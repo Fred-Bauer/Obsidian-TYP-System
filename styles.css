@@ -1,0 +1,841 @@
+/* Core-Views wie der File Explorer hängen nav-header/nav-files-container an einer
+   ungepolsterten Stelle ein und umgehen damit das Standard-Padding von view-content.
+   Als Plugin-View können wir das nur nachbilden, indem wir es hier zurücknehmen.
+   display:flex/flex-direction:column, damit der Split darunter (siehe
+   .fred-typ-split) die gesamte Höhe der View einnehmen kann. */
+.workspace-leaf-content .view-content.fred-typ-view {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Teilt den TYP-View in zwei übereinander liegende Bereiche (siehe
+   buildSplitPanes in typ-view.js): oben die bestehende TYP-Liste/-Detailansicht,
+   unten die neue, immer sichtbare SUBTYP-Liste (siehe SubtypPane in
+   subtyp-view.js). */
+.fred-typ-split {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* min-height: 0 nötig, damit die Panes innerhalb der Flex-Column tatsächlich
+   selbst scrollen können, statt die View aufzublähen. */
+.fred-typ-pane {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.fred-typ-pane-top {
+  flex: 1 1 auto;
+}
+
+/* flex-basis wird von applyPaneRatio() (typ-view.js) per Inline-Style
+   gesetzt - flex-shrink: 0/flex-grow: 0, damit ausschließlich der obere
+   Bereich beim Verkleinern der View nachgibt. */
+.fred-typ-pane-bottom {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.fred-typ-splitter {
+  flex: 0 0 auto;
+  height: 5px;
+  cursor: row-resize;
+  position: relative;
+}
+
+.fred-typ-splitter::after {
+  content: "";
+  position: absolute;
+  inset: 2px 40%;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-border);
+}
+
+.fred-typ-splitter:hover::after,
+.fred-typ-splitter.is-dragging::after {
+  background: var(--interactive-accent);
+}
+
+.fred-typ-pane-bottom .nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fred-typ-subtyp-title {
+  padding-left: var(--size-4-3);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.fred-typ-pane-bottom .nav-action-button.is-disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Kompaktes TYP-Kürzel neben dem Subtyp-Namen, nur in der ungefilterten
+   Übersicht (SubtypPane.renderUnfilteredList) - dort lässt sich der
+   zugehörige TYP anders als in der gefilterten Ansicht nicht aus dem Kontext
+   erschließen. margin-right: auto schiebt die Zähler-Flair an den rechten
+   Rand, wie bei der Beschreibungs-Eingabe der gefilterten Ansicht. */
+.fred-typ-subtyp-type-badge {
+  margin-left: 6px;
+  margin-right: auto;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  flex-shrink: 0;
+}
+
+/* Blendet TYP und SUBTYP als eigene Zeile im Property-Block der Notiz aus -
+   ihr Wert ist ohnehin immer der (SUB-)TYP-Name selbst (siehe stripTypProperty
+   in type-frontmatter-editor.js für TYP; SUBTYP hat noch keinen eigenen
+   Frontmatter-Editor, aber dieselbe Redundanz zur ohnehin sichtbaren
+   TYP/SUBTYP-Zugehörigkeit gilt genauso). Betrifft nicht die "Properties"-
+   Seitenleiste (data-type="file-properties") oder die TYP-Detailansicht
+   dieses Plugins (data-type="fred-typ-view") - dort bleiben beide normale,
+   editierbare Zeilen. Case-insensitiv, da Obsidian den data-property-key
+   intern klein schreibt. War zuvor Teil des CSS-Snippets "Property-Block.css"
+   - hierher verschoben, da TYP/SUBTYP Konzepte dieses Plugins sind, kein
+   allgemeines Property-Block-Styling. */
+.workspace-leaf-content:not([data-type="file-properties"]):not([data-type="fred-typ-view"]) .metadata-property[data-property-key="TYP" i],
+.workspace-leaf-content:not([data-type="file-properties"]):not([data-type="fred-typ-view"]) .metadata-property[data-property-key="SUBTYP" i] {
+  display: none !important;
+}
+
+/* Lässt die bei "Box mit TYP-Namen" zusätzlich angehängten Schalter (siehe
+   displayTypTab in settings.js) untereinander statt nebeneinander stehen -
+   Obsidians Standard-Layout für mehrere Controls in einer Setting-Zeile ist
+   eine Flex-Row. */
+.fred-note-title-setting .setting-item-control {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Label + ToggleComponent je Zeile (siehe addLabeledToggle in settings.js) -
+   Obsidians addToggle() allein liefert nur den nackten Schalter ohne
+   Beschriftung. */
+.fred-note-title-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fred-note-title-toggle-label {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.fred-typ-separator {
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 8px var(--size-4-3);
+}
+
+.fred-typ-unregistered .tree-item-inner {
+  color: var(--text-faint);
+}
+
+/* Der Name (tree-item-inner) soll nicht mehr den ganzen restlichen Platz der
+   Zeile einnehmen (Obsidians Core-Stil dafür: flex-grow: 1) - das Beschreibungs-
+   Input daneben braucht den Platz stattdessen. Nur, wenn das Feld überhaupt
+   angezeigt wird (siehe Einstellung "Beschreibungs-Textfeld anzeigen") - sonst
+   soll der Name wie gewohnt den ganzen Rest der Zeile einnehmen. Scoped auf die
+   TYP-Liste, damit andere Tree-Views (Datei-Explorer etc.) unberührt bleiben. */
+.fred-typ-list:not(.fred-typ-list-no-description) .tree-item-inner {
+  flex: 0 1 auto;
+}
+
+/* Feste Breite für die Zähler-Flair, statt sich an deren Ziffernanzahl anzupassen
+   (1 vs. 100 wären sonst unterschiedlich breit) - bei angezeigtem Beschreibungs-
+   feld schneidet es links davon so bei jeder Zeile an derselben Stelle ab,
+   unabhängig vom Wert der Zahl. tree-item-flair-outer ist selbst ein Flex-
+   Container - text-align wirkt darin nicht, erst justify-content: flex-end
+   schiebt die Zahl tatsächlich an den rechten Rand der festen Breite. Immer
+   rechtsbündig, unabhängig davon, ob das Beschreibungsfeld an- oder
+   ausgestellt ist. */
+.fred-typ-list .tree-item-flair-outer {
+  flex: 0 0 auto;
+  min-width: 1.8em;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Obsidians eigene input[type="text"]-Regel bringt sowohl eine feste (deutlich
+   größere) Höhe als auch eine eigene Textfarbe mit, die unsere sonst auch im
+   fokussierten Zustand schlägt - hier bewusst mit !important dagegengehalten,
+   damit das Feld dauerhaft klein und ausgegraut bleibt, unabhängig vom Fokus. */
+.fred-typ-list-description-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  color: var(--text-faint) !important;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3 !important;
+  height: unset !important;
+  padding: 0 !important;
+  margin: 0 10px;
+}
+
+.fred-typ-list-description-input:hover {
+  background: var(--background-modifier-hover);
+}
+
+.fred-typ-list-description-input:focus {
+  background: var(--background-modifier-form-field);
+  box-shadow: none !important;
+}
+
+.fred-typ-color-wrap {
+  position: relative;
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+/* TYP-Markierung links neben dem Inline-Titel der Notiz (.inline-title,
+   sofern Obsidians Einstellung "Inline-Titel anzeigen" aktiv ist) - siehe
+   active-title-colors.js. Vier sich gegenseitig ausschließende Varianten
+   (Einstellung "TYP-Markierung neben dem Titel"), alle als ::before
+   realisiert statt als eingefügtes Geschwister-/Wrapper-Element:
+   .inline-title hängt in mehreren Themes (u. a. Minimal, dort per
+   ">"-Kind-Selektor) direkt an seinem Eltern-Container für max-width/margin -
+   ein zusätzliches Element davor oder ein Wrapper darum würde diese Regeln
+   unterwandern. Farbe (und beim Badge der TYP-Name) kommen über eine
+   CSS-Variable bzw. ein data-Attribut, die active-title-colors.js direkt auf
+   .inline-title setzt (einem ::before lässt sich beides nicht per Klasse
+   zuweisen). */
+
+/* Punkt: position:absolute mit right:100% platziert ihn komplett links
+   außerhalb von .inline-title (rechter Rand des Punkts = linker Rand des
+   Titels) - der Titeltext bleibt dadurch unverändert an seiner gewohnten
+   Stelle stehen, unabhängig von der (hier zwar festen, aber so einheitlich
+   zur Box gehandhabten) Breite. top:calc(50% + 8px) statt top:50% gleicht
+   .inline-title's eigenes padding-top (16px im Minimal-Theme) aus: ohne
+   diese Korrektur würde top:50% sich auf die volle Box-Höhe inklusive
+   Padding beziehen und den Punkt zu weit oben zentrieren (das Padding zählt
+   nur oben, nicht unten, und verschiebt die reine Prozent-Mitte damit nach
+   oben relativ zur tatsächlichen Textmitte - der Korrekturwert ist exakt
+   die Hälfte des Padding-Werts). */
+.inline-title.fred-typ-title-dot {
+  position: relative;
+}
+
+.inline-title.fred-typ-title-dot::before {
+  content: "";
+  position: absolute;
+  right: 100%;
+  margin-right: 8px;
+  top: calc(50% + 8px);
+  transform: translateY(-50%);
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background-color: var(--fred-typ-title-color);
+}
+
+/* Box (eingefärbt/ungefärbt): ebenfalls position:absolute mit right:100%
+   (Breite hängt vom TYP-Namen ab, content: attr()), aber am Boden der
+   Titel-Höhe statt zentriert - bottom:0 bezieht sich zwar ebenfalls auf die
+   volle Box-Höhe inklusive padding-top, das wirkt aber nur oben und lässt
+   die untere Kante deshalb unverändert, anders als bei top:50% ist hier also
+   keine Korrektur dafür nötig. ABER: Obsidians eigenes Core-CSS (siehe
+   .inline-title in app.css) setzt kein Padding, dafür aber line-height -
+   dessen "Leading" erzeugt unterhalb der eigentlichen Buchstaben-Grundlinie
+   einen kleinen Leerraum, den bottom:0 mit einrechnet. bottom:4px (bewusst
+   px, nicht em - em bezöge sich hier auf die eigene, kleine Schriftgröße der
+   Box statt auf die des riesigen Titels) schiebt die Box um diesen Betrag
+   nach oben, damit sie optisch an der Grundlinie der Buchstaben sitzt statt
+   sichtbar darunter. */
+.inline-title.fred-typ-title-badge,
+.inline-title.fred-typ-title-badge-plain {
+  position: relative;
+}
+
+.inline-title.fred-typ-title-badge::before,
+.inline-title.fred-typ-title-badge-plain::before {
+  content: attr(data-fred-typ);
+  position: absolute;
+  right: 100%;
+  margin-right: 10px;
+  bottom: 4px;
+  padding: 0.1em 0.4em;
+  border-radius: var(--radius-s);
+  font-size: 0.4em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.inline-title.fred-typ-title-badge::before {
+  border: 1px solid var(--fred-typ-title-color);
+  color: var(--fred-typ-title-color);
+}
+
+.inline-title.fred-typ-title-badge-plain::before {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* Gedrehte Box (eingefärbt/ungefärbt) am Property-Block (.metadata-container)
+   statt am Titel - siehe applyStyleToBlock in active-title-colors.js.
+   writing-mode:vertical-rl statt transform:rotate(): die Box wächst dadurch
+   von selbst in der richtigen (vertikalen) Richtung mit der Textlänge, ohne
+   dass die right:100%-Positionierung per transform-origin von Hand
+   nachgerechnet werden müsste - eine 180°-Drehung bildet ein Rechteck exakt
+   auf sich selbst ab, right:100%/top:0/bottom:0 bleiben also unverändert
+   gültig, nur die Leserichtung des Texts dreht sich damit von oben-nach-unten
+   (vertical-rl pur) auf unten-nach-oben (wie im Screenshot der Anfrage). */
+.metadata-container.fred-typ-block-badge,
+.metadata-container.fred-typ-block-badge-plain {
+  position: relative;
+}
+
+.metadata-container.fred-typ-block-badge::before,
+.metadata-container.fred-typ-block-badge-plain::before {
+  content: attr(data-fred-typ);
+  position: absolute;
+  right: 100%;
+  margin-right: 10px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 0.4em 0.15em;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.metadata-container.fred-typ-block-badge-top::before {
+  top: 0;
+}
+
+.metadata-container.fred-typ-block-badge-bottom::before {
+  bottom: 0;
+}
+
+.metadata-container.fred-typ-block-badge::before {
+  border: 1px solid var(--fred-typ-block-color);
+  color: var(--fred-typ-block-color);
+}
+
+.metadata-container.fred-typ-block-badge-plain::before {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* In der Liste wie Obsidians eigene tree-item-icon (z. B. Aufklapp-Pfeil) in die
+   padding-left-Gutter der Zeile hineinziehen, statt regulär Platz wegzunehmen -
+   so landet der Zeilentext immer an derselben Stelle wie in Tags/File-Explorer. */
+.fred-typ-list .fred-typ-color-wrap {
+  position: absolute;
+  margin-inline-start: calc(-1 * var(--size-4-5));
+  width: var(--size-4-4);
+  height: var(--size-4-4);
+  margin-right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fred-typ-list .fred-typ-color-dot {
+  width: 0.6em;
+  height: 0.6em;
+}
+
+.fred-typ-color-dot {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.fred-typ-color-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Manuell-Sortiermodus (siehe SORT_OPTIONS/renderRegisteredItem in
+   typ-view.js) - kein eigenes Griff-Icon, die ganze Zeile ist per Drag & Drop
+   verschiebbar (self.draggable). */
+.fred-typ-list .tree-item-self.is-dragging {
+  opacity: 0.4;
+}
+
+/* Zeigt an, auf welcher Seite der Zeile eine gerade gezogene Zeile landen
+   würde - siehe dragover-Handler in renderRegisteredItem() (typ-view.js) bzw.
+   dieselbe Technik in .fred-order-row.is-drop-before/-after. */
+.fred-typ-list .tree-item-self.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--interactive-accent);
+}
+
+.fred-typ-list .tree-item-self.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--interactive-accent);
+}
+
+.fred-typ-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--size-4-2) var(--size-4-3);
+}
+
+/* Auf Höhe des "Beschreibung"-Labels rechts daneben statt im (beengten) Header -
+   dort darf der Farbpunkt deutlich größer als in der TYP-Liste sein. */
+.fred-typ-detail-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fred-typ-detail-color-row .fred-typ-color-wrap {
+  width: 1em;
+  height: 1em;
+  margin-right: 0;
+}
+
+/* Kein flex-grow (mehr) - sonst würde der Titel immer die ganze verbleibende
+   Headerzeile füllen und die Zähler-Zahl (siehe .fred-typ-detail-count) an
+   deren rechten Rand statt direkt hinter den Namen schieben. */
+.fred-typ-detail-title {
+  flex: 0 1 auto;
+  margin-left: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fred-typ-detail-title.is-being-renamed {
+  overflow: visible;
+  white-space: normal;
+  padding: 0 4px;
+  border: 1px solid var(--background-modifier-border-focus);
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-form-field);
+}
+
+/* Rein visuell: TYPen werden ohnehin beim Speichern in Großbuchstaben
+   normalisiert (siehe normalizeTypeName() in typ-view.js) - hier bereits
+   während der Eingabe, damit keine Überraschung beim Verlassen des Feldes
+   entsteht. Ändert nicht den tatsächlichen (evtl. noch klein geschriebenen)
+   textContent, nur seine Darstellung. */
+.fred-typ-detail-title.is-being-renamed,
+.fred-typ-list .tree-item-self.is-being-renamed .tree-item-inner {
+  text-transform: uppercase;
+}
+
+/* Übernimmt das flex-grow, das vorher auf .fred-typ-detail-title lag - der
+   verbleibende Platz in der Headerzeile landet so hinter der Zahl statt
+   hinter dem Namen, wodurch diese direkt hinter dem Namen erscheint.
+   margin-left zusätzlich zum header-eigenen gap (4px), damit der Abstand zum
+   Namen größer ausfällt als der knappe Abstand der Icon-Buttons untereinander. */
+.fred-typ-detail-count {
+  flex: 1 1 auto;
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  white-space: nowrap;
+}
+
+.fred-confirm-delete-modal {
+  width: auto;
+  max-width: 22em;
+}
+
+.fred-confirm-delete-modal .modal-content p {
+  text-align: center;
+}
+
+.fred-confirm-delete-modal .modal-button-container {
+  justify-content: center;
+}
+
+/* TYP-Name in Fließtext der Bestätigungs-Modale (siehe appendTypeName in
+   typ-view.js) - Farbpunkt-Variante analog zu .fred-typ-picker-dot. */
+.fred-typ-inline-dot {
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.fred-typ-inline-name {
+  font-weight: 600;
+}
+
+.fred-typ-color-reset,
+.fred-typ-detail-rename,
+.fred-typ-detail-rename-notes,
+.fred-typ-detail-delete {
+  flex-shrink: 0;
+}
+
+/* Hervorgehoben (Akzentfarbe) statt wie die übrigen Header-Icons neutral -
+   markiert den folgenreicheren zweiten Umbenennen-Button, der zusätzlich
+   Notizen umschreibt (siehe startDetailRename in typ-view.js). */
+.fred-typ-detail-rename-notes {
+  color: var(--interactive-accent);
+}
+
+.fred-typ-detail-rename-notes:hover {
+  color: var(--interactive-accent-hover);
+}
+
+.fred-typ-detail-body {
+  padding: 0 var(--size-4-3) var(--size-4-3);
+}
+
+.fred-typ-description-section {
+  margin-bottom: var(--size-4-3);
+}
+
+/* Label bodenbündig statt (wie die Standard-Frontmatter-Kopfzeile sonst)
+   vertikal mittig - der größere Farbpunkt daneben macht die Zeile höher als
+   das Label/den Schalter links, die dadurch sonst nicht mehr nahtlos über
+   dem Textfeld sitzen. */
+.fred-typ-options-header {
+  align-items: flex-end;
+}
+
+.fred-typ-manual-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fred-typ-description-input {
+  width: 100%;
+  resize: none;
+  font-family: inherit;
+  font-size: var(--font-ui-small);
+  margin-top: var(--size-4-1);
+}
+
+.fred-typ-frontmatter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--size-4-2);
+}
+
+.fred-typ-detail-section-title {
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.fred-typ-frontmatter-header .fred-typ-detail-section-title {
+  margin-bottom: 0;
+}
+
+/* Gruppiert einen Button mit der Überschrift links im Header (siehe
+   mountGlobalOrderEditor in frontmatter-order-editor.js) - nötig, weil der
+   Header selbst justify-content: space-between nutzt und ein drittes
+   direktes Kind sonst mittig im verbleibenden Platz landen würde, statt
+   direkt neben der Überschrift zu sitzen. */
+.fred-typ-frontmatter-title-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Gruppiert die beiden "Property hinzufügen"-Buttons (normal + Floating,
+   siehe renderTypeSettings in typ-view.js) rechts im Header - aus demselben
+   Grund wie .fred-typ-frontmatter-title-group oben. */
+.fred-typ-frontmatter-add-group {
+  display: flex;
+  align-items: center;
+}
+
+/* Hervorgehoben (Akzentfarbe), analog zu .fred-typ-detail-rename-notes -
+   fügt statt einer normalen eine Floating Property hinzu (siehe
+   fredPendingFloatingAdd in type-frontmatter-editor.js). */
+.fred-typ-frontmatter-add-floating {
+  color: var(--interactive-accent);
+}
+
+.fred-typ-frontmatter-add-floating:hover {
+  color: var(--interactive-accent-hover);
+}
+
+.fred-typ-frontmatter-unavailable {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.fred-typ-placeholder-section {
+  margin-top: var(--size-4-3);
+}
+
+/* margin-top statt/zusätzlich zu margin-bottom - der Hinweis steht im DOM
+   NACH der Platzhalter-Liste (siehe renderPlaceholderList), braucht also vor
+   sich selbst etwas Luft, um erkennbar von der Liste getrennt zu sein. */
+.fred-typ-placeholder-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+/* Grid statt Flex-Column: alle Beschreibungen beginnen in derselben Spalte,
+   unabhängig von der Länge des jeweiligen Tokens in ihrer Zeile - macht die
+   Liste auf einen Blick als Tabelle lesbar. ".fred-typ-placeholder-row" bleibt
+   im Markup als Zeilen-Wrapper bestehen (siehe renderPlaceholderList), wird
+   hier aber via display: contents aufgelöst, damit Token und Beschreibung als
+   direkte Grid-Items in die zwei Spalten einsortiert werden. */
+.fred-typ-placeholder-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: baseline;
+}
+
+.fred-typ-placeholder-row {
+  display: contents;
+}
+
+.fred-typ-placeholder-token {
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+}
+
+.fred-typ-placeholder-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* Unterdrückt Obsidians "Type mismatch"-Warnsymbol (siehe markPlaceholderRows()
+   in type-frontmatter-editor.js) bei Properties, deren Wert ein erkannter
+   Platzhalter ist (z. B. "{{today}}" bei einer als "date" deklarierten
+   Property) - der Typ-Vergleich schlägt dort zwangsläufig an, ist hier aber
+   nicht aussagekräftig, da der Wert erst über getTypeDefaults() aufgelöst wird.
+   !important nötig, da Obsidian das Icon per Inline-style.display einblendet. */
+.fred-typ-placeholder-value .metadata-property-warning-icon {
+  display: none !important;
+}
+
+/* Wert selbst in derselben Farbe wie das Token in der Platzhalter-Legende
+   (siehe .fred-typ-placeholder-token) - macht auf einen Blick erkennbar, dass
+   z. B. "{{today}}" beabsichtigt und kein Tippfehler ist. Bei einem Typ-
+   Mismatch rendert Obsidian den Wert als contenteditable
+   ".metadata-input-longtext"-Div (per DevTools verifiziert) mit eigener
+   (nicht wichtiger) Farbregel - geerbte Farbe vom Container greift dagegen
+   nicht, da eine direkt am Element gesetzte Farbe immer vor geerbter Farbe
+   gewinnt, daher hier explizit mitadressiert. Bei einer als Liste deklarierten
+   Property (z. B. "Autor": "multitext" in types.json) validiert Obsidians
+   eigenes multitext-Widget einen einzelnen String-Wert anstandslos (kein Typ-
+   Mismatch, keine Warnung) und rendert ihn stattdessen als einzelnes
+   ".multi-select-pill" mit eigenem "multi-select-pill-content"-Div - andere
+   DOM-Struktur als bei Text/Datum, daher hier separat mitadressiert, sonst
+   bleibt der Wert dort ungefärbt. !important nötig, da Obsidians eigene
+   Regeln sonst gewinnen. */
+.fred-typ-placeholder-value .metadata-property-value,
+.fred-typ-placeholder-value .metadata-property-value .metadata-input-longtext,
+.fred-typ-placeholder-value .metadata-property-value input,
+.fred-typ-placeholder-value .metadata-property-value .multi-select-pill-content {
+  color: var(--text-accent) !important;
+}
+
+/* Property-Label (nicht der Wert) fett, wenn die Property Teil des
+   Standard-Frontmatters eines TYPs ist - im Frontmatter-Widget einer Notiz
+   (input.metadata-property-key-input) genauso wie in Obsidians "All
+   Properties"-Ansicht (div.tree-item-inner-text), daher bewusst nur die
+   Klasse als Selektor, ohne Element-Einschränkung. Dieselben Variablen wie
+   Obsidians echtes Fett (b/strong/.cm-strong: font-weight: var(--bold-weight)
+   = var(--font-weight) + var(--bold-modifier); color: var(--bold-color)),
+   statt eines festen font-weight - so passt es sich Theme/Schriftart an.
+   !important ist nötig, da Obsidians eigene Regel für das Property-Key-Input
+   sonst gewinnen würde - das schlägt aber jede nicht-!important-Regel
+   unabhängig von deren Spezifität, ganz gleich auf welchem Element. */
+.fred-typ-default-property {
+  font-weight: var(--bold-weight) !important;
+  color: var(--bold-color) !important;
+}
+
+/* Property-Label kursiv, wenn die Property als Floating Property eines TYPs
+   markiert ist (siehe typeFloatingKeys in settings.js) - dieselben
+   Fundstellen wie .fred-typ-default-property, nur font-style/--italic-*
+   statt font-weight/--bold-*, da beide Markierungen sich gegenseitig
+   ausschließen (eine Property ist entweder Standard oder Floating, nie
+   beides). Dieselben Variablen wie Obsidians echtes Kursiv (i/em/.cm-em:
+   font-style: italic; color: var(--italic-color); font-weight:
+   var(--italic-weight)), statt eines festen font-style - so passt es sich
+   Theme/Schriftart an, exakt wie beim Fett-Pendant oben. */
+.fred-typ-floating-property {
+  font-style: italic !important;
+  color: var(--italic-color) !important;
+  font-weight: var(--italic-weight) !important;
+}
+
+/* Globale Property-Reihenfolge (Einstellungen -> TYP) - siehe
+   frontmatter-order-editor.js. Bewusst eine eigene, schlichte Liste statt
+   Obsidians privates Metadata-Editor-Widget (siehe Kommentar oben in
+   type-frontmatter-editor.js zu dessen Stack-Overflow-Fallstricken beim
+   erneuten synchronize() aus saveFrontmatter heraus) - hier müssen zwei
+   Zeilen verschiebbar, aber nicht löschbar sein, was mit dem echten Widget
+   nicht sicher umsetzbar wäre. */
+.fred-order-list {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+
+.fred-order-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.fred-order-row:last-child {
+  border-bottom: none;
+}
+
+.fred-order-row.is-dragging {
+  opacity: 0.4;
+}
+
+/* Zeigt an, auf welcher Seite der Zeile eine gerade gezogene Zeile landen
+   würde - "before" (obere Kante) bzw. "after" (untere Kante), je nachdem, in
+   welcher Hälfte der Zeile sich der Mauszeiger befindet (siehe dragover in
+   frontmatter-order-editor.js). Ohne diese Unterscheidung landete der
+   Balken beim Ziehen auf die letzte Zeile immer über statt ggf. darunter -
+   ein Ablegen nach ganz unten war dadurch optisch nicht erkennbar. */
+.fred-order-row.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--interactive-accent);
+}
+
+.fred-order-row.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--interactive-accent);
+}
+
+/* Feste Größe statt Obsidians variabler .clickable-icon-Polsterung - dadurch
+   sind Zeilen mit Entfernen-Button (fest hinzugefügte Properties) genauso
+   hoch wie die Platzhalter-Zeilen ohne Entfernen-Button. */
+.fred-order-drag,
+.fred-order-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5em;
+  height: 1.5em;
+  flex-shrink: 0;
+  padding: 0 !important;
+}
+
+.fred-order-drag {
+  cursor: grab;
+  color: var(--text-faint);
+}
+
+.fred-order-label {
+  flex: 1 1 auto;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+/* "TYP Properties" ist der einzige Platzhalter, der auf einen ganzen Block
+   echter Properties verweist (statt auf eine einzelne oder den Rest) - daher
+   hier bewusst hervorgehoben statt wie die anderen beiden schlicht muted.
+   Dieselben Variablen wie Obsidians natives Fett (siehe Kommentar bei
+   .fred-typ-default-property), damit es sich mit dem Theme mitzieht statt
+   einen eigenen, festen Fett-Stil zu definieren. */
+.fred-order-row.is-typ-defaults .fred-order-label {
+  color: var(--bold-color);
+  font-weight: var(--bold-weight);
+}
+
+.fred-order-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  font-size: var(--font-ui-small);
+  height: unset !important;
+  padding: 2px 0 !important;
+}
+
+.fred-order-name-input:focus {
+  background: var(--background-modifier-form-field);
+}
+
+.fred-order-remove {
+  color: var(--text-faint);
+}
+
+.fred-order-remove:hover {
+  color: var(--text-error);
+}
+
+/* TYP-Picker (type-picker.js) - Zeile in Obsidians eigenem Suggester-Modal,
+   analog zur TYP-Liste selbst: Farbpunkt bzw. eingefärbter Name (je nach
+   Einstellung "TYP View einfärben"), Beschreibung muted, Notiz-Anzahl rechts. */
+.fred-typ-picker-suggestion {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.fred-typ-picker-dot {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.fred-typ-picker-name {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.fred-typ-picker-desc {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.fred-typ-picker-count {
+  color: var(--text-faint);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Nicht registrierte TYPen (includeUnregistered, siehe type-picker.js) - keine
+   eigene Farbe vorhanden, daher komplett muted statt fett/eingefärbt, analog
+   zu .fred-typ-unregistered in der TYP-Liste selbst. */
+.fred-typ-picker-suggestion.fred-typ-picker-unregistered .fred-typ-picker-name {
+  color: var(--text-faint);
+  font-weight: 400;
+}

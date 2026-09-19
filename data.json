@@ -1,0 +1,145 @@
+{
+  "types": [
+    "WIKI",
+    "NOTIZ",
+    "TEXT",
+    "VORTRAG",
+    "PROJEKT",
+    "ORGA",
+    "KONTAKT",
+    "MEDIA",
+    "TERMIN",
+    "EXTERN"
+  ],
+  "typeColors": {
+    "WIKI": "#ece879",
+    "ORGA": "#7a87e6",
+    "NOTIZ": "#e2aa69",
+    "TEXT": "#d29f46",
+    "MEDIA": "#42943d",
+    "VORTRAG": "#a0701c",
+    "PROJEKT": "#9adf81",
+    "EXTERN": "#ffffff",
+    "KONTAKT": "#c64e4e"
+  },
+  "typeDescriptions": {
+    "WIKI": "Begriffsnotiz",
+    "ORGA": "Verwaltungsnotiz",
+    "NOTIZ": "Rohe Notiz, Überlegung, Rezept, ...",
+    "TEXT": "Auseinandersetzung mit den Thesen einer Quelle",
+    "VORTRAG": "Vortragsbezogene Notizen",
+    "PROJEKT": "..planung",
+    "EXTERN": "Webclippings oder AI-Generated Content",
+    "KONTAKT": "Importierte Kontakte"
+  },
+  "typeDefaultFrontmatter": {
+    "ORGA": {},
+    "TEXT": {
+      "Titel": null,
+      "Autor": null,
+      "Erscheinung": null,
+      "Quelle": null
+    },
+    "NOTIZ": {},
+    "VORTRAG": {
+      "Autor": "{{tp.waehleAutorVortrag}}",
+      "Datum": "{{created}}"
+    },
+    "PROJEKT": {
+      "Beschreibung": null,
+      "Status": "Plan",
+      "Mandatory": null,
+      "Termin": null
+    },
+    "KONTAKT": {
+      "Vorname": null,
+      "Nachname": null,
+      "Geburtstag": null,
+      "Handynummer": null,
+      "E-Mail": null,
+      "Strasse": null,
+      "Stadt": null,
+      "Plz": null,
+      "Nation": null,
+      "Familie": null,
+      "Freunde": null
+    }
+  },
+  "typeFloatingKeys": {
+    "PROJEKT": [
+      "Termin",
+      "Mandatory"
+    ],
+    "KONTAKT": [
+      "Familie",
+      "Freunde",
+      "Nation",
+      "Plz",
+      "Strasse",
+      "E-Mail",
+      "Handynummer",
+      "Geburtstag"
+    ]
+  },
+  "typeManual": {
+    "EXTERN": false,
+    "KONTAKT": false
+  },
+  "subtypesByType": {
+    "KONTAKT": [
+      "TEST"
+    ]
+  },
+  "subtypeDescriptions": {},
+  "globalPropertyOrder": [
+    {
+      "kind": "property",
+      "name": "cssclasses"
+    },
+    {
+      "kind": "typValue"
+    },
+    {
+      "kind": "subtypValue"
+    },
+    {
+      "kind": "property",
+      "name": "aliases"
+    },
+    {
+      "kind": "typ"
+    },
+    {
+      "kind": "other"
+    },
+    {
+      "kind": "property",
+      "name": "tags"
+    }
+  ],
+  "noteTitleStyle": "none",
+  "noteTitleBadgeColored": false,
+  "noteTitleBadgePosition": "block",
+  "noteTitleVerticalAlign": "bottom",
+  "typSortOrder": "manual",
+  "typListDescriptionEnabled": true,
+  "typSubtypPaneRatio": 0.4612035284770212,
+  "includeIgnoredFiles": false,
+  "graphTagColorEnabled": true,
+  "graphTagColor": "#1c1c1c",
+  "graphAttachmentColorEnabled": false,
+  "graphAttachmentColor": "#9f8632",
+  "colorViews": {
+    "fileExplorer": true,
+    "graph": true,
+    "search": true,
+    "recentFiles": true,
+    "backlinks": true,
+    "frontmatterDefaults": true,
+    "typList": true,
+    "allProperties": true,
+    "noteTitle": false,
+    "noteTitleColor": true,
+    "bookmarks": true
+  }
+}

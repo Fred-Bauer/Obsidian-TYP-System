@@ -1,0 +1,9 @@
+{
+  "id": "typ-system",
+  "name": "TYP-System",
+  "version": "0.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Notiz-Typ-System (TYP/SUBTYP): TYP-Pane, Standard-Frontmatter, Frontmatter-Sortierung, Einfärbung nach TYP.",
+  "author": "Fred",
+  "isDesktopOnly": false
+}

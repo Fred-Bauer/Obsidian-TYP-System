@@ -7,6 +7,11 @@ const {
   moveTypeSubtypes,
   deleteTypeSubtypes,
   mergeTypeSubtypes,
+  getSubtype,
+  renameSubtype,
+  reorderSubtypes,
+  deleteSubtype,
+  mergeSubtypes,
   renameSubtypeInNotes,
 } = require("./subtypes");
 const { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require("./frontmatter-placeholders");
@@ -208,6 +213,42 @@ class ConfirmMergeTypeModal extends ConfirmRenameTypeModal {
       this.close();
       this.onConfirm();
     });
+  }
+}
+
+// Bestätigungen rund um Subtypen (siehe renderSectionFooter): schlichter Text
+// statt eingefärbter TYP-Namen, sonst wie die TYP-Modale oben. onCancel greift
+// wie dort auch bei Escape/Klick daneben.
+class ConfirmSubtypeModal extends Modal {
+  constructor(app, { paragraphs, confirmText, confirmCls, onConfirm, onCancel }) {
+    super(app);
+    this.paragraphs = paragraphs;
+    this.confirmText = confirmText;
+    this.confirmCls = confirmCls;
+    this.onConfirm = onConfirm;
+    this.onCancel = onCancel;
+    this.confirmed = false;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    this.modalEl.addClass("fred-confirm-delete-modal");
+    for (const text of this.paragraphs) contentEl.createEl("p", { text });
+
+    const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
+    buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
+
+    const confirmBtn = buttonRow.createEl("button", { cls: this.confirmCls, text: this.confirmText });
+    confirmBtn.addEventListener("click", () => {
+      this.confirmed = true;
+      this.close();
+      this.onConfirm();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (!this.confirmed) this.onCancel?.();
   }
 }
 
@@ -811,6 +852,15 @@ class TypView extends ItemView {
     const bucket = this.plugin.typIndex.subtypeBucket(type);
     this.frontmatterEditor = mountUnifiedFrontmatterEditor(this, body, type, {
       renderHeader: (section, el, editor) => this.renderSectionHeader(el, type, section, bucket, editor),
+      renderFooter: (section, el) => {
+        if (section !== null) this.renderSectionFooter(el, type, section);
+      },
+      onMoveSection: async (order) => {
+        reorderSubtypes(this.plugin.settings, type, order);
+        await this.plugin.saveSettings();
+        this.render();
+      },
+      onSectionContextMenu: (section) => this.openSubtypeSearch(type, section),
     });
     if (this.frontmatterEditor) this.frontmatterEditors.push(this.frontmatterEditor);
 
@@ -837,17 +887,22 @@ class TypView extends ItemView {
   // Überschrift eines Blocks im gemeinsamen Editor (siehe
   // unified-frontmatter-editor.js): Titel mit Notiz-Anzahl (beim Standard-
   // Frontmatter die Notizen ohne SUBTYP - für die gilt nur dieser Block),
-  // Suche per Rechtsklick auf den Titel, und die beiden "Property
+  // Suche per Rechtsklick (beim Standard-Frontmatter auf den Titel), und die beiden "Property
   // hinzufügen"-Buttons, die eine Leerzeile in genau diesem Block anlegen.
   renderSectionHeader(el, type, section, bucket, editor) {
     const titleGroup = el.createDiv({ cls: "fred-typ-frontmatter-title-group" });
     const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? "Standard-Frontmatter" });
     const count = section === null ? bucket.noSubtype : bucket.counts.get(section) ?? 0;
     titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
-    titleEl.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      this.openSubtypeSearch(type, section);
-    });
+    // Subtyp-Blöcke reagieren auf ihrer ganzen Fläche (siehe
+    // onSectionContextMenu in renderTypeSettings), das Standard-Frontmatter
+    // nur auf dem Titel.
+    if (section === null) {
+      titleEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        this.openSubtypeSearch(type, null);
+      });
+    }
 
     // Floating Properties (siehe typeFloatingKeys in settings.js) sind Teil
     // derselben Liste und Reihenfolge wie die übrigen Properties (wichtig für
@@ -876,6 +931,158 @@ class TypView extends ItemView {
     });
     setIcon(addPropertyBtn, "plus");
     addPropertyBtn.addEventListener("click", () => editor.fredAddBlank(section, false));
+  }
+
+  // Abschluss eines Subtyp-Blocks: zentriert die Aktionen des Subtyps, wie im
+  // Kopf der TYP-Detailansicht (Umbenennen inkl. Notizen, Umbenennen, Löschen).
+  // Das Standard-Frontmatter hat keine. Der Titel wird erst beim Klick
+  // gesucht - Überschrift und Abschluss entstehen bei jedem synchronize() neu.
+  renderSectionFooter(el, type, subtype) {
+    el.addClass("fred-typ-subtype-actions");
+    const titleEl = () => {
+      let sibling = el.previousElementSibling;
+      while (sibling && !sibling.hasClass("fred-typ-section-header")) sibling = sibling.previousElementSibling;
+      return sibling?.querySelector(".fred-typ-detail-section-title") ?? null;
+    };
+    const rename = (updateNotes) => {
+      const target = titleEl();
+      if (target) this.startSubtypeRename(type, subtype, target, { updateNotes });
+    };
+
+    const renameWithNotesBtn = el.createDiv({
+      cls: "clickable-icon fred-typ-detail-rename-notes",
+      attr: { "aria-label": "Umbenennen (inkl. Notizen anpassen)" },
+    });
+    setIcon(renameWithNotesBtn, "pencil");
+    renameWithNotesBtn.addEventListener("click", () => rename(true));
+
+    const renameBtn = el.createDiv({ cls: "clickable-icon fred-typ-detail-rename", attr: { "aria-label": "Umbenennen" } });
+    setIcon(renameBtn, "pencil");
+    renameBtn.addEventListener("click", () => rename(false));
+
+    const deleteBtn = el.createDiv({ cls: "clickable-icon fred-typ-detail-delete", attr: { "aria-label": "Löschen" } });
+    setIcon(deleteBtn, "trash");
+    deleteBtn.addEventListener("click", () => this.deleteSubtypeWithConfirm(type, subtype));
+  }
+
+  // Löscht den Subtyp-Block samt seiner Properties. Die Notizen behalten ihren
+  // SUBTYP-Wert (er erscheint danach unten als nicht erfasster Subtyp) - eine
+  // Bestätigung braucht es daher nur, wenn dabei Properties verloren gehen.
+  deleteSubtypeWithConfirm(type, subtype) {
+    const apply = async () => {
+      deleteSubtype(this.plugin.settings, type, subtype);
+      await this.plugin.saveSettings();
+      this.plugin.refreshTypColors?.();
+      this.render();
+    };
+    const keys = Object.keys(getSubtype(this.plugin.settings, type, subtype)?.frontmatter ?? {}).filter((key) => key !== "");
+    if (keys.length === 0) {
+      apply();
+      return;
+    }
+    new ConfirmSubtypeModal(this.app, {
+      paragraphs: [
+        `Subtyp ${subtype} von ${type} wirklich löschen?`,
+        `${keys.length === 1 ? "Die Property" : `Die ${keys.length} Properties`} ${keys.join(", ")} ${keys.length === 1 ? "geht" : "gehen"} dabei verloren.`,
+      ],
+      confirmText: "Löschen",
+      confirmCls: "mod-warning",
+      onConfirm: apply,
+    }).open();
+  }
+
+  // Wie startDetailRename(), aber auf dem Titel eines Subtyp-Blocks. Der Block
+  // behält seine Position; updateNotes: true schreibt nach Bestätigung auch den
+  // SUBTYP der betroffenen Notizen um. Ein bereits vorhandener Name bietet
+  // stattdessen das Zusammenlegen an (schreibt die Notizen immer mit um).
+  startSubtypeRename(type, subtype, titleEl, { updateNotes = false } = {}) {
+    if (this.isEditing) return;
+    this.isEditing = true;
+
+    titleEl.addClass("fred-typ-subtype-name-input", "is-being-renamed");
+    titleEl.setAttribute("contenteditable", "true");
+    titleEl.setAttribute("spellcheck", "false");
+    titleEl.focus();
+
+    const range = titleEl.doc.createRange();
+    range.selectNodeContents(titleEl);
+    const selection = titleEl.win.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const countOf = (name) => this.plugin.typIndex.subtypeBucket(type).counts.get(name) ?? 0;
+    const applyRename = async (value, { withNotes }) => {
+      renameSubtype(this.plugin.settings, type, subtype, value);
+      await this.plugin.saveSettings();
+      const renamed = withNotes ? await renameSubtypeInNotes(this.plugin, type, subtype, value) : 0;
+      this.plugin.refreshTypColors?.();
+      if (withNotes) new Notice(`SUBTYP ${value}: ${renamed} Notiz(en) angepasst.`);
+      this.render();
+    };
+
+    let done = false;
+    const finish = async (commit) => {
+      if (done) return;
+      done = true;
+      this.isEditing = false;
+
+      const value = normalizeSubtypeName(titleEl.textContent);
+      if (!commit || !value || value === subtype) {
+        this.render();
+        return;
+      }
+
+      const existing = getSubtypeNames(this.plugin.settings, type).find(
+        (name) => name.toLowerCase() === value.toLowerCase() && name !== subtype
+      );
+      if (existing) {
+        new ConfirmSubtypeModal(this.app, {
+          paragraphs: [
+            `Subtyp ${existing} existiert bei ${type} bereits. ${subtype} damit zusammenlegen?`,
+            `${countOf(subtype)} Notiz(en) werden auf ${existing} umgestellt, die Properties von ${subtype} wandern in den Block ${existing}.`,
+          ],
+          confirmText: "Zusammenlegen",
+          confirmCls: "mod-warning",
+          onConfirm: async () => {
+            mergeSubtypes(this.plugin.settings, type, subtype, existing);
+            await this.plugin.saveSettings();
+            const renamed = await renameSubtypeInNotes(this.plugin, type, subtype, existing);
+            this.plugin.refreshTypColors?.();
+            new Notice(`Subtyp ${subtype} mit ${existing} zusammengelegt, ${renamed} Notiz(en) angepasst.`);
+            this.render();
+          },
+          onCancel: () => this.render(),
+        }).open();
+        return;
+      }
+
+      if (!updateNotes) {
+        await applyRename(value, { withNotes: false });
+        return;
+      }
+      new ConfirmSubtypeModal(this.app, {
+        paragraphs: [`Subtyp ${subtype} in ${value} umbenennen und ${countOf(subtype)} Notiz(en) entsprechend anpassen?`],
+        confirmText: "Umbenennen",
+        confirmCls: "mod-cta",
+        onConfirm: () => applyRename(value, { withNotes: true }),
+        onCancel: () => this.render(),
+      }).open();
+    };
+
+    // Alle Tasten hier behalten: der Titel steht in der Liste von Obsidians
+    // Property-Editor, dessen eigene Tastatur-Navigation sonst mitreagierte
+    // (Escape zusätzlich wegen der Detailansicht, siehe onOpen).
+    titleEl.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    titleEl.addEventListener("blur", () => finish(true));
   }
 
   // Wie die unregistrierten Einträge der TYP-Liste: SUBTYP-Werte von Notizen
@@ -952,9 +1159,9 @@ class TypView extends ItemView {
     this.isEditing = true;
 
     // Aufgebaut wie der fertige (leere) Block im gemeinsamen Editor - samt den
-    // beiden "+"-Buttons, die hier noch nichts tun, nur noch ohne Anzahl -,
-    // damit beim Abschließen der Eingabe nichts springt (siehe
-    // .fred-typ-subtype-pending).
+    // "+"-Buttons und den Aktionen im Abschluss, die hier noch nichts tun, nur
+    // noch ohne Anzahl -, damit beim Abschließen der Eingabe nichts springt
+    // (siehe .fred-typ-subtype-pending).
     const block = createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block fred-typ-subtype-pending" });
     this.subtypeAddBtnEl.parentElement.insertBefore(block, this.subtypeAddBtnEl);
     const header = block.createDiv({ cls: "fred-typ-frontmatter-header" });
@@ -963,7 +1170,10 @@ class TypView extends ItemView {
     const addButtons = header.createDiv({ cls: "fred-typ-frontmatter-add-group" });
     setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add-floating" }), "plus");
     setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add" }), "plus");
-    block.createDiv({ cls: "fred-typ-section-footer" });
+    const footer = block.createDiv({ cls: "fred-typ-section-footer fred-typ-subtype-actions" });
+    setIcon(footer.createDiv({ cls: "clickable-icon fred-typ-detail-rename-notes" }), "pencil");
+    setIcon(footer.createDiv({ cls: "clickable-icon fred-typ-detail-rename" }), "pencil");
+    setIcon(footer.createDiv({ cls: "clickable-icon fred-typ-detail-delete" }), "trash");
     nameEl.setAttribute("contenteditable", "true");
     nameEl.setAttribute("spellcheck", "false");
     nameEl.focus();

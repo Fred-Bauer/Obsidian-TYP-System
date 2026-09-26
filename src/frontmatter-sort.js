@@ -60,16 +60,20 @@ function normalizeGlobalOrder(order) {
 // Listenposition landen, sobald eine Notiz sie doch trägt. null, wenn kein
 // Typ übergeben wurde oder für den Typ keine Standardliste gepflegt ist.
 //
-// Mit subtype direkt dahinter die Keys aus dessen Frontmatter-Block (siehe
-// subtypes.js), soweit sie nicht schon beim TYP stehen - ein überschriebener
-// Key behält seine Position aus der TYP-Liste.
+// Mit subtype zusätzlich die Keys aus dessen Frontmatter-Block (siehe
+// subtypes.js) - dahinter, oder davor, wenn der Subtyp-Block in der TYP-
+// Detailansicht über dem Standard-Frontmatter steht (aboveStandard). Käme ein
+// Key doch in beiden vor, zählt seine erste Position.
 function orderedDefaultKeys(plugin, type, subtype = null) {
   if (!type) return null;
   const isSystemKey = (key) => key === "" || [TYP_PROPERTY, SUBTYP_PROPERTY].some((p) => key.toLowerCase() === p.toLowerCase());
-  const keys = Object.keys(plugin.settings.typeDefaultFrontmatter[type] ?? {}).filter((key) => !isSystemKey(key));
-  if (subtype) {
-    const seen = new Set(keys.map((key) => key.toLowerCase()));
-    for (const key of Object.keys(getSubtype(plugin.settings, type, subtype)?.frontmatter ?? {})) {
+  const subtypeData = subtype ? getSubtype(plugin.settings, type, subtype) : null;
+  const blocks = [plugin.settings.typeDefaultFrontmatter[type], subtypeData?.frontmatter];
+  if (subtypeData?.aboveStandard) blocks.reverse();
+  const keys = [];
+  const seen = new Set();
+  for (const block of blocks) {
+    for (const key of Object.keys(block ?? {})) {
       if (isSystemKey(key) || seen.has(key.toLowerCase())) continue;
       keys.push(key);
       seen.add(key.toLowerCase());

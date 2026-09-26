@@ -16,7 +16,11 @@ const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-h
 const { registerPropertyRenameSync } = require("./property-rename-sync");
 const { normalizeGlobalOrder, sortFrontmatterFor } = require("./frontmatter-sort");
 const { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require("./frontmatter-placeholders");
-const { pickType: pickTypeModal, pickSubtype: pickSubtypeModal } = require("./type-picker");
+const {
+  pickType: pickTypeModal,
+  pickSubtype: pickSubtypeModal,
+  pickTypeAndSubtype: pickTypeAndSubtypeModal,
+} = require("./type-picker");
 const { registerPlaceholderSuggest } = require("./placeholder-suggest");
 
 // Migriert Bestandsinstallationen von der alten, separaten
@@ -98,10 +102,12 @@ module.exports = class TypSystemPlugin extends Plugin {
   // der Ziel-Datei statt des Aufrufzeitpunkts liefert.
   //
   // subtype (optional): ergänzt das Standard-Frontmatter um den Block dieses
-  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter. Jeder Key gehört
-  // zu genau einem Block (siehe enforceUniqueKeys) - käme er doch doppelt vor,
-  // bliebe seine Position aus der TYP-Liste, Wert und Floating-Markierung
-  // kämen aus dem Subtyp-Block.
+  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter - bzw. stehen
+  // davor, wenn der Subtyp-Block über dem Standard-Frontmatter liegt
+  // (aboveStandard; wichtig für die Reihenfolge der tp.-Platzhalter). Jeder
+  // Key gehört zu genau einem Block (siehe enforceUniqueKeys) - käme er doch
+  // doppelt vor, bliebe seine erste Position, Wert und Floating-Markierung
+  // kämen aus dem späteren Block.
   getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
     const defaults = {};
     const isFloating = new Map();
@@ -114,9 +120,10 @@ module.exports = class TypSystemPlugin extends Plugin {
         isFloating.set(target, (floatingKeys ?? []).includes(key));
       }
     };
-    addBlock(this.settings.typeDefaultFrontmatter[type], this.settings.typeFloatingKeys[type]);
     const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
-    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
+    if (subtypeData?.aboveStandard) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
+    addBlock(this.settings.typeDefaultFrontmatter[type], this.settings.typeFloatingKeys[type]);
+    if (subtypeData && !subtypeData.aboveStandard) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
 
     if (!includeFloating) {
       for (const [key, floating] of isFloating) if (floating) delete defaults[key];
@@ -198,6 +205,15 @@ module.exports = class TypSystemPlugin extends Plugin {
   // auf, oder mit null bei Abbruch (ESC).
   pickType(options) {
     return pickTypeModal(this.app, this, options);
+  }
+
+  // Für _obsidian/templater-scripts/TYP.js: TYP und Subtyp in einem Zug (siehe
+  // type-picker.js) - je nach Einstellung "Subtyp-Picker separat" ein einziger
+  // Picker mit eingerückten Subtypen oder beide Picker nacheinander. Optionen
+  // wie bei pickType(). Löst mit { type, subtype } auf (subtype null für "ohne
+  // Subtyp"), oder mit null bei Abbruch (ESC).
+  pickTypeAndSubtype(options) {
+    return pickTypeAndSubtypeModal(this.app, this, options);
   }
 
   async loadSettings() {

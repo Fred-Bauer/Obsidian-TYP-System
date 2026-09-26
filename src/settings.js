@@ -42,6 +42,9 @@ const DEFAULT_SETTINGS = {
   noteTitleVerticalAlign: "top",
   typSortOrder: "count-desc",
   typListDescriptionEnabled: true,
+  // Siehe pickTypeAndSubtype in type-picker.js: false = Subtypen eingerückt
+  // direkt im TYP-Picker, true = eigener Subtyp-Picker nach der TYP-Auswahl.
+  separateSubtypePicker: false,
   includeIgnoredFiles: false,
   graphTagColorEnabled: false,
   graphTagColor: "",
@@ -116,6 +119,20 @@ class TypSystemSettingTab extends PluginSettingTab {
             })
           )
       );
+
+    new SettingGroup(containerEl).setHeading("TYP-Picker").addSetting((setting) =>
+      setting
+        .setName("Subtyp-Picker separat")
+        .setDesc(
+          "Beim Anlegen einer Notiz folgt auf den TYP-Picker ein eigener Subtyp-Picker (ESC dort führt zurück zur TYP-Auswahl), statt die Subtypen direkt eingerückt unter ihrem TYP im TYP-Picker anzuzeigen."
+        )
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.settings.separateSubtypePicker).onChange(async (value) => {
+            this.plugin.settings.separateSubtypePicker = value;
+            await this.plugin.saveSettings();
+          })
+        )
+    );
 
     // subtypKey (optional): statt eines einzelnen Schalters zwei beschriftete
     // untereinander (wie die Unter-Schalter bei "Box mit TYP-Namen", siehe

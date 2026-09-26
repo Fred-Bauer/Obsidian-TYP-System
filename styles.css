@@ -593,6 +593,37 @@
   border: var(--setting-items-border-width) solid var(--setting-items-border-color);
 }
 
+/* Hover: Blockfläche leicht aufgehellt - Obsidians Hover-Hintergrund über der
+   Kartenfarbe. Gilt ebenso für die nicht erfassten Subtypen, nicht aber für
+   das (transparente) Standard-Frontmatter. Die Karte bekommt is-hovered per
+   JS (siehe unified-frontmatter-editor.js), da die Liste über ihr liegt. */
+.fred-typ-unified-card.is-hovered,
+.fred-typ-subtype-unregistered:hover {
+  background-image: linear-gradient(var(--background-modifier-hover), var(--background-modifier-hover));
+}
+
+/* Block-Drag (siehe unified-frontmatter-editor.js): keine Textauswahl
+   während des Ziehens, der Cursor bleibt bewusst unverändert. */
+body.fred-typ-block-dragging,
+body.fred-typ-block-dragging * {
+  user-select: none;
+}
+
+.fred-typ-unified .fred-typ-block-drag-source,
+.fred-typ-unified-card.is-dragging {
+  opacity: 0.4;
+}
+
+.fred-typ-unified-drop-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background-color: var(--interactive-accent);
+  pointer-events: none;
+}
+
 /* Über der Kartenebene, sonst läge die (positionierte) Ebene darüber. */
 .fred-typ-unified > .metadata-container {
   position: relative;
@@ -613,12 +644,32 @@
   --icon-stroke: var(--icon-m-stroke-width);
 }
 
-.fred-typ-unified .fred-typ-section-header.fred-typ-section-sub {
+/* Abstand zwischen den Blöcken, egal an welcher Stelle das Standard-
+   Frontmatter steht (Subtypen dürfen auch darüber liegen) - nur der
+   oberste Block beginnt ohne. */
+.fred-typ-unified .fred-typ-section-header:not(:first-child) {
   margin-top: var(--size-4-3);
 }
 
 .fred-typ-unified .fred-typ-section-footer {
   height: var(--size-4-1);
+}
+
+/* Aktionen eines Subtyp-Blocks, zentriert im Abschluss (siehe
+   renderSectionFooter in typ-view.js) - Icongröße wie in den Überschriften. */
+.fred-typ-unified .fred-typ-section-footer.fred-typ-subtype-actions,
+.fred-typ-subtype-pending .fred-typ-section-footer.fred-typ-subtype-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--size-4-1);
+  height: auto;
+  padding: var(--size-4-1) 0 var(--size-4-2);
+  --icon-size: var(--icon-m);
+  --icon-stroke: var(--icon-m-stroke-width);
+}
+
+.fred-typ-subtype-pending .fred-typ-subtype-actions {
+  pointer-events: none;
 }
 
 .fred-typ-subtype-add {
@@ -912,6 +963,16 @@
    zu .fred-typ-unregistered in der TYP-Liste selbst. */
 .fred-typ-picker-suggestion.fred-typ-picker-unregistered .fred-typ-picker-name {
   color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* Subtyp-Zeile im kombinierten Picker (TypSubtypPickerModal, siehe
+   type-picker.js) - eingerückt unter ihrem TYP, in dessen Farbe, nicht fett. */
+.fred-typ-picker-suggestion.fred-typ-picker-subtype {
+  padding-left: calc(var(--size-4-3) + 1.5em);
+}
+
+.fred-typ-picker-subtype .fred-typ-picker-name {
   font-weight: 400;
 }
 

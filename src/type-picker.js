@@ -1,4 +1,4 @@
-const { FuzzySuggestModal, Notice } = require("obsidian");
+const { FuzzySuggestModal, Notice, prepareFuzzySearch } = require("obsidian");
 const { DEFAULT_TYPE_COLOR, compareTypes, DEFAULT_SORT_ORDER } = require("./typ-view");
 
 // Nativer Ersatz für Templaters tp.system.suggester bei der TYP-Auswahl (siehe
@@ -35,13 +35,7 @@ class TypPickerModal extends FuzzySuggestModal {
     if (item.unregistered) {
       el.createSpan({ cls: "fred-typ-picker-name", text: item.type });
     } else {
-      const color = this.plugin.settings.typeColors[item.type] ?? DEFAULT_TYPE_COLOR;
-      if (this.plugin.settings.colorViews.typList) {
-        el.createSpan({ cls: "fred-typ-picker-name", text: item.type }).style.color = color;
-      } else {
-        el.createSpan({ cls: "fred-typ-picker-dot" }).style.backgroundColor = color;
-        el.createSpan({ cls: "fred-typ-picker-name", text: item.type });
-      }
+      this.renderColoredName(el, item.type, item.type);
     }
 
     if (item.description) {
@@ -49,6 +43,18 @@ class TypPickerModal extends FuzzySuggestModal {
     }
 
     el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
+  }
+
+  // Name in der Farbe von colorType - je nach Einstellung "TYP View einfärben"
+  // als eingefärbter Text oder mit vorangestelltem Farbpunkt.
+  renderColoredName(el, text, colorType) {
+    const color = this.plugin.settings.typeColors[colorType] ?? DEFAULT_TYPE_COLOR;
+    if (this.plugin.settings.colorViews.typList) {
+      el.createSpan({ cls: "fred-typ-picker-name", text }).style.color = color;
+    } else {
+      el.createSpan({ cls: "fred-typ-picker-dot" }).style.backgroundColor = color;
+      el.createSpan({ cls: "fred-typ-picker-name", text });
+    }
   }
 
   // Obsidians SuggestModal.selectSuggestion() ruft intern erst this.close()
@@ -101,6 +107,56 @@ class SubtypPickerModal extends TypPickerModal {
   }
 }
 
+// TYP-Picker mit den Subtypen direkt eingerückt unter ihrem TYP (Standard,
+// solange "Subtyp-Picker separat" in den Einstellungen aus ist, siehe
+// pickTypeAndSubtype). Die TYP-Zeile selbst steht für "TYP ohne Subtyp".
+// Gesucht wird gruppenweise statt je Zeile, damit ein Subtyp nie ohne seinen
+// TYP darüber erscheint: passt die Suche auf den TYP, bleiben alle seine
+// Subtypen stehen; passt sie nur auf einzelne Subtypen, bleiben diese samt
+// ihrem TYP stehen. Die Gruppen sortieren sich nach ihrem besten Treffer,
+// innerhalb einer Gruppe bleibt die Block-Reihenfolge.
+class TypSubtypPickerModal extends TypPickerModal {
+  constructor(app, plugin, groups, resolve) {
+    super(app, plugin, groups.map((group) => group.item), resolve);
+    this.groups = groups;
+  }
+
+  getSuggestions(query) {
+    const search = query.trim() ? prepareFuzzySearch(query.trim()) : null;
+    const noMatch = { score: 0, matches: [] };
+    const results = [];
+    for (const { item, subtypes } of this.groups) {
+      const typeMatch = search ? search(this.getItemText(item)) : noMatch;
+      let subtypeMatches = subtypes.map((subtype) => ({ item: subtype, match: search ? search(subtype.subtype) : noMatch }));
+      if (!typeMatch) subtypeMatches = subtypeMatches.filter((entry) => entry.match);
+      if (!typeMatch && subtypeMatches.length === 0) continue;
+
+      const scores = [typeMatch, ...subtypeMatches.map((entry) => entry.match)].filter(Boolean).map((match) => match.score);
+      results.push({
+        score: Math.max(...scores),
+        rows: [{ item, match: typeMatch ?? noMatch }, ...subtypeMatches.map((entry) => ({ item: entry.item, match: entry.match ?? noMatch }))],
+      });
+    }
+    if (search) results.sort((a, b) => b.score - a.score);
+    return results.flatMap((group) => group.rows);
+  }
+
+  renderSuggestion(match, el) {
+    const item = match.item;
+    if (!item.subtype) {
+      super.renderSuggestion(match, el);
+      return;
+    }
+    el.addClass("fred-typ-picker-suggestion", "fred-typ-picker-subtype");
+    this.renderColoredName(el, item.subtype, item.type);
+    el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
+  }
+
+  onChooseItem(item) {
+    this.resolve({ type: item.type, subtype: item.subtype ?? null });
+  }
+}
+
 // Für _obsidian/templater-scripts/TYP.js: öffnet den Subtyp-Picker, sobald
 // der TYP mindestens einen registrierten Subtyp hat (in der Reihenfolge der
 // Blöcke in der TYP-Detailansicht). Löst auf mit
@@ -145,19 +201,51 @@ function unregisteredItems(app, plugin) {
 // muted dargestellt, da für sie keine Farbe/Beschreibung existiert. Löst mit
 // dem gewählten TYP auf, oder mit null bei Abbruch bzw. falls es (auch mit
 // den gewählten Optionen) keine anzuzeigenden TYPen gibt.
-function pickType(app, plugin, { includeManualOff = false, includeUnregistered = false } = {}) {
+function pickType(app, plugin, options = {}) {
   return new Promise((resolve) => {
-    const items = plugin.getTypes({ includeManualOff }).map((item) => ({ ...item, unregistered: false }));
-    if (includeUnregistered) items.push(...unregisteredItems(app, plugin));
-
-    if (items.length === 0) {
-      new Notice("Keine TYPen vorhanden.");
+    const items = typeItems(app, plugin, options);
+    if (!items) {
       resolve(null);
       return;
     }
-
     new TypPickerModal(app, plugin, items, resolve).open();
   });
 }
 
-module.exports = { pickType, pickSubtype };
+// Gemeinsame TYP-Liste für pickType/pickTypeAndSubtype - null samt Notice,
+// falls es (auch mit den gewählten Optionen) keine TYPen gibt.
+function typeItems(app, plugin, { includeManualOff = false, includeUnregistered = false } = {}) {
+  const items = plugin.getTypes({ includeManualOff }).map((item) => ({ ...item, unregistered: false }));
+  if (includeUnregistered) items.push(...unregisteredItems(app, plugin));
+  if (items.length > 0) return items;
+  new Notice("Keine TYPen vorhanden.");
+  return null;
+}
+
+// Für _obsidian/templater-scripts/TYP.js: TYP und Subtyp in einem Zug. Je
+// nach Einstellung separateSubtypePicker entweder ein einziger Picker mit den
+// Subtypen eingerückt unter ihrem TYP (Standard), oder wie früher erst der
+// TYP-Picker und danach, falls der TYP Subtypen hat, der Subtyp-Picker (ESC
+// dort führt zurück zur TYP-Auswahl). Optionen wie bei pickType. Löst auf mit
+// { type, subtype } (subtype null für "ohne Subtyp"), oder mit null bei
+// Abbruch.
+async function pickTypeAndSubtype(app, plugin, options = {}) {
+  if (plugin.settings.separateSubtypePicker) {
+    while (true) {
+      const type = await pickType(app, plugin, options);
+      if (!type) return null;
+      const subtype = await pickSubtype(app, plugin, type);
+      if (subtype !== null) return { type, subtype: subtype || null };
+    }
+  }
+
+  const items = typeItems(app, plugin, options);
+  if (!items) return null;
+  const groups = items.map((item) => ({
+    item,
+    subtypes: plugin.getSubtypes(item.type).map(({ subtype, count }) => ({ type: item.type, subtype, count })),
+  }));
+  return new Promise((resolve) => new TypSubtypPickerModal(app, plugin, groups, resolve).open());
+}
+
+module.exports = { pickType, pickSubtype, pickTypeAndSubtype };

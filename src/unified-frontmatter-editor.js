@@ -1,5 +1,5 @@
 const { mountFrontmatterEditor, ensurePropertyMenuPatch } = require("./type-frontmatter-editor");
-const { getSubtypeNames, getSubtype, ensureSubtype } = require("./subtypes");
+const { getSubtypeNames, getSubtype, ensureSubtype, getSectionOrder } = require("./subtypes");
 
 /* ============================================================
  * Ein einziger Property-Editor für das Standard-Frontmatter eines TYPs und
@@ -28,10 +28,11 @@ function unifiedStore(plugin, type) {
   const layout = new Map();
   let current = {};
 
-  const sections = () => [null, ...getSubtypeNames(plugin.settings, type)];
+  const sections = () => getSectionOrder(plugin.settings, type);
 
   // Kommt ein Key (aus älteren Daten) in mehreren Blöcken vor, gewinnt der
-  // erste - siehe auch enforceUniqueKeys in subtypes.js.
+  // erste - siehe auch enforceUniqueKeys in subtypes.js. Das Objekt entsteht
+  // in Block-Reihenfolge, damit die Zeilen blockweise stehen (injectSections).
   const load = () => {
     layout.clear();
     current = {};
@@ -44,8 +45,9 @@ function unifiedStore(plugin, type) {
         layout.set(key, section);
       }
     };
-    add(plugin.settings.typeDefaultFrontmatter[type], null);
-    for (const subtype of getSubtypeNames(plugin.settings, type)) add(getSubtype(plugin.settings, type, subtype)?.frontmatter, subtype);
+    for (const section of sections()) {
+      add(section === null ? plugin.settings.typeDefaultFrontmatter[type] : getSubtype(plugin.settings, type, section)?.frontmatter, section);
+    }
   };
   load();
 
@@ -116,8 +118,11 @@ function unifiedStore(plugin, type) {
 }
 
 // renderHeader(section, el, editor) / renderFooter(section, el, editor)
-// füllen Überschrift bzw. Abschluss eines Blocks.
-function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, renderFooter }) {
+// füllen Überschrift bzw. Abschluss eines Blocks. onMoveSection(order) meldet
+// die neue Block-Reihenfolge nach einem Block-Drag (wie getSectionOrder, samt
+// null für das Standard-Frontmatter), onSectionContextMenu(section, event)
+// einen Rechtsklick in einem Subtyp-Block.
+function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, renderFooter, onMoveSection, onSectionContextMenu }) {
   const store = unifiedStore(view.plugin, type);
   const wrapper = containerEl.createDiv({ cls: "fred-typ-unified" });
   const cardLayer = wrapper.createDiv({ cls: "fred-typ-unified-cards" });
@@ -129,17 +134,33 @@ function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, 
   if (!editor) return null;
   const listEl = editor.propertyListEl;
 
+  // Alle Blöcke in Anzeigereihenfolge, je { section, top, bottom, el } relativ
+  // zum wrapper - el ist die Kartenfläche (nur Subtyp-Blöcke, das Standard-
+  // Frontmatter bleibt transparent). Zugleich Grundlage für Hover, Rechtsklick
+  // und Block-Drag (siehe unten).
+  let blocks = [];
+  let hoveredSection;
+  let dragSection;
+
   const layoutCards = () => {
     cardLayer.empty();
+    blocks = [];
     const base = wrapper.getBoundingClientRect();
-    for (const header of listEl.querySelectorAll(":scope > .fred-typ-section-header.fred-typ-section-sub")) {
+    for (const header of listEl.querySelectorAll(":scope > .fred-typ-section-header")) {
       const footer = header.fredFooter;
       if (!footer?.isConnected) continue;
+      const section = header.fredSection;
       const top = header.getBoundingClientRect().top - base.top;
       const bottom = footer.getBoundingClientRect().bottom - base.top;
-      const card = cardLayer.createDiv({ cls: "fred-typ-unified-card" });
-      card.style.top = `${top}px`;
-      card.style.height = `${bottom - top}px`;
+      let el = null;
+      if (section !== null) {
+        el = cardLayer.createDiv({ cls: "fred-typ-unified-card" });
+        el.style.top = `${top}px`;
+        el.style.height = `${bottom - top}px`;
+        el.toggleClass("is-hovered", section === hoveredSection && dragSection === undefined);
+        el.toggleClass("is-dragging", section === dragSection);
+      }
+      blocks.push({ section, top, bottom, el });
     }
   };
 
@@ -253,6 +274,133 @@ function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, 
     this.focusKey("");
     ensurePropertyMenuPatch(view.app, this);
   };
+
+  // --- Hover, Rechtsklick und Verschieben ganzer Subtyp-Blöcke --------------
+  // Alles über die Blockflächen (siehe layoutCards), da ein Block kein eigenes
+  // Element ist. Hover und Rechtsklick (Suche nach den Notizen des Subtyps)
+  // gelten im ganzen Subtyp-Block. Angefasst wird ein Block überall außerhalb
+  // seiner Property-Zeilen: Überschrift, Abschluss und die seitlichen Ränder
+  // (dort ist die Liste selbst das Ziel); Buttons und ein gerade bearbeiteter
+  // Titel bleiben ausgenommen. Das Standard-Frontmatter selbst ist nicht
+  // verschiebbar, Subtypen dürfen aber auch darüber liegen.
+  const blockAt = (event) => {
+    const y = event.clientY - wrapper.getBoundingClientRect().top;
+    return blocks.find((block) => y >= block.top && y <= block.bottom) ?? null;
+  };
+  const subtypeBlockAt = (event) => {
+    const block = blockAt(event);
+    return block?.section != null ? block : null;
+  };
+
+  const isGrabTarget = (target) => {
+    if (target.closest(".clickable-icon, [contenteditable='true'], input, textarea")) return false;
+    if (target === listEl) return true;
+    return !!target.closest(".fred-typ-section-header.fred-typ-section-sub, .fred-typ-section-footer.fred-typ-section-sub");
+  };
+
+  const setHovered = (section) => {
+    if (section === hoveredSection) return;
+    hoveredSection = section;
+    for (const block of blocks) block.el?.toggleClass("is-hovered", block.section === section && dragSection === undefined);
+  };
+
+  // Überschrift, Zeilen und Abschluss eines Blocks (für die abgeblendete
+  // Darstellung des gerade gezogenen Blocks).
+  const markSection = (section) => {
+    let current = null;
+    for (const el of listEl.children) {
+      if (el.hasClass("fred-typ-section-header")) current = el.fredSection;
+      el.toggleClass("fred-typ-block-drag-source", section !== undefined && current === section);
+    }
+  };
+
+  wrapper.addEventListener("mousemove", (event) => {
+    if (dragSection === undefined) setHovered(subtypeBlockAt(event)?.section);
+  });
+  wrapper.addEventListener("mouseleave", () => setHovered(undefined));
+
+  // Obsidians eigene Menüs (z. B. das einer Property) und Textfelder haben
+  // Vorrang - sie reagieren vorher und setzen defaultPrevented.
+  wrapper.addEventListener("contextmenu", (event) => {
+    if (event.defaultPrevented || event.target.closest("input, textarea, [contenteditable='true']")) return;
+    const block = subtypeBlockAt(event);
+    if (!block) return;
+    event.preventDefault();
+    onSectionContextMenu?.(block.section, event);
+  });
+
+  // Eigenes Maus-Drag statt HTML5-draggable: ein draggable-Vorfahre störte die
+  // Textauswahl in den Eingabefeldern der Zeilen. Der Drag beginnt erst nach
+  // ein paar Pixeln Bewegung, ein Strich in Akzentfarbe zeigt die Zielposition
+  // zwischen den Blöcken, Escape bricht ab.
+  wrapper.addEventListener("mousedown", (event) => {
+    if (event.button !== 0 || !isGrabTarget(event.target)) return;
+    const startBlock = subtypeBlockAt(event);
+    if (!startBlock) return;
+    const win = wrapper.win;
+    const startY = event.clientY;
+    let indicator = null;
+    let targetIndex = null;
+
+    const onMove = (moveEvent) => {
+      if (dragSection === undefined) {
+        if (Math.abs(moveEvent.clientY - startY) < 4) return;
+        dragSection = startBlock.section;
+        setHovered(undefined);
+        wrapper.doc.body.addClass("fred-typ-block-dragging");
+        win.getSelection()?.removeAllRanges();
+        markSection(dragSection);
+        layoutCards();
+        indicator = wrapper.createDiv({ cls: "fred-typ-unified-drop-indicator" });
+      }
+      moveEvent.preventDefault();
+      if (blocks.length === 0) return;
+      const y = moveEvent.clientY - wrapper.getBoundingClientRect().top;
+      targetIndex = blocks.filter((block) => (block.top + block.bottom) / 2 < y).length;
+      const from = blocks.findIndex((block) => block.section === dragSection);
+      indicator.toggle(targetIndex !== from && targetIndex !== from + 1);
+      // Mitte der Lücke zwischen zwei Blöcken (Abstand siehe
+      // .fred-typ-section-header:not(:first-child) in styles.css).
+      const halfGap = 6;
+      const gapY =
+        targetIndex === 0
+          ? blocks[0].top - halfGap
+          : targetIndex === blocks.length
+            ? blocks[blocks.length - 1].bottom + halfGap
+            : (blocks[targetIndex - 1].bottom + blocks[targetIndex].top) / 2;
+      indicator.style.top = `${gapY - 1}px`;
+    };
+
+    const end = (commit) => {
+      win.removeEventListener("mousemove", onMove);
+      win.removeEventListener("mouseup", onUp);
+      win.removeEventListener("keydown", onKey, true);
+      if (dragSection === undefined) return;
+      const section = dragSection;
+      dragSection = undefined;
+      wrapper.doc.body.removeClass("fred-typ-block-dragging");
+      indicator?.remove();
+      markSection(undefined);
+      layoutCards();
+
+      const order = blocks.map((block) => block.section);
+      const from = order.indexOf(section);
+      if (!commit || targetIndex === null || targetIndex === from || targetIndex === from + 1) return;
+      order.splice(from, 1);
+      order.splice(from < targetIndex ? targetIndex - 1 : targetIndex, 0, section);
+      onMoveSection?.(order);
+    };
+    const onUp = () => end(true);
+    const onKey = (keyEvent) => {
+      if (keyEvent.key !== "Escape") return;
+      keyEvent.preventDefault();
+      keyEvent.stopPropagation();
+      end(false);
+    };
+    win.addEventListener("mousemove", onMove);
+    win.addEventListener("mouseup", onUp);
+    win.addEventListener("keydown", onKey, true);
+  });
 
   // Karten folgen jeder Änderung der Liste - auch live während eines Drags,
   // bei dem Obsidian die Zeile laufend im DOM umhängt.

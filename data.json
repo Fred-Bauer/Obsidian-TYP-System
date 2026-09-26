@@ -87,22 +87,7 @@
   },
   "typeSubtypes": {
     "PROJEKT": {
-      "Test": {
-        "frontmatter": {
-          "test2": null,
-          "test1": null
-        },
-        "floatingKeys": []
-      },
-      "Tecdf": {
-        "frontmatter": {},
-        "floatingKeys": []
-      },
-      "Sx": {
-        "frontmatter": {},
-        "floatingKeys": []
-      },
-      "Sdfsd": {
+      "Tecxcvdf": {
         "frontmatter": {},
         "floatingKeys": []
       }
@@ -140,6 +125,7 @@
   "noteTitleVerticalAlign": "bottom",
   "typSortOrder": "manual",
   "typListDescriptionEnabled": true,
+  "separateSubtypePicker": false,
   "includeIgnoredFiles": false,
   "graphTagColorEnabled": true,
   "graphTagColor": "#1c1c1c",

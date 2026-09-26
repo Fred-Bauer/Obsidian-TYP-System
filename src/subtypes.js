@@ -8,7 +8,7 @@ function normalizeSubtypeName(raw) {
 }
 
 // Registrierte SUBTYPen je TYP (settings.typeSubtypes):
-//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...] } } }
+//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...], aboveStandard?: true } } }
 // Ein Subtyp gehört immer zu genau einem TYP; derselbe Name darf aber (als
 // eigenständiger Subtyp) auch unter einem anderen TYP vorkommen. Die
 // Reihenfolge der Schlüssel ist die Anzeigereihenfolge der Blöcke in der
@@ -94,6 +94,63 @@ function mergeTypeSubtypes(settings, source, target) {
   enforceUniqueKeys(settings, target);
 }
 
+// Umbenennen eines Subtyps innerhalb seines TYPs - der Block behält dabei
+// seine Position (Anzeigereihenfolge = Schlüsselreihenfolge).
+function renameSubtype(settings, type, oldName, newName) {
+  const byName = settings.typeSubtypes?.[type];
+  if (!byName?.[oldName] || oldName === newName) return;
+  settings.typeSubtypes[type] = Object.fromEntries(
+    Object.entries(byName).map(([name, data]) => [name === oldName ? newName : name, data])
+  );
+}
+
+// Reihenfolge aller Blöcke eines TYPs, null = Standard-Frontmatter. Subtypen
+// mit aboveStandard stehen davor - als Markierung am Subtyp selbst statt als
+// Position, damit sie Umbenennen, Löschen und Zusammenlegen ohne Nachpflege
+// übersteht. Bestimmt die Anzeige in der TYP-Detailansicht ebenso wie die
+// Frontmatter-Sortierung der Notizen (siehe orderedDefaultKeys).
+function getSectionOrder(settings, type) {
+  const names = getSubtypeNames(settings, type);
+  const above = names.filter((name) => settings.typeSubtypes[type][name].aboveStandard);
+  return [...above, null, ...names.filter((name) => !above.includes(name))];
+}
+
+// Neue Block-Reihenfolge (Drag & Drop in der TYP-Detailansicht): order wie
+// getSectionOrder, samt null für das Standard-Frontmatter. Nicht genannte
+// Subtypen bleiben dahinter erhalten.
+function reorderSubtypes(settings, type, order) {
+  const byName = settings.typeSubtypes?.[type];
+  if (!byName) return;
+  const standardIndex = order.indexOf(null);
+  const names = order.filter((name) => name !== null && byName[name]);
+  const ordered = [...names, ...Object.keys(byName).filter((name) => !names.includes(name))];
+  for (const name of ordered) {
+    if (standardIndex !== -1 && order.indexOf(name) !== -1 && order.indexOf(name) < standardIndex) byName[name].aboveStandard = true;
+    else delete byName[name].aboveStandard;
+  }
+  settings.typeSubtypes[type] = Object.fromEntries(ordered.map((name) => [name, byName[name]]));
+}
+
+function deleteSubtype(settings, type, name) {
+  const byName = settings.typeSubtypes?.[type];
+  if (!byName) return;
+  delete byName[name];
+  if (Object.keys(byName).length === 0) delete settings.typeSubtypes[type];
+}
+
+// Zusammenlegen zweier Subtypen desselben TYPs: die Properties von source
+// wandern ans Ende des Ziel-Blocks (Keys kommen ohnehin nur in einem Block
+// vor, siehe enforceUniqueKeys), source verschwindet.
+function mergeSubtypes(settings, type, source, target) {
+  const sourceData = getSubtype(settings, type, source);
+  const targetData = getSubtype(settings, type, target);
+  if (!sourceData || !targetData || source === target) return;
+  Object.assign(targetData.frontmatter, sourceData.frontmatter);
+  targetData.floatingKeys.push(...sourceData.floatingKeys.filter((key) => !targetData.floatingKeys.includes(key)));
+  deleteSubtype(settings, type, source);
+  enforceUniqueKeys(settings, type);
+}
+
 // Schreibt den SUBTYP-Wert aller Notizen mit TYP-Schlüssel type und
 // SUBTYP-Schlüssel oldKey auf den Einzelwert newValue um - analog zu
 // renameTypeInNotes() in typ-view.js.
@@ -120,5 +177,10 @@ module.exports = {
   moveTypeSubtypes,
   deleteTypeSubtypes,
   mergeTypeSubtypes,
+  renameSubtype,
+  getSectionOrder,
+  reorderSubtypes,
+  deleteSubtype,
+  mergeSubtypes,
   renameSubtypeInNotes,
 };

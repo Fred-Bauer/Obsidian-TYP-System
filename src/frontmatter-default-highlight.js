@@ -41,11 +41,7 @@ function keysForType(plugin, type) {
 }
 
 function keysForFile(plugin, file) {
-  if (!file || file.extension !== "md") return { standard: null, floating: null };
-  const value = plugin.app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-  if (!value) return { standard: null, floating: null };
-  const type = String(Array.isArray(value) ? value[0] : value).trim();
-  return keysForType(plugin, type);
+  return keysForType(plugin, plugin.typIndex.typeOf(file));
 }
 
 // Property-Name (lowercase) -> Set der Typen, in deren Standard-Frontmatter

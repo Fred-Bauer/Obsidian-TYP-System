@@ -21,12 +21,6 @@ var require_frontmatter_sort = __commonJS({
       if (!hasKind("other")) result.push({ kind: "other" });
       return result;
     }
-    function typeForFile(app, file) {
-      const value = app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-      if (!value || Array.isArray(value) && value.length === 0) return null;
-      const type = String(Array.isArray(value) ? value[0] : value).trim();
-      return type || null;
-    }
     function orderedDefaultKeys(plugin, type) {
       if (!type) return null;
       const standard = plugin.settings.typeDefaultFrontmatter[type] ?? {};
@@ -99,7 +93,7 @@ var require_frontmatter_sort = __commonJS({
     }
     async function sortSingleFileFrontmatter(app, plugin, file) {
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
-      const type = typeForFile(app, file);
+      const type = plugin.typIndex.typeOf(file);
       const typeDefaultKeys = orderedDefaultKeys(plugin, type);
       return sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys);
     }
@@ -110,7 +104,7 @@ var require_frontmatter_sort = __commonJS({
       const hasTypeDefaults = onlyType ? orderedDefaultKeys(plugin, onlyType) !== null : null;
       for (const file of app.vault.getMarkdownFiles()) {
         if (!plugin.settings.includeIgnoredFiles && app.metadataCache.isUserIgnored(file.path)) continue;
-        const type = typeForFile(app, file);
+        const type = plugin.typIndex.typeOf(file);
         if (onlyType && type !== onlyType) continue;
         const typeDefaultKeys = orderedDefaultKeys(plugin, type);
         checked++;
@@ -336,7 +330,8 @@ var require_settings = __commonJS({
         frontmatterDefaults: true,
         typList: true,
         allProperties: true,
-        noteTitleColor: true
+        noteTitleColor: true,
+        links: true
       }
     };
     var TypSystemSettingTab2 = class extends PluginSettingTab {
@@ -378,6 +373,11 @@ var require_settings = __commonJS({
         colorViewToggle("graph", "Graph", "Knoten im Graph (global und lokal) nach TYP einf\xE4rben.");
         colorViewToggle("search", "Suche", "Treffer-Titel in der Suche nach TYP einf\xE4rben.");
         colorViewToggle("recentFiles", "Recent Files", "Eintr\xE4ge im Recent-Files-Plugin nach TYP einf\xE4rben.");
+        colorViewToggle(
+          "links",
+          "Links in Notizen",
+          "Interne Links im Notiztext (Lese-Modus, Live Preview, Hover-Vorschau) in der Farbe des TYPs ihres Ziels darstellen. Nicht aufgel\xF6ste Links bleiben unver\xE4ndert."
+        );
         colorViewToggle("typList", "TYP View", "Typ-Namen in der TYP-View selbst (Liste und Detailansicht) in ihrer jeweiligen Farbe darstellen.");
         colorViewToggle(
           "noteTitleColor",
@@ -836,13 +836,206 @@ var require_type_utils = __commonJS({
   }
 });
 
+// src/typ-index.js
+var require_typ_index = __commonJS({
+  "src/typ-index.js"(exports2, module2) {
+    var { Events, TFile, debounce } = require("obsidian");
+    var TYP_PROPERTY = "TYP";
+    var SUBTYP_PROPERTY = "SUBTYP";
+    var EMPTY_ENTRY = Object.freeze({ typeKey: null, rawType: null, subtypes: Object.freeze([]) });
+    var FLUSH_DELAY_MS = 100;
+    function rawItem(value) {
+      if (value == null) return "";
+      return typeof value === "object" ? JSON.stringify(value) : String(value);
+    }
+    function typeKeyOf(value) {
+      if (Array.isArray(value)) {
+        const items = value.map(rawItem);
+        if (items.every((item) => item.trim() === "")) return null;
+        return `[${items.join(", ")}]`;
+      }
+      const text = rawItem(value);
+      return text.trim() === "" ? null : text;
+    }
+    function subtypeList(value) {
+      if (value == null) return [];
+      return (Array.isArray(value) ? value : [value]).map((v) => rawItem(v).trim()).filter(Boolean);
+    }
+    function sameEntry(a, b) {
+      return !!a && !!b && a.typeKey === b.typeKey && a.subtypes.length === b.subtypes.length && a.subtypes.every((v, i) => v === b.subtypes[i]);
+    }
+    var TypIndex2 = class extends Events {
+      constructor(plugin) {
+        super();
+        this.plugin = plugin;
+        this.app = plugin.app;
+        this.entries = /* @__PURE__ */ new Map();
+        this.built = false;
+        this.aggregates = null;
+        this.pendingPaths = /* @__PURE__ */ new Set();
+        this.flush = debounce(() => {
+          const paths = this.pendingPaths;
+          this.pendingPaths = /* @__PURE__ */ new Set();
+          this.trigger("change", paths);
+        }, FLUSH_DELAY_MS);
+      }
+      register() {
+        const { plugin, app } = this;
+        plugin.registerEvent(app.metadataCache.on("changed", (file) => this.update(file)));
+        plugin.registerEvent(app.metadataCache.on("deleted", (file) => this.remove(file.path)));
+        plugin.registerEvent(app.vault.on("rename", (file, oldPath) => this.rename(file, oldPath)));
+        plugin.registerEvent(app.vault.on("config-changed", () => this.aggregates = null));
+        const resolvedRef = app.metadataCache.on("resolved", () => {
+          app.metadataCache.offref(resolvedRef);
+          this.rebuild();
+        });
+        plugin.registerEvent(resolvedRef);
+        plugin.register(() => this.flush.cancel());
+      }
+      read(file) {
+        const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        const rawType = frontmatter?.[TYP_PROPERTY] ?? null;
+        return { typeKey: typeKeyOf(rawType), rawType, subtypes: subtypeList(frontmatter?.[SUBTYP_PROPERTY]) };
+      }
+      ensureBuilt() {
+        if (!this.built) this.rebuild();
+      }
+      rebuild() {
+        const previous = this.entries;
+        const wasBuilt = this.built;
+        this.entries = /* @__PURE__ */ new Map();
+        for (const file of this.app.vault.getMarkdownFiles()) this.entries.set(file.path, this.read(file));
+        this.built = true;
+        this.aggregates = null;
+        if (!wasBuilt) return;
+        for (const [path, entry] of this.entries) {
+          if (!sameEntry(previous.get(path), entry)) this.pendingPaths.add(path);
+        }
+        for (const path of previous.keys()) {
+          if (!this.entries.has(path)) this.pendingPaths.add(path);
+        }
+        if (this.pendingPaths.size > 0) this.flush();
+      }
+      markChanged(path) {
+        this.aggregates = null;
+        this.pendingPaths.add(path);
+        this.flush();
+      }
+      update(file) {
+        if (!this.built || !(file instanceof TFile) || file.extension !== "md") return;
+        const next = this.read(file);
+        if (sameEntry(this.entries.get(file.path), next)) return;
+        this.entries.set(file.path, next);
+        this.markChanged(file.path);
+      }
+      remove(path) {
+        if (!this.built || !this.entries.delete(path)) return;
+        this.markChanged(path);
+      }
+      rename(file, oldPath) {
+        if (!this.built) return;
+        const entry = this.entries.get(oldPath);
+        if (entry) {
+          this.entries.delete(oldPath);
+          this.markChanged(oldPath);
+        }
+        if (file instanceof TFile && file.extension === "md") {
+          this.entries.set(file.path, entry ?? this.read(file));
+          this.markChanged(file.path);
+        }
+      }
+      entryFor(file) {
+        if (!file) return EMPTY_ENTRY;
+        this.ensureBuilt();
+        return this.entries.get(file.path) ?? EMPTY_ENTRY;
+      }
+      // TYP-Schlüssel (siehe typeKeyOf) oder null. Für einen sauberen Wert ist das
+      // schlicht der TYP-Name selbst.
+      typeOf(file) {
+        return this.entryFor(file).typeKey;
+      }
+      // Ein tatsächlicher Frontmatter-Wert zu einem Schlüssel - für Anzeige, Suche
+      // und Normalisierung unregistrierter Einträge (alle Notizen eines Schlüssels
+      // haben per Definition dieselbe Rohform).
+      rawValueOf(typeKey) {
+        return this.aggregate().rawByKey.get(typeKey);
+      }
+      // Sauberer Wert = Einzelwert ohne Leerzeichen am Rand. Klein geschriebene
+      // Werte zählen hier als sauber (sie sind ein gültiger, nur noch nicht
+      // registrierter TYP-Name), Listen und Randleerzeichen nicht.
+      isCleanKey(typeKey) {
+        const raw = this.rawValueOf(typeKey);
+        return raw !== void 0 && !Array.isArray(raw) && typeKey === typeKey.trim();
+      }
+      // Dateien mit genau diesem TYP-Schlüssel, unter Beachtung der
+      // "Ignorierte Notizen berücksichtigen"-Einstellung.
+      filesWithType(typeKey) {
+        this.ensureBuilt();
+        const includeIgnored = !!this.plugin.settings.includeIgnoredFiles;
+        const files = [];
+        for (const [path, entry] of this.entries) {
+          if (entry.typeKey !== typeKey) continue;
+          if (!includeIgnored && this.app.metadataCache.isUserIgnored(path)) continue;
+          const file = this.app.vault.getAbstractFileByPath(path);
+          if (file instanceof TFile) files.push(file);
+        }
+        return files;
+      }
+      // Respektiert standardmäßig Obsidians eigene "Excluded files"-Liste - dort
+      // tragen auch Plugins wie Hide Folders ausgeblendete Ordner ein. Über die
+      // Einstellung "Ignorierte Notizen berücksichtigen" abschaltbar.
+      //
+      // Mehrfach-SUBTYP (Array-Wert) zählt für jeden seiner SUBTYP-Buckets. Eine
+      // Notiz ohne TYP hat keinen SUBTYP-Kontext.
+      aggregate() {
+        this.ensureBuilt();
+        const includeIgnored = !!this.plugin.settings.includeIgnoredFiles;
+        if (this.aggregates?.includeIgnored === includeIgnored) return this.aggregates;
+        const counts = /* @__PURE__ */ new Map();
+        const rawByKey = /* @__PURE__ */ new Map();
+        const subtypesByType = /* @__PURE__ */ new Map();
+        let noType = 0;
+        for (const [path, { typeKey, rawType, subtypes }] of this.entries) {
+          if (!includeIgnored && this.app.metadataCache.isUserIgnored(path)) continue;
+          if (typeKey === null) {
+            noType++;
+            continue;
+          }
+          counts.set(typeKey, (counts.get(typeKey) ?? 0) + 1);
+          if (!rawByKey.has(typeKey)) rawByKey.set(typeKey, rawType);
+          let bucket = subtypesByType.get(typeKey);
+          if (!bucket) {
+            bucket = { counts: /* @__PURE__ */ new Map(), noSubtype: 0 };
+            subtypesByType.set(typeKey, bucket);
+          }
+          if (subtypes.length === 0) bucket.noSubtype++;
+          else for (const sub of subtypes) bucket.counts.set(sub, (bucket.counts.get(sub) ?? 0) + 1);
+        }
+        this.aggregates = { includeIgnored, counts, noType, rawByKey, subtypesByType };
+        return this.aggregates;
+      }
+      // Zwischengespeichert - die gelieferten Maps nicht verändern.
+      typeCounts() {
+        const { counts, noType } = this.aggregate();
+        return { counts, noType };
+      }
+      // TYP -> { counts: Map(SUBTYP -> Anzahl), noSubtype }. Zwischengespeichert -
+      // nicht verändern.
+      subtypeCounts() {
+        return this.aggregate().subtypesByType;
+      }
+    };
+    module2.exports = { TypIndex: TypIndex2, typeKeyOf, TYP_PROPERTY };
+  }
+});
+
 // src/subtyp-view.js
 var require_subtyp_view = __commonJS({
   "src/subtyp-view.js"(exports2, module2) {
     var { Notice, setIcon } = require("obsidian");
     var { normalizeTypeName, compareTypes } = require_type_utils();
+    var { typeKeyOf, TYP_PROPERTY } = require_typ_index();
     var SUBTYP_PROPERTY = "SUBTYP";
-    var TYP_PROPERTY = "TYP";
     var SORT_MODE = "count-desc";
     function getSubtypeList(plugin, typ) {
       return plugin.settings.subtypesByType?.[typ] ?? [];
@@ -864,41 +1057,12 @@ var require_subtyp_view = __commonJS({
       if (!plugin.settings.subtypeDescriptions[typ]) plugin.settings.subtypeDescriptions[typ] = {};
       return plugin.settings.subtypeDescriptions[typ];
     }
-    function scanSubtypes(app, { includeIgnored = false } = {}) {
-      const byType = /* @__PURE__ */ new Map();
-      const ensureBucket = (typ) => {
-        let bucket = byType.get(typ);
-        if (!bucket) {
-          bucket = { counts: /* @__PURE__ */ new Map(), noSubtype: 0 };
-          byType.set(typ, bucket);
-        }
-        return bucket;
-      };
-      for (const file of app.vault.getMarkdownFiles()) {
-        if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
-        const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
-        const typValue = frontmatter?.[TYP_PROPERTY];
-        if (!typValue || Array.isArray(typValue) && typValue.length === 0) continue;
-        const subValue = frontmatter?.[SUBTYP_PROPERTY];
-        const subList = subValue == null || Array.isArray(subValue) && subValue.length === 0 ? [] : (Array.isArray(subValue) ? subValue : [subValue]).map((v) => String(v).trim()).filter(Boolean);
-        for (const rawTyp of Array.isArray(typValue) ? typValue : [typValue]) {
-          const typ = String(rawTyp).trim();
-          if (!typ) continue;
-          const bucket = ensureBucket(typ);
-          if (subList.length === 0) bucket.noSubtype++;
-          else for (const sub of subList) bucket.counts.set(sub, (bucket.counts.get(sub) ?? 0) + 1);
-        }
-      }
-      return byType;
-    }
     async function renameSubtypeInNotes(app, typ, oldValue, newValue, { includeIgnored = false } = {}) {
       let changed = 0;
       for (const file of app.vault.getMarkdownFiles()) {
         if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
         const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
-        const typValue = frontmatter?.[TYP_PROPERTY];
-        const typMatches = Array.isArray(typValue) ? typValue.includes(typ) : typValue === typ;
-        if (!typMatches) continue;
+        if (typeKeyOf(frontmatter?.[TYP_PROPERTY]) !== typ) continue;
         const subValue = frontmatter?.[SUBTYP_PROPERTY];
         const subMatches = Array.isArray(subValue) ? subValue.includes(oldValue) : subValue === oldValue;
         if (!subMatches) continue;
@@ -949,7 +1113,7 @@ var require_subtyp_view = __commonJS({
         else addBtn.addClass("is-disabled");
         this.listEl = containerEl.createDiv({ cls: "fred-typ-list nav-files-container" });
         this.separatorEl = null;
-        const byType = scanSubtypes(this.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+        const byType = this.plugin.typIndex.subtypeCounts();
         if (activeType) this.renderFilteredList(activeType, byType.get(activeType) ?? { counts: /* @__PURE__ */ new Map(), noSubtype: 0 });
         else this.renderUnfilteredList(byType);
       }
@@ -1113,7 +1277,7 @@ var require_subtyp_view = __commonJS({
         inner.addEventListener("blur", () => finish(true));
       }
     };
-    module2.exports = { SubtypPane, scanSubtypes, SUBTYP_PROPERTY };
+    module2.exports = { SubtypPane, SUBTYP_PROPERTY };
   }
 });
 
@@ -1125,8 +1289,8 @@ var require_typ_view = __commonJS({
     var { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require_frontmatter_placeholders();
     var { normalizeTypeName, compareTypes, sortTypesByMode: sortTypesByMode2 } = require_type_utils();
     var { SubtypPane } = require_subtyp_view();
+    var { typeKeyOf, TYP_PROPERTY } = require_typ_index();
     var VIEW_TYPE_TYP = "fred-typ-view";
-    var TYP_PROPERTY = "TYP";
     var DEFAULT_TYPE_COLOR = "#888888";
     var DEFAULT_SORT_ORDER2 = "count-desc";
     var DEFAULT_SUBTYP_PANE_RATIO = 0.5;
@@ -1145,42 +1309,27 @@ var require_typ_view = __commonJS({
       { mode: "color-asc", title: "Farbe (Rot \u2192 Violett)" },
       { mode: "color-desc", title: "Farbe (Violett \u2192 Rot)" }
     ];
-    function scanTypes2(app, { includeIgnored = false } = {}) {
-      const counts = /* @__PURE__ */ new Map();
-      let noType = 0;
-      for (const file of app.vault.getMarkdownFiles()) {
-        if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
-        const value = app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-        if (!value || Array.isArray(value) && value.length === 0) {
-          noType++;
-          continue;
-        }
-        for (const v of Array.isArray(value) ? value : [value]) {
-          const key = String(v).trim();
-          if (!key) continue;
-          counts.set(key, (counts.get(key) ?? 0) + 1);
-        }
-      }
-      return { counts, noType };
-    }
-    async function renameTypeInNotes(app, oldValue, newValue, { includeIgnored = false } = {}) {
+    async function renameTypeInNotes(plugin, oldKey, newValue) {
       let changed = 0;
-      for (const file of app.vault.getMarkdownFiles()) {
-        if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
-        const value = app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-        const matches = Array.isArray(value) ? value.includes(oldValue) : value === oldValue;
-        if (!matches) continue;
-        await app.fileManager.processFrontMatter(file, (frontmatter) => {
-          const current = frontmatter[TYP_PROPERTY];
-          if (Array.isArray(current)) {
-            frontmatter[TYP_PROPERTY] = [...new Set(current.map((v) => v === oldValue ? newValue : v))];
-          } else if (current === oldValue) {
-            frontmatter[TYP_PROPERTY] = newValue;
-          }
+      for (const file of plugin.typIndex.filesWithType(oldKey)) {
+        let matched = false;
+        await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
+          if (typeKeyOf(frontmatter[TYP_PROPERTY]) !== oldKey) return;
+          frontmatter[TYP_PROPERTY] = newValue;
+          matched = true;
         });
-        changed++;
+        if (matched) changed++;
       }
       return changed;
+    }
+    function normalizeRawType(raw) {
+      if (Array.isArray(raw)) {
+        return raw.map((v) => normalizeTypeName(String(v ?? ""))).filter(Boolean).join(", ");
+      }
+      return normalizeTypeName(String(raw));
+    }
+    function displayTypeKey(typeKey) {
+      return typeKey !== typeKey.trim() ? `"${typeKey}"` : typeKey;
     }
     function appendTypeName(parentEl, plugin, type, color) {
       if (plugin.settings.colorViews.typList) {
@@ -1251,6 +1400,30 @@ var require_typ_view = __commonJS({
       onClose() {
         this.contentEl.empty();
         if (!this.confirmed) this.onCancel?.();
+      }
+    };
+    var ConfirmMergeTypeModal = class extends ConfirmRenameTypeModal {
+      onOpen() {
+        const { contentEl } = this;
+        this.modalEl.addClass("fred-confirm-delete-modal");
+        const settings = this.plugin.settings;
+        const p = contentEl.createEl("p");
+        p.appendText("TYP ");
+        appendTypeName(p, this.plugin, this.newType, settings.typeColors[this.newType] ?? DEFAULT_TYPE_COLOR);
+        p.appendText(" existiert bereits. ");
+        appendTypeName(p, this.plugin, this.oldType, settings.typeColors[this.oldType] ?? DEFAULT_TYPE_COLOR);
+        p.appendText(" damit zusammenlegen?");
+        contentEl.createEl("p", {
+          text: `${this.affectedCount} Notiz(en) werden auf ${this.newType} umgestellt. Farbe, Beschreibung und Standard-Frontmatter von ${this.oldType} entfallen, seine SUBTYPen werden \xFCbernommen.`
+        });
+        const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
+        buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
+        const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "Zusammenlegen" });
+        confirmBtn.addEventListener("click", () => {
+          this.confirmed = true;
+          this.close();
+          this.onConfirm();
+        });
       }
     };
     var TypView = class extends ItemView {
@@ -1336,25 +1509,27 @@ var require_typ_view = __commonJS({
       openSearch(type) {
         const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
         if (!globalSearch) return;
-        const query = type === null ? `-["${TYP_PROPERTY}"] file:.md` : `["${TYP_PROPERTY}":"${type}"]`;
+        const raw = type === null ? void 0 : this.plugin.typIndex.rawValueOf(type);
+        const query = type === null ? `-["${TYP_PROPERTY}"] file:.md` : Array.isArray(raw) ? raw.map((v) => `["${TYP_PROPERTY}":"${String(v ?? "").trim()}"]`).join(" ") : `["${TYP_PROPERTY}":"${type}"]`;
         globalSearch.instance.openGlobalSearch(query);
       }
-      // type kommt 1:1 aus einem tatsächlichen Frontmatter-Wert (siehe
-      // unregisteredRows in render()) - könnte also klein geschrieben sein. TYPen
-      // werden aber immer groß geschrieben (siehe normalizeTypeName) - registriert
-      // wird deshalb die normalisierte Form, und die betroffenen Notizen werden
-      // gleich mit umgeschrieben, damit sie nicht weiterhin als "nicht registriert"
-      // auftauchen (Zählung/Zuordnung vergleicht bewusst weiterhin exakt).
-      async registerType(type) {
-        const normalized = normalizeTypeName(type);
+      // typeKey kommt 1:1 aus den tatsächlichen Frontmatter-Werten (siehe
+      // unregisteredRows in render() und typeKeyOf in typ-index.js) - kann also
+      // klein geschrieben sein, Randleerzeichen tragen oder eine Liste sein. TYPen
+      // werden aber immer als sauberer Einzelwert in Großbuchstaben geführt -
+      // registriert wird deshalb die bereinigte Form (siehe normalizeRawType), und
+      // die betroffenen Notizen werden gleich mit umgeschrieben, damit sie nicht
+      // weiterhin als "nicht registriert" auftauchen.
+      async registerType(typeKey) {
+        const raw = this.plugin.typIndex.rawValueOf(typeKey);
+        const normalized = normalizeRawType(raw === void 0 ? typeKey : raw);
+        if (!normalized) return;
         if (!this.plugin.settings.types.includes(normalized)) {
           this.plugin.settings.types.push(normalized);
         }
         let renamed = 0;
-        if (normalized !== type) {
-          renamed = await renameTypeInNotes(this.plugin.app, type, normalized, {
-            includeIgnored: this.plugin.settings.includeIgnoredFiles
-          });
+        if (normalized !== typeKey) {
+          renamed = await renameTypeInNotes(this.plugin, typeKey, normalized);
         }
         await this.plugin.saveSettings();
         this.render();
@@ -1471,7 +1646,7 @@ var require_typ_view = __commonJS({
           }
           const contentEl = this.paneTopEl;
           contentEl.empty();
-          const { counts, noType } = scanTypes2(this.plugin.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+          const { counts, noType } = this.plugin.typIndex.typeCounts();
           const registered = this.plugin.settings.types;
           const typeColors = this.plugin.settings.typeColors;
           const sortOrder = this.plugin.settings.typSortOrder ?? DEFAULT_SORT_ORDER2;
@@ -1698,7 +1873,7 @@ var require_typ_view = __commonJS({
       renderUnregisteredItem(type, count) {
         const treeItem = this.listEl.createDiv({ cls: "tree-item" });
         const self = treeItem.createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
-        self.createDiv({ cls: "tree-item-inner", text: type });
+        self.createDiv({ cls: "tree-item-inner", text: displayTypeKey(type) });
         this.renderCountFlair(self, count);
         self.addEventListener("click", () => this.registerType(type));
         self.addEventListener("contextmenu", (event) => {
@@ -1717,7 +1892,7 @@ var require_typ_view = __commonJS({
         const titleEl = header.createDiv({ cls: "fred-typ-detail-title", text: type });
         const titleColor = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
         if (titleColor) titleEl.style.color = titleColor;
-        const { counts } = scanTypes2(this.plugin.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+        const { counts } = this.plugin.typIndex.typeCounts();
         header.createSpan({ cls: "fred-typ-detail-count", text: String(counts.get(type) ?? 0) });
         const renameWithNotesBtn = header.createDiv({
           cls: "clickable-icon fred-typ-detail-rename-notes",
@@ -1862,11 +2037,11 @@ var require_typ_view = __commonJS({
             this.render();
             return;
           }
-          const exists = this.plugin.settings.types.some(
+          const existing = this.plugin.settings.types.find(
             (t) => t.toLowerCase() === value.toLowerCase() && t !== type
           );
-          if (exists) {
-            this.render();
+          if (existing) {
+            this.showMergeConfirm(type, existing);
             return;
           }
           if (!updateNotes) {
@@ -1874,7 +2049,7 @@ var require_typ_view = __commonJS({
             this.render();
             return;
           }
-          const { counts } = scanTypes2(this.plugin.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+          const { counts } = this.plugin.typIndex.typeCounts();
           new ConfirmRenameTypeModal(
             this.plugin,
             type,
@@ -1882,9 +2057,7 @@ var require_typ_view = __commonJS({
             counts.get(type) ?? 0,
             async () => {
               await applyRename(value);
-              const renamed = await renameTypeInNotes(this.plugin.app, type, value, {
-                includeIgnored: this.plugin.settings.includeIgnoredFiles
-              });
+              const renamed = await renameTypeInNotes(this.plugin, type, value);
               new Notice(`TYP ${value}: ${renamed} Notiz(en) angepasst.`);
               this.render();
             },
@@ -1903,6 +2076,54 @@ var require_typ_view = __commonJS({
           }
         });
         titleEl.addEventListener("blur", () => finish(true));
+      }
+      showMergeConfirm(source, target) {
+        const { counts } = this.plugin.typIndex.typeCounts();
+        new ConfirmMergeTypeModal(
+          this.plugin,
+          source,
+          target,
+          counts.get(source) ?? 0,
+          () => this.mergeType(source, target),
+          () => this.render()
+        ).open();
+      }
+      // Legt source in target auf: Notizen werden auf target umgeschrieben,
+      // source verschwindet aus der TYP-Liste samt eigener Einstellungen (target
+      // behält seine). Die SUBTYPen von source werden übernommen, da die
+      // umgeschriebenen Notizen sie weiterhin tragen - Beschreibungen nur, wo
+      // target für denselben SUBTYP noch keine hat.
+      async mergeType(source, target) {
+        var _a, _b;
+        const settings = this.plugin.settings;
+        const renamed = await renameTypeInNotes(this.plugin, source, target);
+        settings.types = settings.types.filter((t) => t !== source);
+        delete settings.typeColors[source];
+        delete settings.typeDescriptions[source];
+        delete settings.typeDefaultFrontmatter[source];
+        delete settings.typeFloatingKeys[source];
+        delete this.ensureTypeManual()[source];
+        const sourceSubtypes = settings.subtypesByType?.[source] ?? [];
+        if (sourceSubtypes.length > 0) {
+          const targetSubtypes = (_a = settings.subtypesByType)[target] ?? (_a[target] = []);
+          for (const subtyp of sourceSubtypes) {
+            if (!targetSubtypes.includes(subtyp)) targetSubtypes.push(subtyp);
+          }
+        }
+        const sourceDescriptions = settings.subtypeDescriptions?.[source];
+        if (sourceDescriptions) {
+          const targetDescriptions = (_b = settings.subtypeDescriptions)[target] ?? (_b[target] = {});
+          for (const [subtyp, description] of Object.entries(sourceDescriptions)) {
+            if (targetDescriptions[subtyp] === void 0) targetDescriptions[subtyp] = description;
+          }
+        }
+        if (settings.subtypesByType) delete settings.subtypesByType[source];
+        if (settings.subtypeDescriptions) delete settings.subtypeDescriptions[source];
+        this.selectedType = target;
+        await this.plugin.saveSettings();
+        this.plugin.refreshTypColors?.();
+        new Notice(`TYP ${source} mit ${target} zusammengelegt, ${renamed} Notiz(en) angepasst.`);
+        this.render();
       }
       renderCountFlair(self, count) {
         const flairOuter = self.createDiv({ cls: "tree-item-flair-outer" });
@@ -1959,9 +2180,7 @@ var require_typ_view = __commonJS({
         }
       };
       const debouncedRefresh = debounce(refresh, 500, true);
-      plugin.registerEvent(plugin.app.metadataCache.on("changed", debouncedRefresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("resolved", debouncedRefresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("deleted", debouncedRefresh));
+      plugin.registerEvent(plugin.typIndex.on("change", debouncedRefresh));
       plugin.registerEvent(plugin.app.vault.on("config-changed", debouncedRefresh));
       return refresh;
     }
@@ -1994,8 +2213,7 @@ var require_typ_view = __commonJS({
         return;
       }
       const file = app.workspace.getActiveFile();
-      const value = file ? app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY] : null;
-      const type = String((Array.isArray(value) ? value[0] : value) ?? "").trim();
+      const type = plugin.typIndex.typeOf(file);
       if (!type) {
         new Notice("Aktive Notiz hat keinen TYP.");
         return;
@@ -2023,22 +2241,18 @@ var require_typ_view = __commonJS({
       }
       view.subtypPane?.startAdd();
     }
-    module2.exports = { registerTypView: registerTypView2, VIEW_TYPE_TYP, scanTypes: scanTypes2, compareTypes, sortTypesByMode: sortTypesByMode2, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2, DEFAULT_TYPE_COLOR };
+    module2.exports = { registerTypView: registerTypView2, VIEW_TYPE_TYP, compareTypes, sortTypesByMode: sortTypesByMode2, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2, DEFAULT_TYPE_COLOR };
   }
 });
 
 // src/type-colors.js
 var require_type_colors = __commonJS({
   "src/type-colors.js"(exports2, module2) {
-    var TYP_PROPERTY = "TYP";
     function colorForFile(plugin, file) {
-      if (!file || file.extension !== "md") return null;
-      const value = plugin.app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-      if (!value) return null;
-      const type = String(Array.isArray(value) ? value[0] : value).trim();
-      return plugin.settings.typeColors[type] ?? null;
+      const type = plugin.typIndex.typeOf(file);
+      return type ? plugin.settings.typeColors[type] ?? null : null;
     }
-    module2.exports = { TYP_PROPERTY, colorForFile };
+    module2.exports = { colorForFile };
   }
 });
 
@@ -2090,8 +2304,7 @@ var require_file_explorer_colors = __commonJS({
         }
       };
       plugin.register(() => observer.disconnect());
-      plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
       plugin.registerEvent(plugin.app.vault.on("rename", refresh));
       plugin.registerEvent(
         plugin.app.workspace.on("layout-change", () => {
@@ -2162,6 +2375,7 @@ var require_graph_colors = __commonJS({
         }
       };
       plugin.registerEvent(plugin.app.workspace.on("layout-change", refresh));
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
       plugin.app.workspace.onLayoutReady(refresh);
       return refresh;
     }
@@ -2196,8 +2410,7 @@ var require_search_colors = __commonJS({
         }
       };
       plugin.register(() => observer.disconnect());
-      plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
       plugin.registerEvent(
         plugin.app.workspace.on("layout-change", () => {
           observeLeaves();
@@ -2242,8 +2455,7 @@ var require_recent_files_colors = __commonJS({
         }
       };
       plugin.register(() => observer.disconnect());
-      plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
       plugin.registerEvent(
         plugin.app.workspace.on("layout-change", () => {
           observeLeaves();
@@ -2315,8 +2527,8 @@ var require_backlink_colors = __commonJS({
         }
       };
       plugin.register(() => observer.disconnect());
-      plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
+      plugin.registerEvent(plugin.app.metadataCache.on("resolved", () => applyEmbeddedBacklinkColors(plugin)));
       plugin.registerEvent(
         plugin.app.workspace.on("layout-change", () => {
           observeLeaves();
@@ -2371,8 +2583,7 @@ var require_bookmark_colors = __commonJS({
         }
       };
       plugin.register(() => observer.disconnect());
-      plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
       plugin.registerEvent(
         plugin.app.workspace.on("layout-change", () => {
           observeLeaves();
@@ -2393,7 +2604,7 @@ var require_bookmark_colors = __commonJS({
 var require_active_title_colors = __commonJS({
   "src/active-title-colors.js"(exports2, module2) {
     var { TFile } = require("obsidian");
-    var { TYP_PROPERTY, colorForFile } = require_type_colors();
+    var { colorForFile } = require_type_colors();
     var DOT_CLASS = "fred-typ-title-dot";
     var BADGE_CLASS = "fred-typ-title-badge";
     var BADGE_PLAIN_CLASS = "fred-typ-title-badge-plain";
@@ -2403,19 +2614,13 @@ var require_active_title_colors = __commonJS({
     var BLOCK_ALIGN_TOP_CLASS = "fred-typ-block-badge-top";
     var BLOCK_ALIGN_BOTTOM_CLASS = "fred-typ-block-badge-bottom";
     var BLOCK_COLOR_VAR = "--fred-typ-block-color";
-    function typeNameForFile(plugin, file) {
-      if (!file || file.extension !== "md") return null;
-      const value = plugin.app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-      if (!value) return null;
-      return String(Array.isArray(value) ? value[0] : value).trim() || null;
-    }
     function resolveMarker(plugin, file) {
       const style = plugin.settings.noteTitleStyle;
       if (style === "none") return { kind: "none" };
       if (style === "dot") return { kind: "dot", color: colorForFile(plugin, file) };
       const colored = plugin.settings.noteTitleBadgeColored;
       const color = colored ? colorForFile(plugin, file) : null;
-      const typeName = colored ? color ? typeNameForFile(plugin, file) : null : typeNameForFile(plugin, file);
+      const typeName = colored ? color ? plugin.typIndex.typeOf(file) : null : plugin.typIndex.typeOf(file);
       if (!typeName) return { kind: "none" };
       const position = plugin.settings.noteTitleBadgePosition;
       return { kind: position === "block" ? "block-badge" : "title-badge", colored, color, typeName };
@@ -2464,8 +2669,7 @@ var require_active_title_colors = __commonJS({
     }
     function registerActiveTitleColors2(plugin) {
       const refresh = () => applyActiveTitleColors(plugin);
-      plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-      plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
       plugin.registerEvent(plugin.app.workspace.on("file-open", refresh));
       plugin.registerEvent(plugin.app.workspace.on("active-leaf-change", refresh));
       plugin.registerEvent(plugin.app.workspace.on("layout-change", refresh));
@@ -2473,6 +2677,115 @@ var require_active_title_colors = __commonJS({
       return refresh;
     }
     module2.exports = { registerActiveTitleColors: registerActiveTitleColors2 };
+  }
+});
+
+// src/link-colors.js
+var require_link_colors = __commonJS({
+  "src/link-colors.js"(exports2, module2) {
+    var { editorInfoField, getLinkpath } = require("obsidian");
+    var { ViewPlugin, Decoration } = require("@codemirror/view");
+    var { Prec, RangeSetBuilder, StateEffect } = require("@codemirror/state");
+    var { syntaxTree } = require("@codemirror/language");
+    var { colorForFile } = require_type_colors();
+    var COLOR_VAR = "--link-color";
+    var SOURCE_ATTR = "data-fred-typ-src";
+    var WIKILINK_PATTERN = /(?<!!)\[\[([^[\]]+?)\]\]/g;
+    function colorForLinktext(plugin, linktext, sourcePath) {
+      const target = linktext.split(/\\?\|/)[0].trim();
+      const linkpath = getLinkpath(target);
+      if (!linkpath) return null;
+      const file = plugin.app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
+      return colorForFile(plugin, file);
+    }
+    function applyToAnchor(plugin, anchorEl) {
+      const href = anchorEl.getAttribute("data-href");
+      const color = plugin.settings.colorViews.links && href && !anchorEl.classList.contains("is-unresolved") ? colorForLinktext(plugin, href, anchorEl.getAttribute(SOURCE_ATTR) ?? "") : null;
+      if (color) anchorEl.style.setProperty(COLOR_VAR, color);
+      else anchorEl.style.removeProperty(COLOR_VAR);
+    }
+    function refreshRenderedLinks(plugin) {
+      const docs = /* @__PURE__ */ new Set();
+      plugin.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.view.containerEl.ownerDocument));
+      for (const doc of docs) {
+        for (const anchorEl of doc.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) applyToAnchor(plugin, anchorEl);
+      }
+    }
+    var refreshEffect = StateEffect.define();
+    function buildLinkViewPlugin(plugin) {
+      const decorationsByColor = /* @__PURE__ */ new Map();
+      const decorationFor = (color) => {
+        let decoration = decorationsByColor.get(color);
+        if (!decoration) {
+          decoration = Decoration.mark({
+            class: "fred-typ-link",
+            attributes: { style: `${COLOR_VAR}: ${color};` }
+          });
+          decorationsByColor.set(color, decoration);
+        }
+        return decoration;
+      };
+      const build = (view) => {
+        if (!plugin.settings.colorViews.links) return Decoration.none;
+        const sourcePath = view.state.field(editorInfoField, false)?.file?.path ?? "";
+        const tree = syntaxTree(view.state);
+        const builder = new RangeSetBuilder();
+        for (const { from, to } of view.visibleRanges) {
+          const text = view.state.sliceDoc(from, to);
+          WIKILINK_PATTERN.lastIndex = 0;
+          for (let match; match = WIKILINK_PATTERN.exec(text); ) {
+            const start = from + match.index;
+            if (!tree.resolveInner(start + 2, 1).name.includes("hmd-internal-link")) continue;
+            const color = colorForLinktext(plugin, match[1], sourcePath);
+            if (color) builder.add(start, start + match[0].length, decorationFor(color));
+          }
+        }
+        return builder.finish();
+      };
+      return ViewPlugin.fromClass(
+        class {
+          constructor(view) {
+            this.decorations = build(view);
+          }
+          // Der Parser arbeitet den sichtbaren Bereich ggf. erst nach und nach ab -
+          // ein neuer Syntaxbaum zählt daher ebenfalls als Anlass zum Neuaufbau.
+          update(update) {
+            if (update.docChanged || update.viewportChanged || syntaxTree(update.startState) !== syntaxTree(update.state) || update.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshEffect)))) {
+              this.decorations = build(update.view);
+            }
+          }
+        },
+        { decorations: (value) => value.decorations }
+      );
+    }
+    function refreshEditors(plugin) {
+      plugin.app.workspace.iterateAllLeaves((leaf) => {
+        leaf.view?.editor?.cm?.dispatch({ effects: refreshEffect.of(null) });
+      });
+    }
+    function registerLinkColors2(plugin) {
+      plugin.registerMarkdownPostProcessor((el, ctx) => {
+        for (const anchorEl of el.querySelectorAll("a.internal-link")) {
+          anchorEl.setAttribute(SOURCE_ATTR, ctx.sourcePath);
+          applyToAnchor(plugin, anchorEl);
+        }
+      });
+      plugin.registerEditorExtension(Prec.lowest(buildLinkViewPlugin(plugin)));
+      const refresh = () => {
+        refreshRenderedLinks(plugin);
+        refreshEditors(plugin);
+      };
+      plugin.registerEvent(plugin.typIndex.on("change", refresh));
+      plugin.register(() => {
+        plugin.app.workspace.iterateAllLeaves((leaf) => {
+          for (const anchorEl of leaf.view.containerEl.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) {
+            anchorEl.style.removeProperty(COLOR_VAR);
+          }
+        });
+      });
+      return refresh;
+    }
+    module2.exports = { registerLinkColors: registerLinkColors2 };
   }
 });
 
@@ -2506,11 +2819,7 @@ var require_frontmatter_default_highlight = __commonJS({
       };
     }
     function keysForFile(plugin, file) {
-      if (!file || file.extension !== "md") return { standard: null, floating: null };
-      const value = plugin.app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-      if (!value) return { standard: null, floating: null };
-      const type = String(Array.isArray(value) ? value[0] : value).trim();
-      return keysForType(plugin, type);
+      return keysForType(plugin, plugin.typIndex.typeOf(file));
     }
     function typesUsingKeyMap(plugin) {
       const map = /* @__PURE__ */ new Map();
@@ -2597,7 +2906,7 @@ var require_frontmatter_default_highlight = __commonJS({
 var require_type_picker = __commonJS({
   "src/type-picker.js"(exports2, module2) {
     var { FuzzySuggestModal, Notice } = require("obsidian");
-    var { DEFAULT_TYPE_COLOR, scanTypes: scanTypes2, compareTypes, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2 } = require_typ_view();
+    var { DEFAULT_TYPE_COLOR, compareTypes, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2 } = require_typ_view();
     var TypPickerModal = class extends FuzzySuggestModal {
       constructor(app, plugin, items, resolve) {
         super(app);
@@ -2659,9 +2968,9 @@ var require_type_picker = __commonJS({
     };
     function unregisteredItems(app, plugin) {
       const registered = new Set(plugin.settings.types);
-      const { counts } = scanTypes2(app, { includeIgnored: plugin.settings.includeIgnoredFiles });
+      const { counts } = plugin.typIndex.typeCounts();
       const sortOrder = plugin.settings.typSortOrder ?? DEFAULT_SORT_ORDER2;
-      return [...counts.keys()].filter((type) => !registered.has(type)).sort((a, b) => compareTypes(sortOrder, a, b, counts, plugin.settings.typeColors)).map((type) => ({ type, description: "", count: counts.get(type) ?? 0, unregistered: true }));
+      return [...counts.keys()].filter((type) => !registered.has(type) && plugin.typIndex.isCleanKey(type)).sort((a, b) => compareTypes(sortOrder, a, b, counts, plugin.settings.typeColors)).map((type) => ({ type, description: "", count: counts.get(type) ?? 0, unregistered: true }));
     }
     function pickType(app, plugin, { includeManualOff = false, includeUnregistered = false } = {}) {
       return new Promise((resolve) => {
@@ -2683,7 +2992,8 @@ var require_type_picker = __commonJS({
 var { Plugin } = require("obsidian");
 var { DEFAULT_SETTINGS, TypSystemSettingTab } = require_settings();
 var { registerCommands } = require_commands();
-var { registerTypView, scanTypes, sortTypesByMode, DEFAULT_SORT_ORDER } = require_typ_view();
+var { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require_typ_view();
+var { TypIndex } = require_typ_index();
 var { registerFileExplorerColors } = require_file_explorer_colors();
 var { registerGraphColors } = require_graph_colors();
 var { registerSearchColors } = require_search_colors();
@@ -2691,6 +3001,7 @@ var { registerRecentFilesColors } = require_recent_files_colors();
 var { registerBacklinkColors } = require_backlink_colors();
 var { registerBookmarksColors } = require_bookmark_colors();
 var { registerActiveTitleColors } = require_active_title_colors();
+var { registerLinkColors } = require_link_colors();
 var { registerFrontmatterDefaultHighlight } = require_frontmatter_default_highlight();
 var { normalizeGlobalOrder } = require_frontmatter_sort();
 var { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require_frontmatter_placeholders();
@@ -2708,6 +3019,8 @@ function migrateFloatingFrontmatter(settings) {
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
+    this.typIndex = new TypIndex(this);
+    this.typIndex.register();
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
     this.refreshFrontmatterHighlight = registerFrontmatterDefaultHighlight(this);
@@ -2720,6 +3033,7 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerBacklinkColors(this),
       registerBookmarksColors(this),
       registerActiveTitleColors(this),
+      registerLinkColors(this),
       this.refreshFrontmatterHighlight
     ];
     this.refreshTypColors = () => refreshFns.forEach((fn) => fn());
@@ -2773,7 +3087,7 @@ module.exports = class TypSystemPlugin extends Plugin {
   // Notiz) und werden deshalb standardmäßig ausgeklammert - Aufrufer, die
   // trotzdem alle TYPen brauchen, übergeben includeManualOff: true.
   getTypes({ includeManualOff = false } = {}) {
-    const { counts } = scanTypes(this.app, { includeIgnored: this.settings.includeIgnoredFiles });
+    const { counts } = this.typIndex.typeCounts();
     const sortOrder = this.settings.typSortOrder ?? DEFAULT_SORT_ORDER;
     return sortTypesByMode(this.settings.types, sortOrder, counts, this.settings.typeColors).filter((type) => includeManualOff || (this.settings.typeManual ?? {})[type] !== false).map((type) => ({
       type,
@@ -2791,6 +3105,7 @@ module.exports = class TypSystemPlugin extends Plugin {
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
     migrateFloatingFrontmatter(this.settings);
   }

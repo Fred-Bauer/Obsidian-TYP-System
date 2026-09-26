@@ -33,8 +33,7 @@ function registerSearchColors(plugin) {
   };
   plugin.register(() => observer.disconnect());
 
-  plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-  plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+  plugin.registerEvent(plugin.typIndex.on("change", refresh));
   plugin.registerEvent(
     plugin.app.workspace.on("layout-change", () => {
       observeLeaves();

@@ -135,11 +135,12 @@
     "search": true,
     "recentFiles": true,
     "backlinks": true,
+    "bookmarks": true,
     "frontmatterDefaults": true,
     "typList": true,
     "allProperties": true,
-    "noteTitle": false,
     "noteTitleColor": true,
-    "bookmarks": true
+    "links": true,
+    "noteTitle": false
   }
 }

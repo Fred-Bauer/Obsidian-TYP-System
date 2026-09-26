@@ -3,9 +3,9 @@ const { mountTypeFrontmatterEditor, addBlankProperty } = require("./type-frontma
 const { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require("./frontmatter-placeholders");
 const { normalizeTypeName, compareTypes, sortTypesByMode } = require("./type-utils");
 const { SubtypPane } = require("./subtyp-view");
+const { typeKeyOf, TYP_PROPERTY } = require("./typ-index");
 
 const VIEW_TYPE_TYP = "fred-typ-view";
-const TYP_PROPERTY = "TYP";
 const DEFAULT_TYPE_COLOR = "#888888";
 const DEFAULT_SORT_ORDER = "count-desc";
 const DEFAULT_SUBTYP_PANE_RATIO = 0.5;
@@ -26,57 +26,46 @@ const SORT_OPTIONS = [
   { mode: "color-desc", title: "Farbe (Violett → Rot)" },
 ];
 
-function scanTypes(app, { includeIgnored = false } = {}) {
-  const counts = new Map();
-  let noType = 0;
-  for (const file of app.vault.getMarkdownFiles()) {
-    // Respektiert standardmäßig Obsidians eigene "Excluded files"-Liste - dort
-    // tragen auch Plugins wie Hide Folders ausgeblendete Ordner ein. Über die
-    // Einstellung "Ignorierte Notizen berücksichtigen" abschaltbar.
-    if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
-
-    const value = app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-    if (!value || (Array.isArray(value) && value.length === 0)) {
-      noType++;
-      continue;
-    }
-    for (const v of Array.isArray(value) ? value : [value]) {
-      const key = String(v).trim();
-      if (!key) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-  }
-  return { counts, noType };
-}
-
-// Schreibt den TYP-Wert betroffener Notizen von oldValue auf newValue um -
-// für registerType() (Übernahme eines in Notizen klein geschriebenen, nicht
-// registrierten TYP-Werts unter seiner normalisierten Großschreibungs-Form).
-// Behandelt auch Mehrfach-TYP (Array-Wert): ersetzt darin nur den exakt
-// passenden Eintrag, der Rest bleibt unverändert; ein dabei entstehendes
-// Duplikat (newValue kommt im Array bereits vor) wird entfernt. Bewusst
-// weiterhin exaktes (case-sensitives) Matching gegen oldValue - kein
-// pauschales case-insensitives Matching an anderer Stelle im Plugin.
-async function renameTypeInNotes(app, oldValue, newValue, { includeIgnored = false } = {}) {
+// Schreibt den TYP-Wert aller Notizen mit dem Schlüssel oldKey (siehe
+// typeKeyOf in typ-index.js - für einen sauberen Wert der TYP-Name selbst,
+// sonst die Rohform, z. B. " buch" oder "[PERSON, BUCH]") auf den Einzelwert
+// newValue um. Genutzt für registerType() (Bereinigen), Umbenennen und
+// Zusammenlegen. Der Abgleich erfolgt exakt über den Schlüssel, eine Liste
+// wird dabei also als Ganzes ersetzt statt nur einer ihrer Einträge.
+async function renameTypeInNotes(plugin, oldKey, newValue) {
   let changed = 0;
-  for (const file of app.vault.getMarkdownFiles()) {
-    if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
-
-    const value = app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-    const matches = Array.isArray(value) ? value.includes(oldValue) : value === oldValue;
-    if (!matches) continue;
-
-    await app.fileManager.processFrontMatter(file, (frontmatter) => {
-      const current = frontmatter[TYP_PROPERTY];
-      if (Array.isArray(current)) {
-        frontmatter[TYP_PROPERTY] = [...new Set(current.map((v) => (v === oldValue ? newValue : v)))];
-      } else if (current === oldValue) {
-        frontmatter[TYP_PROPERTY] = newValue;
-      }
+  for (const file of plugin.typIndex.filesWithType(oldKey)) {
+    let matched = false;
+    await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      if (typeKeyOf(frontmatter[TYP_PROPERTY]) !== oldKey) return;
+      frontmatter[TYP_PROPERTY] = newValue;
+      matched = true;
     });
-    changed++;
+    if (matched) changed++;
   }
   return changed;
+}
+
+// Bereinigte Form eines Rohwerts für registerType(): Einzelwert getrimmt und
+// groß geschrieben; eine Liste wird bewusst NICHT auf einen ihrer Einträge
+// reduziert, sondern als Ganzes zu einem Einzelwert "A, B" (Rohform) - daraus
+// lässt sich der TYP danach per Umbenennen gezielt in einen anderen überführen
+// (siehe startDetailRename/showMergeConfirm).
+function normalizeRawType(raw) {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((v) => normalizeTypeName(String(v ?? "")))
+      .filter(Boolean)
+      .join(", ");
+  }
+  return normalizeTypeName(String(raw));
+}
+
+// Anzeige eines unregistrierten Schlüssels: Randleerzeichen wären als reiner
+// Text unsichtbar, daher dann in Anführungszeichen. Listen tragen ihre
+// eckigen Klammern schon im Schlüssel.
+function displayTypeKey(typeKey) {
+  return typeKey !== typeKey.trim() ? `"${typeKey}"` : typeKey;
 }
 
 // TYP-Name in Fließtext (Bestätigungs-Modale): eingefärbter Name, wenn "TYP
@@ -173,6 +162,43 @@ class ConfirmRenameTypeModal extends Modal {
   onClose() {
     this.contentEl.empty();
     if (!this.confirmed) this.onCancel?.();
+  }
+}
+
+// Umbenennen auf den Namen eines bereits registrierten TYPs (siehe
+// startDetailRename) - statt die Umbenennung stillschweigend zu verwerfen,
+// anbieten, beide zusammenzulegen (siehe mergeType). Schreibt immer auch die
+// Notizen um, unabhängig davon, über welchen der beiden Umbenennen-Buttons es
+// ausgelöst wurde: ein Zusammenlegen nur in den Einstellungen ließe die
+// Notizen des Quell-TYPs als unregistrierten Eintrag zurück.
+class ConfirmMergeTypeModal extends ConfirmRenameTypeModal {
+  onOpen() {
+    const { contentEl } = this;
+    this.modalEl.addClass("fred-confirm-delete-modal");
+    const settings = this.plugin.settings;
+    const p = contentEl.createEl("p");
+    p.appendText("TYP ");
+    appendTypeName(p, this.plugin, this.newType, settings.typeColors[this.newType] ?? DEFAULT_TYPE_COLOR);
+    p.appendText(" existiert bereits. ");
+    appendTypeName(p, this.plugin, this.oldType, settings.typeColors[this.oldType] ?? DEFAULT_TYPE_COLOR);
+    p.appendText(" damit zusammenlegen?");
+
+    contentEl.createEl("p", {
+      text:
+        `${this.affectedCount} Notiz(en) werden auf ${this.newType} umgestellt. ` +
+        `Farbe, Beschreibung und Standard-Frontmatter von ${this.oldType} entfallen, ` +
+        `seine SUBTYPen werden übernommen.`,
+    });
+
+    const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
+    buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
+
+    const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "Zusammenlegen" });
+    confirmBtn.addEventListener("click", () => {
+      this.confirmed = true;
+      this.close();
+      this.onConfirm();
+    });
   }
 }
 
@@ -276,27 +302,36 @@ class TypView extends ItemView {
     if (!globalSearch) return;
     // "kein Typ" träfe ohne Filter auch alle Nicht-Markdown-Dateien (die naturgemäß
     // nie eine Frontmatter-Property haben können) - daher explizit auf .md eingrenzen.
-    const query = type === null ? `-["${TYP_PROPERTY}"] file:.md` : `["${TYP_PROPERTY}":"${type}"]`;
+    // Für eine Liste (unregistrierter Schlüssel "[A, B]") gibt es keine exakte
+    // Suchsyntax - dann nach Notizen suchen, die alle ihre Einträge tragen.
+    const raw = type === null ? undefined : this.plugin.typIndex.rawValueOf(type);
+    const query =
+      type === null
+        ? `-["${TYP_PROPERTY}"] file:.md`
+        : Array.isArray(raw)
+          ? raw.map((v) => `["${TYP_PROPERTY}":"${String(v ?? "").trim()}"]`).join(" ")
+          : `["${TYP_PROPERTY}":"${type}"]`;
     globalSearch.instance.openGlobalSearch(query);
   }
 
-  // type kommt 1:1 aus einem tatsächlichen Frontmatter-Wert (siehe
-  // unregisteredRows in render()) - könnte also klein geschrieben sein. TYPen
-  // werden aber immer groß geschrieben (siehe normalizeTypeName) - registriert
-  // wird deshalb die normalisierte Form, und die betroffenen Notizen werden
-  // gleich mit umgeschrieben, damit sie nicht weiterhin als "nicht registriert"
-  // auftauchen (Zählung/Zuordnung vergleicht bewusst weiterhin exakt).
-  async registerType(type) {
-    const normalized = normalizeTypeName(type);
+  // typeKey kommt 1:1 aus den tatsächlichen Frontmatter-Werten (siehe
+  // unregisteredRows in render() und typeKeyOf in typ-index.js) - kann also
+  // klein geschrieben sein, Randleerzeichen tragen oder eine Liste sein. TYPen
+  // werden aber immer als sauberer Einzelwert in Großbuchstaben geführt -
+  // registriert wird deshalb die bereinigte Form (siehe normalizeRawType), und
+  // die betroffenen Notizen werden gleich mit umgeschrieben, damit sie nicht
+  // weiterhin als "nicht registriert" auftauchen.
+  async registerType(typeKey) {
+    const raw = this.plugin.typIndex.rawValueOf(typeKey);
+    const normalized = normalizeRawType(raw === undefined ? typeKey : raw);
+    if (!normalized) return;
     if (!this.plugin.settings.types.includes(normalized)) {
       this.plugin.settings.types.push(normalized);
     }
 
     let renamed = 0;
-    if (normalized !== type) {
-      renamed = await renameTypeInNotes(this.plugin.app, type, normalized, {
-        includeIgnored: this.plugin.settings.includeIgnoredFiles,
-      });
+    if (normalized !== typeKey) {
+      renamed = await renameTypeInNotes(this.plugin, typeKey, normalized);
     }
 
     await this.plugin.saveSettings();
@@ -437,7 +472,7 @@ class TypView extends ItemView {
       const contentEl = this.paneTopEl;
       contentEl.empty();
 
-      const { counts, noType } = scanTypes(this.plugin.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+      const { counts, noType } = this.plugin.typIndex.typeCounts();
       const registered = this.plugin.settings.types;
       const typeColors = this.plugin.settings.typeColors;
       const sortOrder = this.plugin.settings.typSortOrder ?? DEFAULT_SORT_ORDER;
@@ -739,7 +774,7 @@ class TypView extends ItemView {
   renderUnregisteredItem(type, count) {
     const treeItem = this.listEl.createDiv({ cls: "tree-item" });
     const self = treeItem.createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
-    self.createDiv({ cls: "tree-item-inner", text: type });
+    self.createDiv({ cls: "tree-item-inner", text: displayTypeKey(type) });
     this.renderCountFlair(self, count);
 
     self.addEventListener("click", () => this.registerType(type));
@@ -763,7 +798,7 @@ class TypView extends ItemView {
     const titleColor = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
     if (titleColor) titleEl.style.color = titleColor;
 
-    const { counts } = scanTypes(this.plugin.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+    const { counts } = this.plugin.typIndex.typeCounts();
     header.createSpan({ cls: "fred-typ-detail-count", text: String(counts.get(type) ?? 0) });
 
     // Links neben dem normalen Umbenennen-Button, hervorgehoben (Akzentfarbe,
@@ -972,11 +1007,11 @@ class TypView extends ItemView {
         return;
       }
 
-      const exists = this.plugin.settings.types.some(
+      const existing = this.plugin.settings.types.find(
         (t) => t.toLowerCase() === value.toLowerCase() && t !== type
       );
-      if (exists) {
-        this.render();
+      if (existing) {
+        this.showMergeConfirm(type, existing);
         return;
       }
 
@@ -988,7 +1023,7 @@ class TypView extends ItemView {
 
       // Bulk-Schreibvorgang über potenziell viele Dateien - vorher bestätigen
       // lassen, statt sofort zu speichern.
-      const { counts } = scanTypes(this.plugin.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+      const { counts } = this.plugin.typIndex.typeCounts();
       new ConfirmRenameTypeModal(
         this.plugin,
         type,
@@ -996,9 +1031,7 @@ class TypView extends ItemView {
         counts.get(type) ?? 0,
         async () => {
           await applyRename(value);
-          const renamed = await renameTypeInNotes(this.plugin.app, type, value, {
-            includeIgnored: this.plugin.settings.includeIgnoredFiles,
-          });
+          const renamed = await renameTypeInNotes(this.plugin, type, value);
           new Notice(`TYP ${value}: ${renamed} Notiz(en) angepasst.`);
           this.render();
         },
@@ -1021,6 +1054,59 @@ class TypView extends ItemView {
     });
 
     titleEl.addEventListener("blur", () => finish(true));
+  }
+
+  showMergeConfirm(source, target) {
+    const { counts } = this.plugin.typIndex.typeCounts();
+    new ConfirmMergeTypeModal(
+      this.plugin,
+      source,
+      target,
+      counts.get(source) ?? 0,
+      () => this.mergeType(source, target),
+      () => this.render()
+    ).open();
+  }
+
+  // Legt source in target auf: Notizen werden auf target umgeschrieben,
+  // source verschwindet aus der TYP-Liste samt eigener Einstellungen (target
+  // behält seine). Die SUBTYPen von source werden übernommen, da die
+  // umgeschriebenen Notizen sie weiterhin tragen - Beschreibungen nur, wo
+  // target für denselben SUBTYP noch keine hat.
+  async mergeType(source, target) {
+    const settings = this.plugin.settings;
+    const renamed = await renameTypeInNotes(this.plugin, source, target);
+
+    settings.types = settings.types.filter((t) => t !== source);
+    delete settings.typeColors[source];
+    delete settings.typeDescriptions[source];
+    delete settings.typeDefaultFrontmatter[source];
+    delete settings.typeFloatingKeys[source];
+    delete this.ensureTypeManual()[source];
+
+    const sourceSubtypes = settings.subtypesByType?.[source] ?? [];
+    if (sourceSubtypes.length > 0) {
+      const targetSubtypes = (settings.subtypesByType[target] ??= []);
+      for (const subtyp of sourceSubtypes) {
+        if (!targetSubtypes.includes(subtyp)) targetSubtypes.push(subtyp);
+      }
+    }
+    const sourceDescriptions = settings.subtypeDescriptions?.[source];
+    if (sourceDescriptions) {
+      const targetDescriptions = (settings.subtypeDescriptions[target] ??= {});
+      for (const [subtyp, description] of Object.entries(sourceDescriptions)) {
+        if (targetDescriptions[subtyp] === undefined) targetDescriptions[subtyp] = description;
+      }
+    }
+    if (settings.subtypesByType) delete settings.subtypesByType[source];
+    if (settings.subtypeDescriptions) delete settings.subtypeDescriptions[source];
+
+    // Vor refreshTypColors() setzen, aus demselben Grund wie in applyRename.
+    this.selectedType = target;
+    await this.plugin.saveSettings();
+    this.plugin.refreshTypColors?.();
+    new Notice(`TYP ${source} mit ${target} zusammengelegt, ${renamed} Notiz(en) angepasst.`);
+    this.render();
   }
 
   renderCountFlair(self, count) {
@@ -1091,21 +1177,16 @@ function registerTypView(plugin) {
     }
   };
 
-  // Zähler (Liste und Picker, siehe scanTypes()) sonst nur so aktuell wie beim
-  // letzten Render dieser View - jede TYP-relevante Änderung anderswo (neue/
-  // gelöschte Notiz, TYP umgetragen) ließe sie sonst veralten, bis irgendein
-  // anderer Grund (z. B. eine Einstellung) zufällig einen Refresh auslöst.
-  // "changed" feuert bei jedem Cache-Update (Erstellen, Speichern), "resolved"
-  // nach einem kompletten Auflösungsdurchlauf (z. B. Vault-Start, Bulk-Importe -
-  // dieselben zwei Events nutzen auch die anderen Color-Refresh-Module, siehe
-  // z. B. search-colors.js), "deleted" beim Löschen (dort ungenutzt, da die
-  // dortigen refresh()-Funktionen nur bereits gerenderte Zeilen umfärben statt
-  // zu zählen). Debounced, da "changed" bei jedem Autosave-Tick feuert -
-  // resetTimer:true sammelt eine Änderungsserie zu einem einzigen Refresh.
+  // Zähler (Liste und Picker, siehe typIndex.typeCounts()) sonst nur so aktuell
+  // wie beim letzten Render dieser View - jede TYP-relevante Änderung anderswo
+  // (neue/gelöschte Notiz, TYP oder SUBTYP umgetragen) ließe sie sonst veralten,
+  // bis irgendein anderer Grund (z. B. eine Einstellung) zufällig einen Refresh
+  // auslöst. Das "change"-Event des Index feuert nur bei genau solchen
+  // Änderungen, nicht bei jedem Autosave-Tick. Trotzdem debounced, da das
+  // Rendern der Liste vergleichsweise teuer ist - resetTimer:true sammelt eine
+  // Änderungsserie (z. B. Bulk-Import) zu einem einzigen Refresh.
   const debouncedRefresh = debounce(refresh, 500, true);
-  plugin.registerEvent(plugin.app.metadataCache.on("changed", debouncedRefresh));
-  plugin.registerEvent(plugin.app.metadataCache.on("resolved", debouncedRefresh));
-  plugin.registerEvent(plugin.app.metadataCache.on("deleted", debouncedRefresh));
+  plugin.registerEvent(plugin.typIndex.on("change", debouncedRefresh));
   // Ändert die "Excluded files"-Liste selbst (z. B. Hide Folders beim Aus-/
   // Einblenden eines Ordners) - Obsidians eigener MetadataCache lauscht intern
   // ebenfalls genau auf dieses Event, um seine Ignore-Filter neu zu laden.
@@ -1170,8 +1251,7 @@ async function addTypPropertyCommand(plugin) {
   }
 
   const file = app.workspace.getActiveFile();
-  const value = file ? app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY] : null;
-  const type = String((Array.isArray(value) ? value[0] : value) ?? "").trim();
+  const type = plugin.typIndex.typeOf(file);
   if (!type) {
     new Notice("Aktive Notiz hat keinen TYP.");
     return;
@@ -1210,4 +1290,4 @@ async function addSubtypCommand(plugin) {
   view.subtypPane?.startAdd();
 }
 
-module.exports = { registerTypView, VIEW_TYPE_TYP, scanTypes, compareTypes, sortTypesByMode, DEFAULT_SORT_ORDER, DEFAULT_TYPE_COLOR };
+module.exports = { registerTypView, VIEW_TYPE_TYP, compareTypes, sortTypesByMode, DEFAULT_SORT_ORDER, DEFAULT_TYPE_COLOR };

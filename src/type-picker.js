@@ -1,5 +1,5 @@
 const { FuzzySuggestModal, Notice } = require("obsidian");
-const { DEFAULT_TYPE_COLOR, scanTypes, compareTypes, DEFAULT_SORT_ORDER } = require("./typ-view");
+const { DEFAULT_TYPE_COLOR, compareTypes, DEFAULT_SORT_ORDER } = require("./typ-view");
 
 // Nativer Ersatz für Templaters tp.system.suggester bei der TYP-Auswahl (siehe
 // _obsidian/templater-scripts/TYP.js): baut auf Obsidians eigenem
@@ -80,13 +80,15 @@ class TypPickerModal extends FuzzySuggestModal {
 // Nicht in plugin.settings.types registrierte TYPen, die aber tatsächlich in
 // Notizen vorkommen - analog zu den "unregistrierten" Zeilen der TYP-Liste
 // (siehe unregisteredRows in typ-view.js). Keine Beschreibung/Farbe, da für
-// sie nichts dergleichen gepflegt ist.
+// sie nichts dergleichen gepflegt ist. Listen und Werte mit Randleerzeichen
+// (siehe isCleanKey in typ-index.js) bleiben außen vor - der gewählte Wert
+// wird in eine neue Notiz geschrieben und soll dort kein Aufräumfall sein.
 function unregisteredItems(app, plugin) {
   const registered = new Set(plugin.settings.types);
-  const { counts } = scanTypes(app, { includeIgnored: plugin.settings.includeIgnoredFiles });
+  const { counts } = plugin.typIndex.typeCounts();
   const sortOrder = plugin.settings.typSortOrder ?? DEFAULT_SORT_ORDER;
   return [...counts.keys()]
-    .filter((type) => !registered.has(type))
+    .filter((type) => !registered.has(type) && plugin.typIndex.isCleanKey(type))
     .sort((a, b) => compareTypes(sortOrder, a, b, counts, plugin.settings.typeColors))
     .map((type) => ({ type, description: "", count: counts.get(type) ?? 0, unregistered: true }));
 }

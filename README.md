@@ -8,7 +8,10 @@ Notiz-Typ-System für diesen Vault: eine eigene, links andockende **TYP-Pane** (
 - Typen, die zwar in Notizen vorkommen aber noch nicht erfasst sind, erscheinen blass unterhalb einer Trennlinie
 - `[KEIN TYP]` zeigt die Anzahl Notizen ganz ohne `TYP`-Property
 - **Registrierter Typ:** Linksklick öffnet die Detailansicht, Rechtsklick öffnet die Suche (`["TYP":"…"]`)
-- **Unregistrierter Typ:** Linksklick übernimmt ihn in die Liste – dabei automatisch in Großbuchstaben normalisiert, und der TYP-Wert aller betroffenen Notizen (auch bei Mehrfach-TYP/Array-Werten) gleich mit umgeschrieben, damit sie nicht weiterhin als „nicht registriert“ auftauchen. Rechtsklick öffnet die Suche
+- **Unregistrierter Typ:** Linksklick übernimmt ihn in die Liste – dabei automatisch bereinigt (getrimmt, Großbuchstaben), und der TYP-Wert aller betroffenen Notizen gleich mit umgeschrieben, damit sie nicht weiterhin als „nicht registriert“ auftauchen. Rechtsklick öffnet die Suche
+- **TYP ist immer genau ein sauberer Wert.** Unsaubere Werte werden in Rohform als eigener unregistrierter Eintrag gelistet, statt stillschweigend einem registrierten Typ zugeschlagen zu werden – sie bekommen auch keine Farbe:
+  - Randleerzeichen erscheinen in Anführungszeichen (`" BUCH"`), Klick → `BUCH`
+  - Listen erscheinen mit Klammern (`[PERSON, BUCH]`), Klick → neuer Typ `PERSON, BUCH` als Einzelwert; per Umbenennen lässt er sich danach in einen bestehenden Typ überführen (s. „Zusammenlegen“)
 - **`[KEIN TYP]`:** Links- und Rechtsklick öffnen beide die Suche
 - Rechtsklick auf freie Fläche bzw. „+“-Button im Header: **Neuen Typ hinzufügen** – neuer Eintrag wird sofort inline umbenannt (kein Modal, kein Eingabefeld – nutzt denselben Mechanismus wie Obsidians eigene Umbenennungen), Name wird automatisch in Großbuchstaben normalisiert
 - Jeder Typ hat einen anklickbaren Farbpunkt (nativer Farbwähler)
@@ -19,6 +22,7 @@ Notiz-Typ-System für diesen Vault: eine eigene, links andockende **TYP-Pane** (
 Per Klick auf einen registrierten Typ:
 
 - **Zwei Umbenennen-Buttons** nebeneinander: der normale (Bleistift) ändert nur die Plugin-Einstellungen (Farbe, Beschreibung, Standard-Frontmatter etc.); der davor hervorgehobene (Akzentfarbe, ebenfalls Bleistift) schreibt zusätzlich den TYP-Wert **aller betroffenen Notizen** um – vor dem Speichern erscheint dafür ein Bestätigungs-Modal mit der Anzahl betroffener Notizen
+- **Zusammenlegen:** Umbenennen auf den Namen eines bereits registrierten Typs (egal über welchen der beiden Buttons) fragt, ob beide zusammengelegt werden sollen. Dabei werden die Notizen auf den Zieltyp umgeschrieben; Farbe, Beschreibung und Standard-Frontmatter des Quelltyps entfallen, seine SUBTYPen (samt Beschreibungen, sofern das Ziel keine eigene hat) werden übernommen
 - **Löschen**-Button mit Bestätigungs-Modal
 - In beiden Bestätigungs-Modalen wird der TYP-Name je nach Einstellung *TYP View einfärben* farbig oder mit vorangestelltem Farbpunkt dargestellt
 - Notiz-Anzahl direkt neben dem Namen (muted)
@@ -70,6 +74,7 @@ Die vergebenen Typ-Farben werden automatisch übernommen in:
 - **Backlinks** – sowohl das Backlinks-Pane in der Seitenleiste als auch die im Dokument eingebetteten Backlinks (inkl. nicht verlinkter Erwähnungen)
 - **Bookmarks** – Einträge, die direkt auf eine Notiz zeigen (Ordner-/Such-/Gruppen-Bookmarks bleiben unverändert)
 - **TYP-Pane selbst** (Liste und Detailansicht)
+- **Links in Notizen** – interne Links (`[[…]]`, auch mit Alias) in der Farbe des Typs ihres Ziels, im Lese-Modus, in Live Preview/Quelltext und in der Hover-Vorschau. Nicht aufgelöste Links und Einbettungen (`![[…]]`) bleiben unverändert
 - **All Properties** – Property-Namen, die im Standard-Frontmatter genau eines Typs vorkommen, in dessen Farbe (zusätzlich kursiv, falls dort als Floating Property markiert); kommen sie bei mehreren Typen vor, stattdessen fett
 
 Jede Ansicht lässt sich einzeln ein-/ausschalten. Zusätzlich lässt sich unabhängig davon eine eigene **Tag-Farbe** sowie eine **Anhänge-Farbe** für entsprechende Knoten im Graph aktivieren.
@@ -90,5 +95,6 @@ Das Plugin selbst enthält keine Templater-Logik, stellt aber eine kleine API au
 - `src/` ist die Quelle, `main.js` das über esbuild gebaute Bundle (`npm run dev` für Watch-Modus, `node esbuild.config.mjs production` für einen einmaligen Build)
 - Die Graph-Einfärbung patcht `renderer.setData` zur Laufzeit (keine offizielle Obsidian-API dafür) – ähnlich wie es das Community-Plugin *graph-nested-tags* für Tag-Hierarchien tut
 - Die TYP-Pane hält sich beim Hot-Reload (z. B. über das Hot-Reload-Plugin) selbst offen, da Obsidian eigene Views beim Plugin-Unload nicht automatisch wiederherstellt
-- Die TYP-Pane lauscht (debounced) auf `metadataCache`-Events (`changed`, `resolved`, `deleted`) sowie `vault`-Event `config-changed`, damit Zähler nach Notiz-Änderungen oder einer geänderten Excluded-Files-Liste automatisch nachziehen, auch ohne dass die View aktiv neu geöffnet wird
+- **TYP-Index** (`src/typ-index.js`): hält TYP und SUBTYP aller Notizen im Speicher und meldet per eigenem `change`-Event nur tatsächliche TYP-/SUBTYP-Änderungen (bzw. neue/gelöschte/umbenannte Notizen). Alle Einfärbungen und die TYP-Pane hängen an diesem Event statt direkt an `metadataCache` – normales Schreiben in einer Notiz löst damit kein Neu-Einfärben aus. Die Zählungen (TYP-Pane, Picker, `getTypes()`) werden dort zwischengespeichert. Zusätzlich lauscht die TYP-Pane auf das `vault`-Event `config-changed` (geänderte Excluded-Files-Liste)
+- **Link-Einfärbung** (`src/link-colors.js`): überschreibt je Link nur `--link-color`/`--link-color-hover`. Im Lese-Modus per Markdown-Post-Processor, in Live Preview per CodeMirror-ViewPlugin, der nur den sichtbaren Bereich betrachtet (Links in Code-Blöcken werden über den Syntaxbaum ausgeschlossen). `@codemirror/*` ist deshalb in `esbuild.config.mjs` als extern markiert
 - Der Standard-Frontmatter-Editor je Typ nutzt Obsidians eigenes (undokumentiertes) Property-Editor-Widget, gebunden an ein Plain-Object statt an eine echte Datei. Die globale Property-Reihenfolge baut dagegen bewusst eine eigene, schlichte Liste statt desselben Widgets – für die nicht entfernbaren, aber verschiebbaren Platzhalter-Zeilen wäre ein erneutes `synchronize()` aus dessen `saveFrontmatter`-Callback heraus nötig, was nachweislich zu einem Stack Overflow führen kann

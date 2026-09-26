@@ -1,8 +1,8 @@
 const { Notice, setIcon } = require("obsidian");
 const { normalizeTypeName, compareTypes } = require("./type-utils");
+const { typeKeyOf, TYP_PROPERTY } = require("./typ-index");
 
 const SUBTYP_PROPERTY = "SUBTYP";
-const TYP_PROPERTY = "TYP";
 // SUBTYPen haben (anders als TYPen) keine eigene Farbe - sortiert wird daher
 // immer nach Häufigkeit, ohne Auswahlmenü wie bei der TYP-Liste.
 const SORT_MODE = "count-desc";
@@ -41,47 +41,6 @@ function ensureSubtypeDescriptions(plugin, typ) {
   return plugin.settings.subtypeDescriptions[typ];
 }
 
-// Scannt das gesamte Vault nach SUBTYP-Werten, gruppiert je TYP - eine Notiz
-// ohne TYP hat konzeptionell auch keinen SUBTYP-Kontext und wird ignoriert,
-// SUBTYP setzt immer einen TYP voraus (siehe addSubtypCommand in typ-view.js).
-// Mehrfach-TYP bzw. Mehrfach-SUBTYP (Array-Werte) werden wie bei scanTypes()
-// (typ-view.js) als Kreuzprodukt gezählt: eine Notiz mit zwei TYPen und einem
-// SUBTYP zählt für beide TYP-Buckets.
-function scanSubtypes(app, { includeIgnored = false } = {}) {
-  const byType = new Map();
-  const ensureBucket = (typ) => {
-    let bucket = byType.get(typ);
-    if (!bucket) {
-      bucket = { counts: new Map(), noSubtype: 0 };
-      byType.set(typ, bucket);
-    }
-    return bucket;
-  };
-
-  for (const file of app.vault.getMarkdownFiles()) {
-    if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
-
-    const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
-    const typValue = frontmatter?.[TYP_PROPERTY];
-    if (!typValue || (Array.isArray(typValue) && typValue.length === 0)) continue;
-
-    const subValue = frontmatter?.[SUBTYP_PROPERTY];
-    const subList =
-      subValue == null || (Array.isArray(subValue) && subValue.length === 0)
-        ? []
-        : (Array.isArray(subValue) ? subValue : [subValue]).map((v) => String(v).trim()).filter(Boolean);
-
-    for (const rawTyp of Array.isArray(typValue) ? typValue : [typValue]) {
-      const typ = String(rawTyp).trim();
-      if (!typ) continue;
-      const bucket = ensureBucket(typ);
-      if (subList.length === 0) bucket.noSubtype++;
-      else for (const sub of subList) bucket.counts.set(sub, (bucket.counts.get(sub) ?? 0) + 1);
-    }
-  }
-  return byType;
-}
-
 // Analog zu renameTypeInNotes() (typ-view.js), aber zusätzlich auf Notizen mit
 // passendem TYP eingegrenzt - derselbe SUBTYP-Text unter einem anderen TYP
 // bleibt unangetastet.
@@ -91,9 +50,7 @@ async function renameSubtypeInNotes(app, typ, oldValue, newValue, { includeIgnor
     if (!includeIgnored && app.metadataCache.isUserIgnored(file.path)) continue;
 
     const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
-    const typValue = frontmatter?.[TYP_PROPERTY];
-    const typMatches = Array.isArray(typValue) ? typValue.includes(typ) : typValue === typ;
-    if (!typMatches) continue;
+    if (typeKeyOf(frontmatter?.[TYP_PROPERTY]) !== typ) continue;
 
     const subValue = frontmatter?.[SUBTYP_PROPERTY];
     const subMatches = Array.isArray(subValue) ? subValue.includes(oldValue) : subValue === oldValue;
@@ -167,7 +124,7 @@ class SubtypPane {
     this.listEl = containerEl.createDiv({ cls: "fred-typ-list nav-files-container" });
     this.separatorEl = null;
 
-    const byType = scanSubtypes(this.app, { includeIgnored: this.plugin.settings.includeIgnoredFiles });
+    const byType = this.plugin.typIndex.subtypeCounts();
 
     if (activeType) this.renderFilteredList(activeType, byType.get(activeType) ?? { counts: new Map(), noSubtype: 0 });
     else this.renderUnfilteredList(byType);
@@ -361,4 +318,4 @@ class SubtypPane {
   }
 }
 
-module.exports = { SubtypPane, scanSubtypes, SUBTYP_PROPERTY };
+module.exports = { SubtypPane, SUBTYP_PROPERTY };

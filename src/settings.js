@@ -65,6 +65,7 @@ const DEFAULT_SETTINGS = {
     typList: true,
     allProperties: true,
     noteTitleColor: true,
+    links: true,
   },
 };
 
@@ -123,6 +124,11 @@ class TypSystemSettingTab extends PluginSettingTab {
     colorViewToggle("graph", "Graph", "Knoten im Graph (global und lokal) nach TYP einfärben.");
     colorViewToggle("search", "Suche", "Treffer-Titel in der Suche nach TYP einfärben.");
     colorViewToggle("recentFiles", "Recent Files", "Einträge im Recent-Files-Plugin nach TYP einfärben.");
+    colorViewToggle(
+      "links",
+      "Links in Notizen",
+      "Interne Links im Notiztext (Lese-Modus, Live Preview, Hover-Vorschau) in der Farbe des TYPs ihres Ziels darstellen. Nicht aufgelöste Links bleiben unverändert."
+    );
     colorViewToggle("typList", "TYP View", "Typ-Namen in der TYP-View selbst (Liste und Detailansicht) in ihrer jeweiligen Farbe darstellen.");
     colorViewToggle(
       "noteTitleColor",

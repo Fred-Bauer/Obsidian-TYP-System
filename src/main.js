@@ -1,7 +1,8 @@
 const { Plugin } = require("obsidian");
 const { DEFAULT_SETTINGS, TypSystemSettingTab } = require("./settings");
 const { registerCommands } = require("./commands");
-const { registerTypView, scanTypes, sortTypesByMode, DEFAULT_SORT_ORDER } = require("./typ-view");
+const { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require("./typ-view");
+const { TypIndex } = require("./typ-index");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
 const { registerSearchColors } = require("./search-colors");
@@ -9,6 +10,7 @@ const { registerRecentFilesColors } = require("./recent-files-colors");
 const { registerBacklinkColors } = require("./backlink-colors");
 const { registerBookmarksColors } = require("./bookmark-colors");
 const { registerActiveTitleColors } = require("./active-title-colors");
+const { registerLinkColors } = require("./link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { normalizeGlobalOrder } = require("./frontmatter-sort");
 const { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require("./frontmatter-placeholders");
@@ -34,6 +36,12 @@ function migrateFloatingFrontmatter(settings) {
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
+
+    // Vor allen übrigen Modulen: die registrieren sich auf dessen "change"-
+    // Event und lesen TYP/SUBTYP ausschließlich darüber (siehe typ-index.js).
+    this.typIndex = new TypIndex(this);
+    this.typIndex.register();
+
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
 
@@ -54,6 +62,7 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerBacklinkColors(this),
       registerBookmarksColors(this),
       registerActiveTitleColors(this),
+      registerLinkColors(this),
       this.refreshFrontmatterHighlight,
     ];
     this.refreshTypColors = () => refreshFns.forEach((fn) => fn());
@@ -110,7 +119,7 @@ module.exports = class TypSystemPlugin extends Plugin {
   // Notiz) und werden deshalb standardmäßig ausgeklammert - Aufrufer, die
   // trotzdem alle TYPen brauchen, übergeben includeManualOff: true.
   getTypes({ includeManualOff = false } = {}) {
-    const { counts } = scanTypes(this.app, { includeIgnored: this.settings.includeIgnoredFiles });
+    const { counts } = this.typIndex.typeCounts();
     const sortOrder = this.settings.typSortOrder ?? DEFAULT_SORT_ORDER;
     return sortTypesByMode(this.settings.types, sortOrder, counts, this.settings.typeColors)
       .filter((type) => includeManualOff || (this.settings.typeManual ?? {})[type] !== false)
@@ -132,6 +141,10 @@ module.exports = class TypSystemPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Object.assign ersetzt verschachtelte Objekte als Ganzes - später
+    // hinzugekommene Ansichten (z. B. colorViews.links) fehlten in bereits
+    // gespeicherten Einstellungen sonst und wären stillschweigend aus.
+    this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };
     // Migriert Bestandsinstallationen, deren globalPropertyOrder noch aus der
     // Zeit vor "TYP als Listeneintrag" stammt (siehe frontmatter-sort.js).
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);

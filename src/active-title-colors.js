@@ -1,5 +1,5 @@
 const { TFile } = require("obsidian");
-const { TYP_PROPERTY, colorForFile } = require("./type-colors");
+const { colorForFile } = require("./type-colors");
 
 const DOT_CLASS = "fred-typ-title-dot";
 const BADGE_CLASS = "fred-typ-title-badge";
@@ -11,17 +11,6 @@ const BLOCK_BADGE_PLAIN_CLASS = "fred-typ-block-badge-plain";
 const BLOCK_ALIGN_TOP_CLASS = "fred-typ-block-badge-top";
 const BLOCK_ALIGN_BOTTOM_CLASS = "fred-typ-block-badge-bottom";
 const BLOCK_COLOR_VAR = "--fred-typ-block-color";
-
-// Für die Box-Varianten: derselbe Wert wie colorForFile() ihn zur Farbsuche
-// verwendet, hier aber der Name selbst statt der Farbe (siehe ähnliche
-// Duplizierung an mehreren Stellen im Plugin - jeweils zu klein/lokal, um
-// eine gemeinsame Hilfsfunktion zu rechtfertigen).
-function typeNameForFile(plugin, file) {
-  if (!file || file.extension !== "md") return null;
-  const value = plugin.app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-  if (!value) return null;
-  return String(Array.isArray(value) ? value[0] : value).trim() || null;
-}
 
 // noteTitleStyle: "none" | "dot" | "badge". Bei "badge" bestimmen zwei
 // weitere Einstellungen Farbe (noteTitleBadgeColored) und Position
@@ -39,7 +28,7 @@ function resolveMarker(plugin, file) {
   // style === "badge"
   const colored = plugin.settings.noteTitleBadgeColored;
   const color = colored ? colorForFile(plugin, file) : null;
-  const typeName = colored ? (color ? typeNameForFile(plugin, file) : null) : typeNameForFile(plugin, file);
+  const typeName = colored ? (color ? plugin.typIndex.typeOf(file) : null) : plugin.typIndex.typeOf(file);
   if (!typeName) return { kind: "none" };
 
   const position = plugin.settings.noteTitleBadgePosition;
@@ -121,8 +110,7 @@ function applyActiveTitleColors(plugin) {
 function registerActiveTitleColors(plugin) {
   const refresh = () => applyActiveTitleColors(plugin);
 
-  plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-  plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+  plugin.registerEvent(plugin.typIndex.on("change", refresh));
   plugin.registerEvent(plugin.app.workspace.on("file-open", refresh));
   plugin.registerEvent(plugin.app.workspace.on("active-leaf-change", refresh));
   plugin.registerEvent(plugin.app.workspace.on("layout-change", refresh));

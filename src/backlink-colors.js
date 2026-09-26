@@ -71,8 +71,9 @@ function registerBacklinkColors(plugin) {
   // Backlinks im Dokument brauchen dafür keinen eigenen Observer: sie ändern
   // sich nur, wenn irgendwo im Vault Links hinzukommen/wegfallen oder beim
   // Öffnen/Wechseln einer Notiz - beides ist über die Events unten bereits
-  // abgedeckt (metadataCache/layout-change/active-leaf-change lösen ohnehin
-  // applyBacklinkColors() und damit auch applyEmbeddedBacklinkColors() aus).
+  // abgedeckt ("resolved" nach jeder Link-Auflösung, layout-change/
+  // active-leaf-change lösen ohnehin applyBacklinkColors() und damit auch
+  // applyEmbeddedBacklinkColors() aus).
   const observer = new MutationObserver(refresh);
   const observeLeaves = () => {
     for (const leaf of plugin.app.workspace.getLeavesOfType(BACKLINK_VIEW_TYPE)) {
@@ -81,8 +82,10 @@ function registerBacklinkColors(plugin) {
   };
   plugin.register(() => observer.disconnect());
 
-  plugin.registerEvent(plugin.app.metadataCache.on("changed", refresh));
-  plugin.registerEvent(plugin.app.metadataCache.on("resolved", refresh));
+  plugin.registerEvent(plugin.typIndex.on("change", refresh));
+  // Nur der eingebettete Teil hängt (mangels eigenem Observer, siehe oben)
+  // weiterhin an der Link-Auflösung - die Seitenleiste deckt ihr Observer ab.
+  plugin.registerEvent(plugin.app.metadataCache.on("resolved", () => applyEmbeddedBacklinkColors(plugin)));
   plugin.registerEvent(
     plugin.app.workspace.on("layout-change", () => {
       observeLeaves();

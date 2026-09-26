@@ -67,6 +67,9 @@ function registerGraphColors(plugin) {
   };
 
   plugin.registerEvent(plugin.app.workspace.on("layout-change", refresh));
+  // Nur bei tatsächlich geändertem TYP (siehe typ-index.js) - sonst zeigte der
+  // Graph eine umgetragene Farbe erst nach dem nächsten eigenen Neuaufbau.
+  plugin.registerEvent(plugin.typIndex.on("change", refresh));
   plugin.app.workspace.onLayoutReady(refresh);
 
   return refresh;

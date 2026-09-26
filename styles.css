@@ -839,3 +839,17 @@
   color: var(--text-faint);
   font-weight: 400;
 }
+
+/* Links in Notizen (siehe link-colors.js), nur Live Preview/Quelltext: die
+   Markierung liegt dort INNERHALB von Obsidians ".cm-hmd-internal-link" und
+   trägt die TYP-Farbe als --link-color. Beim Überfahren des Links wieder die
+   normale Hover-Farbe (--link-color-hover wird nicht überschrieben, erbt also
+   den Standardwert). Im Lese-Modus braucht es keine eigene Regel - dort sitzt
+   --link-color direkt auf dem <a>, dessen eigene Regeln das schon so machen. */
+.cm-hmd-internal-link .fred-typ-link {
+  color: var(--link-color);
+}
+
+.cm-hmd-internal-link:hover .fred-typ-link {
+  color: var(--link-color-hover);
+}

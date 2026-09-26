@@ -47,16 +47,6 @@ function normalizeGlobalOrder(order) {
  * Werte - reine Umsortierung der bereits vorhandenen Zeilen.
  * ============================================================ */
 
-// Mehrfach-TYP (Array) kommt in scanTypes() ebenso vor wie in
-// frontmatter-default-highlight.js - dort wie hier zählt für die Sortierung
-// einheitlich nur der erste Wert.
-function typeForFile(app, file) {
-  const value = app.metadataCache.getFileCache(file)?.frontmatter?.[TYP_PROPERTY];
-  if (!value || (Array.isArray(value) && value.length === 0)) return null;
-  const type = String(Array.isArray(value) ? value[0] : value).trim();
-  return type || null;
-}
-
 // Standard-Property-Reihenfolge eines Typs, inkl. der darin als "Floating
 // Property" markierten Keys (siehe typeFloatingKeys in settings.js) an genau
 // der Stelle, an der sie in der Liste stehen - ohne TYP selbst (das ist dort
@@ -185,7 +175,9 @@ async function sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys) {
 // Sortiert eine einzelne, bereits bekannte Notiz (z. B. die aktive Datei).
 async function sortSingleFileFrontmatter(app, plugin, file) {
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
-  const type = typeForFile(app, file);
+  // Unsaubere TYP-Werte (Liste, Randleerzeichen) haben keine Standardliste -
+  // dann greift nur die globale Reihenfolge (siehe typeKeyOf in typ-index.js).
+  const type = plugin.typIndex.typeOf(file);
   const typeDefaultKeys = orderedDefaultKeys(plugin, type);
   return sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys);
 }
@@ -209,7 +201,7 @@ async function sortAllFrontmatter(app, plugin, onlyType) {
   for (const file of app.vault.getMarkdownFiles()) {
     if (!plugin.settings.includeIgnoredFiles && app.metadataCache.isUserIgnored(file.path)) continue;
 
-    const type = typeForFile(app, file);
+    const type = plugin.typIndex.typeOf(file);
     if (onlyType && type !== onlyType) continue;
 
     const typeDefaultKeys = orderedDefaultKeys(plugin, type);

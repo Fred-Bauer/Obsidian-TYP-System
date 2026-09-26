@@ -1,3 +1,5 @@
+const { getSubtypeNames, getSubtype } = require("./subtypes");
+
 const TYP_PROPERTY = "TYP";
 const TYP_VIEW_TYPE = "fred-typ-view";
 const ALL_PROPERTIES_VIEW_TYPE = "all-properties";
@@ -18,48 +20,88 @@ function rawKeysForType(type, defaults) {
   return keys.length > 0 ? keys.map((key) => key.toLowerCase()) : null;
 }
 
-function floatingKeySet(plugin, type) {
-  return new Set((plugin.settings.typeFloatingKeys[type] ?? []).map((key) => key.toLowerCase()));
+// Frontmatter-Blöcke eines TYPs als Liste von { keys, floating } (jeweils
+// lowercase): zuerst das Standard-Frontmatter des TYPs, danach - falls
+// gewünscht - der Block eines bestimmten Subtyps (subtype) bzw. aller seiner
+// Subtypen (subtype === ALL_SUBTYPES), siehe subtypes.js.
+const ALL_SUBTYPES = Symbol("all-subtypes");
+
+function blockOf(defaults, floatingKeys) {
+  const keys = rawKeysForType(true, defaults) ?? [];
+  return { keys, floating: new Set((floatingKeys ?? []).map((key) => key.toLowerCase())) };
+}
+
+function blocksForType(plugin, type, subtype) {
+  const { settings } = plugin;
+  const blocks = [blockOf(settings.typeDefaultFrontmatter[type], settings.typeFloatingKeys[type])];
+  const subtypeNames = subtype === ALL_SUBTYPES ? getSubtypeNames(settings, type) : subtype ? [subtype] : [];
+  for (const name of subtypeNames) {
+    const data = getSubtype(settings, type, name);
+    if (data) blocks.push(blockOf(data.frontmatter, data.floatingKeys));
+  }
+  return blocks;
 }
 
 // Liefert getrennte Sets für fett darzustellende ("standard") und kursiv
-// darzustellende ("floating") Property-Namen (jeweils lowercase) - beide
-// stammen aus derselben typeDefaultFrontmatter-Liste, Floating-markierte Keys
-// zählen dabei nur zu "floating", nie zusätzlich zu "standard".
-function keysForType(plugin, type) {
-  if (!plugin.settings.colorViews.frontmatterDefaults) return { standard: null, floating: null };
-  if (!type) return { standard: null, floating: null };
-  const allKeys = rawKeysForType(type, plugin.settings.typeDefaultFrontmatter[type]);
-  if (!allKeys) return { standard: null, floating: null };
-  const floating = floatingKeySet(plugin, type);
-  const standardKeys = allKeys.filter((key) => !floating.has(key));
-  const floatingKeys = allKeys.filter((key) => floating.has(key));
-  return {
-    standard: standardKeys.length > 0 ? new Set(standardKeys) : null,
-    floating: floatingKeys.length > 0 ? new Set(floatingKeys) : null,
-  };
+// darzustellende ("floating") Property-Namen (jeweils lowercase) aus den
+// übergebenen Blöcken - Floating-markierte Keys zählen dabei nur zu
+// "floating", nie zusätzlich zu "standard". Kommt ein Key in mehreren Blöcken
+// vor (Subtyp überschreibt TYP), gilt die Markierung des späteren Blocks.
+function splitKeys(blocks) {
+  const isFloating = new Map();
+  for (const { keys, floating } of blocks) {
+    for (const key of keys) isFloating.set(key, floating.has(key));
+  }
+  const standard = new Set();
+  const floating = new Set();
+  for (const [key, flag] of isFloating) (flag ? floating : standard).add(key);
+  return { standard: standard.size > 0 ? standard : null, floating: floating.size > 0 ? floating : null };
 }
+
+const NO_KEYS = { standard: null, floating: null };
 
 function keysForFile(plugin, file) {
-  return keysForType(plugin, plugin.typIndex.typeOf(file));
+  const { colorViews } = plugin.settings;
+  if (!colorViews.frontmatterDefaults) return NO_KEYS;
+  const type = plugin.typIndex.typeOf(file);
+  if (!type) return NO_KEYS;
+  const subtype = colorViews.frontmatterDefaultsSubtyp ? plugin.typIndex.subtypeOf(file) : null;
+  return splitKeys(blocksForType(plugin, type, subtype));
 }
 
-// Property-Name (lowercase) -> Set der Typen, in deren Standard-Frontmatter
-// er vorkommt. Die "All Properties"-Ansicht ist vault-weit und kennt keinen
+// Einzelner Block im Editor der TYP-Detailansicht (TYP selbst oder einer
+// seiner Subtypen, siehe typeStore/subtypeStore in type-frontmatter-editor.js).
+function keysForStore(plugin, store) {
+  const { colorViews } = plugin.settings;
+  if (!colorViews.frontmatterDefaults || !store) return NO_KEYS;
+  if (store.subtype && !colorViews.frontmatterDefaultsSubtyp) return NO_KEYS;
+  return splitKeys([blockOf(store.getFrontmatter(), store.getFloating())]);
+}
+
+// Property-Name (lowercase) -> Map(TYP -> nur als Floating markiert?) über
+// alle Typen, in deren Frontmatter (ggf. inkl. ihrer Subtyp-Blöcke) er
+// vorkommt. Die "All Properties"-Ansicht ist vault-weit und kennt keinen
 // einzelnen TYP-Kontext - daher hier statt eines einzelnen Fett-Flags gleich
 // die vollständige Zuordnung sammeln, damit applyToAllPropertiesView zwischen
 // "genau ein Typ" (einfärben) und "mehrere Typen" (fett) unterscheiden kann.
 // Eigener Schalter (colorViews.allProperties), unabhängig von
-// colorViews.frontmatterDefaults.
+// colorViews.frontmatterDefaults. Eine Subtyp-Property zählt für ihren TYP.
 function typesUsingKeyMap(plugin) {
   const map = new Map();
-  if (!plugin.settings.colorViews.allProperties) return map;
-  for (const [type, defaults] of Object.entries(plugin.settings.typeDefaultFrontmatter)) {
-    const keys = rawKeysForType(type, defaults);
-    if (!keys) continue;
-    for (const key of keys) {
-      if (!map.has(key)) map.set(key, new Set());
-      map.get(key).add(type);
+  const { colorViews } = plugin.settings;
+  if (!colorViews.allProperties) return map;
+  const types = new Set([
+    ...Object.keys(plugin.settings.typeDefaultFrontmatter),
+    ...(colorViews.allPropertiesSubtyp ? Object.keys(plugin.settings.typeSubtypes ?? {}) : []),
+  ]);
+  for (const type of types) {
+    const blocks = blocksForType(plugin, type, colorViews.allPropertiesSubtyp ? ALL_SUBTYPES : null);
+    for (const { keys, floating } of blocks) {
+      for (const key of keys) {
+        if (!map.has(key)) map.set(key, new Map());
+        const byType = map.get(key);
+        byType.set(type, (byType.get(type) ?? true) && floating.has(key));
+      }
     }
   }
   return map;
@@ -105,12 +147,13 @@ function applyToAllPropertiesView(plugin) {
       titleEl.classList.toggle(HIGHLIGHT_CLASS, count > 1);
 
       // Kursiv nur, wenn eindeutig genau ein TYP die Property nutzt UND sie
-      // dort als Floating markiert ist - bei mehreren TYPs (Fett-Fall) wäre
-      // nicht klar, wessen Floating-Markierung gemeint ist.
+      // dort überall (TYP- wie Subtyp-Blöcke) als Floating markiert ist - bei
+      // mehreren TYPs (Fett-Fall) wäre nicht klar, wessen Floating-Markierung
+      // gemeint ist.
       let isFloating = false;
       if (count === 1) {
-        const [onlyType] = types;
-        isFloating = floatingKeySet(plugin, onlyType).has(key.toLowerCase());
+        const [[onlyType, onlyFloating]] = types;
+        isFloating = onlyFloating;
         const color = plugin.settings.typeColors[onlyType];
         // !important via setProperty, da die Fett-Regel für .fred-typ-default-
         // property in styles.css ebenfalls !important color setzt und ein
@@ -143,14 +186,16 @@ function applyFrontmatterDefaultHighlight(plugin) {
     applyToContainer(view?.metadataEditor?.containerEl, standard, floating);
   }
 
-  // TYP-Detailansicht des Plugins selbst: dort zeigt der Editor direkt das
-  // Standard-Frontmatter des gerade ausgewählten Typs, entspricht also 1:1
-  // den "Standard"- bzw. "Floating"-Properties (view.selectedType/
-  // .frontmatterEditor kommen aus typ-view.js).
+  // TYP-Detailansicht des Plugins selbst: dort zeigt jeder Editor direkt einen
+  // Frontmatter-Block (TYP bzw. Subtyp), entspricht also 1:1 dessen
+  // "Standard"- bzw. "Floating"-Properties (view.frontmatterEditors kommt aus
+  // typ-view.js, editor.owner.fredStore aus type-frontmatter-editor.js).
   for (const leaf of plugin.app.workspace.getLeavesOfType(TYP_VIEW_TYPE)) {
-    const view = leaf.view;
-    const { standard, floating } = keysForType(plugin, view?.selectedType);
-    applyToContainer(view?.frontmatterEditor?.containerEl, standard, floating);
+    for (const editor of leaf.view?.frontmatterEditors ?? []) {
+      const { standard, floating } = keysForStore(plugin, editor.owner?.fredStore);
+      applyToContainer(editor.containerEl, standard, floating);
+    }
+    leaf.view?.markOverriddenProperties?.();
   }
 
   applyToAllPropertiesView(plugin);

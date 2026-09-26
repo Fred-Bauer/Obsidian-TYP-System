@@ -7,9 +7,7 @@
 
 /* Blendet TYP und SUBTYP als eigene Zeile im Property-Block der Notiz aus -
    ihr Wert ist ohnehin immer der (SUB-)TYP-Name selbst (siehe stripTypProperty
-   in type-frontmatter-editor.js für TYP; SUBTYP hat noch keinen eigenen
-   Frontmatter-Editor, aber dieselbe Redundanz zur ohnehin sichtbaren
-   TYP/SUBTYP-Zugehörigkeit gilt genauso). Betrifft nicht die "Properties"-
+   in type-frontmatter-editor.js). Betrifft nicht die "Properties"-
    Seitenleiste (data-type="file-properties") oder die TYP-Detailansicht
    dieses Plugins (data-type="fred-typ-view") - dort bleiben beide normale,
    editierbare Zeilen. Case-insensitiv, da Obsidian den data-property-key
@@ -43,6 +41,17 @@
 .fred-note-title-toggle-label {
   font-size: var(--font-ui-small);
   color: var(--text-muted);
+}
+
+/* Eintrag mit dem globalen Order-Editor in der Gruppe "Standard-Frontmatter"
+   (siehe settings.js) - hat kein Control, infoEl soll daher die volle Breite
+   nutzen statt Obsidians Abstand zum (hier leeren) Control-Bereich. */
+.fred-order-setting > .setting-item-info {
+  margin-inline-end: 0;
+}
+
+.fred-order-setting .setting-item-info > .setting-item-description {
+  margin-top: var(--size-4-2);
 }
 
 .fred-typ-separator {
@@ -490,6 +499,83 @@
 
 .fred-typ-frontmatter-add-floating:hover {
   color: var(--interactive-accent-hover);
+}
+
+/* Frontmatter-Blöcke der Detailansicht (Standard-Frontmatter und je Subtyp,
+   siehe renderFrontmatterBlock in typ-view.js) - im Stil der Gruppen in
+   Obsidians eigenen Einstellungen (.setting-group .setting-items): Rundung
+   und Rahmen von dort. Die Fläche aber nicht --setting-items-background -
+   das entspricht z. B. im Minimal-Theme genau dem Seitenleisten-Hintergrund
+   und wäre hier unsichtbar -, sondern --background-primary, das sich in
+   praktisch jedem Theme von der Seitenleiste (--background-secondary) abhebt.
+   Seitlicher Innenabstand bewusst knapp: unter 250px Breite bricht Obsidians
+   Property-Widget Name und Wert auf zwei Zeilen um (@container metadata). */
+.fred-typ-frontmatter-block {
+  background-color: var(--background-primary);
+  border-radius: var(--setting-items-radius);
+  border: var(--setting-items-border-width) solid var(--setting-items-border-color);
+  padding: var(--size-4-2) var(--size-4-2);
+}
+
+/* Der Abstand unter dem Property-Block ist für Notizen gedacht (Abstand zum
+   Text darunter) - im Block selbst nur Leerraum. */
+.fred-typ-frontmatter-block .metadata-container {
+  margin-bottom: 0;
+}
+
+.fred-typ-frontmatter-block + .fred-typ-frontmatter-block {
+  margin-top: var(--size-4-3);
+}
+
+/* Trennt in der Detailansicht die Frontmatter-Blöcke von den übrigen
+   Einstellungen bzw. von der Platzhalter-Legende. */
+.fred-typ-detail-separator {
+  border-top: 1px solid var(--background-modifier-border);
+  margin: var(--size-4-4) 0;
+}
+
+.fred-typ-subtype-count {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-left: var(--size-4-1);
+}
+
+/* Name eines gerade neu angelegten Subtyps (siehe startAddSubtype). */
+.fred-typ-subtype-name-input {
+  min-width: 8em;
+  padding: 0 var(--size-4-1);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  outline: none;
+}
+
+/* Vom Block eines Subtyps überschriebene Zeile im Standard-Frontmatter des
+   TYPs - ganze Zeile samt Wert ausgegraut (siehe markOverriddenProperties). */
+.fred-typ-overridden-property {
+  opacity: 0.4;
+}
+
+.fred-typ-subtype-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--size-4-2);
+  width: 100%;
+  margin-top: var(--size-4-4);
+}
+
+.fred-typ-subtype-add-icon {
+  display: flex;
+}
+
+.fred-typ-subtype-add-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.fred-typ-subtype-unregistered-list {
+  margin-top: var(--size-4-2);
 }
 
 .fred-typ-frontmatter-unavailable {

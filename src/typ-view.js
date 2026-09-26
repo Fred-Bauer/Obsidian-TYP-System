@@ -1,8 +1,17 @@
 const { ItemView, Menu, Modal, Notice, setIcon, debounce } = require("obsidian");
-const { mountTypeFrontmatterEditor, addBlankProperty } = require("./type-frontmatter-editor");
+const { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore } = require("./type-frontmatter-editor");
+const {
+  getSubtypeNames,
+  getSubtype,
+  ensureSubtype,
+  moveTypeSubtypes,
+  deleteTypeSubtypes,
+  mergeTypeSubtypes,
+  renameSubtypeInNotes,
+} = require("./subtypes");
 const { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require("./frontmatter-placeholders");
 const { normalizeTypeName, compareTypes, sortTypesByMode } = require("./type-utils");
-const { typeKeyOf, TYP_PROPERTY } = require("./typ-index");
+const { typeKeyOf, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 
 const VIEW_TYPE_TYP = "fred-typ-view";
 const DEFAULT_TYPE_COLOR = "#888888";
@@ -184,7 +193,8 @@ class ConfirmMergeTypeModal extends ConfirmRenameTypeModal {
     contentEl.createEl("p", {
       text:
         `${this.affectedCount} Notiz(en) werden auf ${this.newType} umgestellt. ` +
-        `Farbe, Beschreibung und Standard-Frontmatter von ${this.oldType} entfallen.`,
+        `Farbe, Beschreibung und Standard-Frontmatter von ${this.oldType} entfallen, ` +
+        `seine Subtypen werden übernommen (gleichnamige Subtyp-Blöcke zusammengeführt).`,
     });
 
     const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
@@ -221,6 +231,7 @@ class TypView extends ItemView {
     this.isEditing = false;
     this.selectedType = null;
     this.frontmatterEditor = null;
+    this.frontmatterEditors = [];
 
     this.contentEl.empty();
     this.contentEl.addClass("fred-typ-view");
@@ -347,6 +358,7 @@ class TypView extends ItemView {
               this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
               delete this.plugin.settings.typeManual[type];
             }
+            moveTypeSubtypes(this.plugin.settings, type, value);
           }
           await this.plugin.saveSettings();
           this.plugin.refreshTypColors?.();
@@ -378,15 +390,17 @@ class TypView extends ItemView {
     this.render();
   }
 
-  // Wird als Component-Child geladen (siehe mountTypeFrontmatterEditor) und muss
+  // Wird als Component-Child geladen (siehe mountFrontmatterEditor) und muss
   // deshalb vor jedem Neuaufbau der Detail-Ansicht explizit entladen werden -
   // contentEl.empty() allein würde nur die DOM-Elemente entfernen, nicht aber
   // den darauf registrierten metadataTypeManager-Listener der Editor-Instanz.
+  // frontmatterEditor ist der Editor des TYP-Blocks (u. a. für den Befehl
+  // "Standard-Property hinzufügen"), frontmatterEditors alle Editoren der
+  // Detailansicht inkl. der Subtyp-Blöcke.
   destroyFrontmatterEditor() {
-    if (this.frontmatterEditor) {
-      this.removeChild(this.frontmatterEditor);
-      this.frontmatterEditor = null;
-    }
+    for (const editor of this.frontmatterEditors ?? []) this.removeChild(editor);
+    this.frontmatterEditors = [];
+    this.frontmatterEditor = null;
   }
 
   render() {
@@ -784,15 +798,74 @@ class TypView extends ItemView {
       await this.plugin.saveSettings();
     });
 
-    const sectionHeader = body.createDiv({ cls: "fred-typ-frontmatter-header" });
-    sectionHeader.createDiv({ cls: "fred-typ-detail-section-title", text: "Standard-Frontmatter" });
+    // Trennt die Frontmatter-Blöcke von den übrigen Einstellungen des TYPs.
+    body.createDiv({ cls: "fred-typ-detail-separator" });
+
+    // Die Anzahl am Standard-Frontmatter zählt die Notizen dieses TYPs ohne
+    // SUBTYP - für die gilt nur dieser Block. Rechtsklick sucht genau diese.
+    const bucket = this.plugin.typIndex.subtypeBucket(type);
+    this.frontmatterEditor = this.renderFrontmatterBlock(body, typeStore(this.plugin, type), "Standard-Frontmatter", {
+      count: bucket.noSubtype,
+      onContextMenu: () => this.openSubtypeSearch(type, null),
+    });
+
+    // Je registriertem Subtyp ein eigener Block darunter - ergänzt bzw.
+    // überschreibt das Standard-Frontmatter für Notizen mit diesem SUBTYP
+    // (siehe subtypes.js). Überschriebene Zeilen im TYP-Block werden
+    // ausgegraut, siehe markOverriddenProperties().
+    for (const subtype of getSubtypeNames(this.plugin.settings, type)) {
+      this.renderFrontmatterBlock(body, subtypeStore(this.plugin, type, subtype), subtype, {
+        count: bucket.counts.get(subtype) ?? 0,
+        onContextMenu: () => this.openSubtypeSearch(type, subtype),
+      });
+    }
+    this.markOverriddenProperties();
+
+    // Bewusst über die volle Breite und in Akzentfarbe, damit er sich von den
+    // kleinen Icon-Buttons der Blöcke abhebt.
+    this.subtypeAddBtnEl = body.createEl("button", { cls: "mod-cta fred-typ-subtype-add" });
+    setIcon(this.subtypeAddBtnEl.createSpan({ cls: "fred-typ-subtype-add-icon" }), "plus");
+    this.subtypeAddBtnEl.createSpan({ text: "Subtyp hinzufügen" });
+    this.subtypeAddBtnEl.addEventListener("click", () => this.startAddSubtype(type));
+
+    this.renderUnregisteredSubtypes(body, type, bucket);
+
+    body.createDiv({ cls: "fred-typ-detail-separator" });
+    this.renderPlaceholderList(body);
+    // Fett-Markierung (siehe frontmatter-default-highlight.js) reagiert nur auf
+    // Metadaten-/Layout-Events - das Öffnen dieser Detailansicht selbst löst
+    // keins davon aus, daher hier direkt nach dem Mounten anstoßen. Bewusst
+    // nur dieser eine, gezielte Refresh statt des vollen refreshTypColors()-
+    // Bündels: das würde u. a. auch render() auf diesem (gerade erst mitten
+    // im eigenen render()-Durchlauf befindlichen) View erneut auslösen.
+    this.plugin.refreshFrontmatterHighlight?.();
+  }
+
+  // Ein Frontmatter-Block der Detailansicht (TYP selbst oder ein Subtyp): Kopf
+  // mit Titel und den beiden "Property hinzufügen"-Buttons, darunter Obsidians
+  // Property-Editor, gebunden an store (siehe type-frontmatter-editor.js).
+  // count/onContextMenu: Notiz-Anzahl neben dem Titel, Suche per Rechtsklick
+  // auf den Titel.
+  renderFrontmatterBlock(parent, store, title, { count, onContextMenu } = {}) {
+    const block = parent.createDiv({ cls: "fred-typ-frontmatter-block" + (store.subtype ? " fred-typ-subtype-block" : "") });
+    const sectionHeader = block.createDiv({ cls: "fred-typ-frontmatter-header" });
+    const titleGroup = sectionHeader.createDiv({ cls: "fred-typ-frontmatter-title-group" });
+    const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: title });
+    if (count !== undefined) titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
+    if (onContextMenu) {
+      titleEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        onContextMenu();
+      });
+    }
 
     // Beide Buttons hängen an derselben Editor-Instanz - Floating Properties
     // (siehe typeFloatingKeys in settings.js) sind Teil derselben Liste und
-    // Reihenfolge wie die übrigen Properties dieses Typs (wichtig für die
+    // Reihenfolge wie die übrigen Properties des Blocks (wichtig für die
     // Frontmatter-Sortierung), landen also an genau der Stelle, an die sie per
     // Drag & Drop einsortiert werden, statt fest ans Ende einer zweiten Liste.
     const addButtons = sectionHeader.createDiv({ cls: "fred-typ-frontmatter-add-group" });
+    let editor = null;
 
     // Links neben dem normalen Button, hervorgehoben (Akzentfarbe, wie
     // renameWithNotesBtn oben) - markiert die als nächstes hinzugefügte (bzw.
@@ -808,8 +881,8 @@ class TypView extends ItemView {
     });
     setIcon(addFloatingPropertyBtn, "plus");
     addFloatingPropertyBtn.addEventListener("click", () => {
-      if (this.frontmatterEditor) this.frontmatterEditor.fredPendingFloatingAdd = true;
-      addBlankProperty(this.frontmatterEditor);
+      if (editor) editor.fredPendingFloatingAdd = true;
+      addBlankProperty(editor);
     });
 
     const addPropertyBtn = addButtons.createDiv({
@@ -818,20 +891,153 @@ class TypView extends ItemView {
     });
     setIcon(addPropertyBtn, "plus");
     addPropertyBtn.addEventListener("click", () => {
-      if (this.frontmatterEditor) this.frontmatterEditor.fredPendingFloatingAdd = false;
-      addBlankProperty(this.frontmatterEditor);
+      if (editor) editor.fredPendingFloatingAdd = false;
+      addBlankProperty(editor);
     });
 
-    this.frontmatterEditor = mountTypeFrontmatterEditor(this, body, type);
+    editor = mountFrontmatterEditor(this, block, store);
+    if (editor) this.frontmatterEditors.push(editor);
+    return editor;
+  }
 
-    this.renderPlaceholderList(body);
-    // Fett-Markierung (siehe frontmatter-default-highlight.js) reagiert nur auf
-    // Metadaten-/Layout-Events - das Öffnen dieser Detailansicht selbst löst
-    // keins davon aus, daher hier direkt nach dem Mounten anstoßen. Bewusst
-    // nur dieser eine, gezielte Refresh statt des vollen refreshTypColors()-
-    // Bündels: das würde u. a. auch render() auf diesem (gerade erst mitten
-    // im eigenen render()-Durchlauf befindlichen) View erneut auslösen.
-    this.plugin.refreshFrontmatterHighlight?.();
+  // Graut im TYP-Block jede Property samt Wert aus, die mindestens ein Subtyp
+  // mit eigenem Wert überschreibt - der Tooltip nennt die Subtypen. Läuft nach
+  // dem Rendern und bei jedem Refresh der Fett-Markierung mit (siehe
+  // frontmatter-default-highlight.js), da Obsidians Editor seine Zeilen bei
+  // Änderungen selbst neu aufbaut.
+  markOverriddenProperties() {
+    const type = this.selectedType;
+    const containerEl = this.frontmatterEditor?.containerEl;
+    if (type === null || !containerEl) return;
+
+    const overriddenBy = new Map();
+    for (const subtype of getSubtypeNames(this.plugin.settings, type)) {
+      for (const key of Object.keys(getSubtype(this.plugin.settings, type, subtype)?.frontmatter ?? {})) {
+        if (key === "") continue;
+        const lower = key.toLowerCase();
+        if (!overriddenBy.has(lower)) overriddenBy.set(lower, []);
+        overriddenBy.get(lower).push(subtype);
+      }
+    }
+
+    for (const row of containerEl.querySelectorAll(".metadata-property[data-property-key]")) {
+      const subtypes = overriddenBy.get(row.getAttribute("data-property-key").toLowerCase());
+      row.toggleClass("fred-typ-overridden-property", !!subtypes);
+      if (subtypes) row.setAttribute("aria-label", `Überschrieben von: ${subtypes.join(", ")}`);
+      else row.removeAttribute("aria-label");
+    }
+  }
+
+  // Wie die unregistrierten Einträge der TYP-Liste: SUBTYP-Werte von Notizen
+  // dieses TYPs, die (noch) keinen eigenen Block haben (Notizen ganz ohne
+  // SUBTYP zählt stattdessen das Standard-Frontmatter). Linksklick übernimmt einen Wert als Subtyp, Rechtsklick öffnet die Suche.
+  renderUnregisteredSubtypes(parent, type, bucket) {
+    const registered = getSubtypeNames(this.plugin.settings, type);
+    const unregistered = [...bucket.counts.keys()]
+      .filter((key) => !registered.includes(key))
+      .sort((a, b) => bucket.counts.get(b) - bucket.counts.get(a) || a.localeCompare(b));
+    if (unregistered.length === 0) return;
+
+    const listEl = parent.createDiv({ cls: "fred-typ-list fred-typ-subtype-unregistered-list" });
+    for (const key of unregistered) {
+      const self = listEl.createDiv({ cls: "tree-item" }).createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
+      self.createDiv({ cls: "tree-item-inner", text: displayTypeKey(key) });
+      this.renderCountFlair(self, bucket.counts.get(key));
+      self.addEventListener("click", () => this.registerSubtype(type, key, bucket));
+      self.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openSubtypeSearch(type, key);
+      });
+    }
+  }
+
+  // subtypeKey === null → Notizen dieses TYPs ohne SUBTYP. Für eine Liste
+  // gibt es wie bei openSearch() keine exakte Suchsyntax - dann nach Notizen
+  // suchen, die alle ihre Einträge tragen.
+  openSubtypeSearch(type, subtypeKey) {
+    const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
+    if (!globalSearch) return;
+    const typClause = `["${TYP_PROPERTY}":"${type}"]`;
+    let subtypClause;
+    if (subtypeKey === null) {
+      subtypClause = `-["${SUBTYP_PROPERTY}"]`;
+    } else {
+      const raw = this.plugin.typIndex.subtypeBucket(type).rawByKey.get(subtypeKey);
+      subtypClause = Array.isArray(raw)
+        ? raw.map((v) => `["${SUBTYP_PROPERTY}":"${String(v ?? "").trim()}"]`).join(" ")
+        : `["${SUBTYP_PROPERTY}":"${subtypeKey}"]`;
+    }
+    globalSearch.instance.openGlobalSearch(`${typClause} ${subtypClause}`);
+  }
+
+  // Wie registerType(): übernimmt die bereinigte Form (Großbuchstaben, Liste
+  // als Einzelwert "A, B") als Subtyp dieses TYPs und schreibt den SUBTYP der
+  // betroffenen Notizen gleich mit um. Gibt es den Subtyp in anderer Schreib-
+  // weise schon, landen die Notizen dort.
+  async registerSubtype(type, subtypeKey, bucket) {
+    const raw = bucket.rawByKey.get(subtypeKey);
+    const normalized = normalizeRawType(raw === undefined ? subtypeKey : raw);
+    if (!normalized) return;
+    const existing = getSubtypeNames(this.plugin.settings, type).find((name) => name.toLowerCase() === normalized.toLowerCase());
+    const subtype = existing ?? normalized;
+    ensureSubtype(this.plugin.settings, type, subtype);
+
+    let renamed = 0;
+    if (subtype !== subtypeKey) renamed = await renameSubtypeInNotes(this.plugin, type, subtypeKey, subtype);
+
+    await this.plugin.saveSettings();
+    this.plugin.refreshTypColors?.();
+    if (renamed > 0) new Notice(`SUBTYP ${subtype} registriert, ${renamed} Notiz(en) angepasst.`);
+  }
+
+  // Neuer, leerer Subtyp-Block direkt über dem "Subtyp hinzufügen"-Button,
+  // dessen Name sofort inline eingegeben wird (wie startAdd() in der Liste).
+  startAddSubtype(type) {
+    if (this.isEditing || !this.subtypeAddBtnEl) return;
+    this.isEditing = true;
+
+    const block = createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block" });
+    this.subtypeAddBtnEl.parentElement.insertBefore(block, this.subtypeAddBtnEl);
+    const header = block.createDiv({ cls: "fred-typ-frontmatter-header" });
+    const nameEl = header.createDiv({ cls: "fred-typ-detail-section-title fred-typ-subtype-name-input is-being-renamed" });
+    nameEl.setAttribute("contenteditable", "true");
+    nameEl.setAttribute("spellcheck", "false");
+    nameEl.focus();
+
+    let done = false;
+    const finish = async (commit) => {
+      if (done) return;
+      done = true;
+      this.isEditing = false;
+
+      const value = normalizeTypeName(nameEl.textContent);
+      if (commit && value) {
+        const existing = getSubtypeNames(this.plugin.settings, type).find((name) => name.toLowerCase() === value.toLowerCase());
+        if (existing) {
+          new Notice(`Subtyp ${existing} gibt es bei ${type} bereits.`);
+        } else {
+          ensureSubtype(this.plugin.settings, type, value);
+          await this.plugin.saveSettings();
+        }
+      }
+      this.render();
+    };
+
+    nameEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(true);
+      } else if (event.key === "Escape") {
+        // stopPropagation, sonst verlässt der Escape-Handler der gesamten
+        // Detailansicht sie gleich mit.
+        event.preventDefault();
+        event.stopPropagation();
+        finish(false);
+      }
+    });
+    nameEl.addEventListener("blur", () => finish(true));
   }
 
   showDeleteConfirm(type) {
@@ -842,6 +1048,7 @@ class TypView extends ItemView {
       delete this.plugin.settings.typeDefaultFrontmatter[type];
       delete this.plugin.settings.typeFloatingKeys[type];
       delete this.ensureTypeManual()[type];
+      deleteTypeSubtypes(this.plugin.settings, type);
       // Vor refreshTypColors() zurück zur Liste, aus demselben Grund wie beim
       // Umbenennen: refreshTypColors() rendert (u. a. über registerTypView)
       // synchron neu - stünde selectedType noch auf dem gerade gelöschten
@@ -899,6 +1106,7 @@ class TypView extends ItemView {
         this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
         delete this.plugin.settings.typeManual[type];
       }
+      moveTypeSubtypes(this.plugin.settings, type, value);
       // Vor refreshTypColors() setzen: das ruft (u. a. über den in
       // registerTypView zurückgegebenen Refresh) synchron render() auf -
       // stünde selectedType noch auf dem alten (bereits migrierten,
@@ -984,7 +1192,8 @@ class TypView extends ItemView {
 
   // Legt source in target auf: Notizen werden auf target umgeschrieben,
   // source verschwindet aus der TYP-Liste samt eigener Einstellungen (target
-  // behält seine).
+  // behält seine). Die Subtypen von source werden übernommen, gleichnamige
+  // Blöcke zusammengeführt (siehe mergeTypeSubtypes in subtypes.js).
   async mergeType(source, target) {
     const settings = this.plugin.settings;
     const renamed = await renameTypeInNotes(this.plugin, source, target);
@@ -995,6 +1204,7 @@ class TypView extends ItemView {
     delete settings.typeDefaultFrontmatter[source];
     delete settings.typeFloatingKeys[source];
     delete this.ensureTypeManual()[source];
+    mergeTypeSubtypes(settings, source, target);
 
     // Vor refreshTypColors() setzen, aus demselben Grund wie in applyRename.
     this.selectedType = target;

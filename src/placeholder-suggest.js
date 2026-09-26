@@ -2,7 +2,7 @@ const { TFile, Vault, debounce, normalizePath } = require("obsidian");
 const { FRONTMATTER_PLACEHOLDERS } = require("./frontmatter-placeholders");
 
 // Marker-Klasse am Container des Standard-Frontmatter-Editors (gesetzt in
-// mountTypeFrontmatterEditor, type-frontmatter-editor.js) - grenzt die
+// mountFrontmatterEditor, type-frontmatter-editor.js) - grenzt die
 // Platzhalter-Vorschläge unten auf diesen Editor ein, echte Notizen bleiben
 // unberührt.
 const EDITOR_CLASS = "fred-typ-frontmatter-editor";

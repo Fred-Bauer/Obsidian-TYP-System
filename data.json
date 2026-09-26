@@ -85,6 +85,14 @@
     "EXTERN": false,
     "KONTAKT": false
   },
+  "typeSubtypes": {
+    "PROJEKT": {
+      "TEST": {
+        "frontmatter": {},
+        "floatingKeys": []
+      }
+    }
+  },
   "globalPropertyOrder": [
     {
       "kind": "property",
@@ -130,8 +138,10 @@
     "backlinks": true,
     "bookmarks": true,
     "frontmatterDefaults": true,
+    "frontmatterDefaultsSubtyp": true,
     "typList": true,
     "allProperties": true,
+    "allPropertiesSubtyp": true,
     "noteTitleColor": true,
     "links": true,
     "noteTitle": false

@@ -10,7 +10,7 @@ const { TYP_PROPERTY, SUBTYP_PROPERTY, sortAllFrontmatter } = require("./frontma
 const PLACEHOLDER_LABELS = {
   typValue: "TYP",
   subtypValue: "SUBTYP",
-  typ: "TYP Properties",
+  typ: "TYP-Frontmatter",
   other: "Sonstige Properties",
 };
 

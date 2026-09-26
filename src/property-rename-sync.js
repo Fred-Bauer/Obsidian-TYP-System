@@ -1,6 +1,8 @@
 const { Notice } = require("obsidian");
+const { typeStore, subtypeStore } = require("./type-frontmatter-editor");
 
 const TYP_PROPERTY = "TYP";
+const SUBTYP_PROPERTY = "SUBTYP";
 
 // Obsidian schreibt Property-Namen intern klein (siehe frontmatter-default-
 // highlight.js) - Zuordnung daher case-insensitiv, der neue Name wird aber
@@ -13,14 +15,14 @@ function isEmptyValue(value) {
   return value === null || value === undefined || value === "";
 }
 
-// Benennt oldKey in typeDefaultFrontmatter[type] um (Reihenfolge bleibt
+// Benennt oldKey in einem Frontmatter-Block (TYP oder Subtyp, siehe
+// typeStore/subtypeStore in type-frontmatter-editor.js) um (Reihenfolge bleibt
 // erhalten) und zieht die Floating-Markierung mit. Gibt es newKey dort bereits
 // (Zusammenlegen, analog zu Obsidians eigenem Merge in den Notizen), bleibt der
 // bestehende Eintrag an seiner Position - der Wert des alten Eintrags wird nur
 // übernommen, wenn der bestehende leer ist. Liefert true bei einer Änderung.
-function renameInType(settings, type, oldKey, newKey) {
-  const defaults = settings.typeDefaultFrontmatter[type];
-  if (!defaults) return false;
+function renameInStore(store, oldKey, newKey) {
+  const defaults = store.getFrontmatter();
   const keys = Object.keys(defaults);
   const sourceKey = keys.find((key) => sameKey(key, oldKey));
   if (sourceKey === undefined) return false;
@@ -38,17 +40,16 @@ function renameInType(settings, type, oldKey, newKey) {
     }
   }
   if (targetKey !== undefined && isEmptyValue(next[targetKey])) next[targetKey] = defaults[sourceKey];
-  settings.typeDefaultFrontmatter[type] = next;
+  store.setFrontmatter(next);
 
-  const floating = settings.typeFloatingKeys[type];
-  if (floating) {
+  const floating = store.getFloating();
+  if (floating.length > 0) {
     // Beim Zusammenlegen bleibt die Floating-Markierung des Ziels maßgeblich.
-    const nextFloating =
+    store.setFloating(
       targetKey !== undefined
         ? floating.filter((key) => key !== sourceKey)
-        : floating.map((key) => (key === sourceKey ? newKey : key));
-    if (nextFloating.length > 0) settings.typeFloatingKeys[type] = nextFloating;
-    else delete settings.typeFloatingKeys[type];
+        : floating.map((key) => (key === sourceKey ? newKey : key))
+    );
   }
   return true;
 }
@@ -71,23 +72,31 @@ async function syncRename(plugin, oldKey, newKey) {
   if (typeof oldKey !== "string" || typeof newKey !== "string") return;
   newKey = newKey.trim();
   if (oldKey === "" || newKey === "" || oldKey === newKey) return;
-  // TYP ist nie Teil des Standard-Frontmatters (siehe stripTypProperty in
-  // type-frontmatter-editor.js) - ein Umbenennen von/nach TYP daher ignorieren.
-  if (sameKey(oldKey, TYP_PROPERTY) || sameKey(newKey, TYP_PROPERTY)) return;
+  // TYP/SUBTYP sind nie Teil eines Frontmatter-Blocks (siehe stripTypProperty
+  // in type-frontmatter-editor.js) - ein Umbenennen von/nach TYP/SUBTYP daher
+  // ignorieren.
+  if ([oldKey, newKey].some((key) => sameKey(key, TYP_PROPERTY) || sameKey(key, SUBTYP_PROPERTY))) return;
 
   const { settings } = plugin;
   let typeCount = 0;
+  let subtypeCount = 0;
   for (const type of Object.keys(settings.typeDefaultFrontmatter)) {
-    if (renameInType(settings, type, oldKey, newKey)) typeCount++;
+    if (renameInStore(typeStore(plugin, type), oldKey, newKey)) typeCount++;
+  }
+  for (const [type, subtypes] of Object.entries(settings.typeSubtypes ?? {})) {
+    for (const subtype of Object.keys(subtypes)) {
+      if (renameInStore(subtypeStore(plugin, type, subtype), oldKey, newKey)) subtypeCount++;
+    }
   }
   const orderChanged = renameInGlobalOrder(settings, oldKey, newKey);
-  if (typeCount === 0 && !orderChanged) return;
+  if (typeCount === 0 && subtypeCount === 0 && !orderChanged) return;
 
   await plugin.saveSettings();
   plugin.refreshTypColors?.();
 
   const parts = [];
   if (typeCount > 0) parts.push(`${typeCount} TYP${typeCount === 1 ? "" : "en"}`);
+  if (subtypeCount > 0) parts.push(`${subtypeCount} Subtyp${subtypeCount === 1 ? "" : "en"}`);
   if (orderChanged) parts.push("globaler Reihenfolge");
   new Notice(`TYP-System: „${oldKey}“ → „${newKey}“ in ${parts.join(" und ")} umbenannt.`);
 }

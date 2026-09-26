@@ -2,7 +2,7 @@ const { Events, TFile, debounce } = require("obsidian");
 
 const TYP_PROPERTY = "TYP";
 const SUBTYP_PROPERTY = "SUBTYP";
-const EMPTY_ENTRY = Object.freeze({ typeKey: null, rawType: null, subtypes: Object.freeze([]) });
+const EMPTY_ENTRY = Object.freeze({ typeKey: null, rawType: null, subtypeKey: null, rawSubtype: null });
 
 // Sammelt Änderungen mehrerer Dateien (z. B. Umbenennen eines TYPs in vielen
 // Notizen, Vault-Sync) zu einem einzigen "change"-Event. Ohne resetTimer, damit
@@ -34,20 +34,11 @@ function typeKeyOf(value) {
   return text.trim() === "" ? null : text;
 }
 
-// SUBTYP bleibt (anders als TYP) Einzelwert oder Liste, getrimmt.
-function subtypeList(value) {
-  if (value == null) return [];
-  return (Array.isArray(value) ? value : [value]).map((v) => rawItem(v).trim()).filter(Boolean);
-}
-
+// SUBTYP wird genauso ausgelegt (typeKeyOf): eine Notiz hat höchstens einen
+// SUBTYP als sauberen Einzelwert, alles andere ist ein eigener, nicht
+// erfasster Schlüssel (siehe Subtyp-Blöcke in der TYP-Detailansicht).
 function sameEntry(a, b) {
-  return (
-    !!a &&
-    !!b &&
-    a.typeKey === b.typeKey &&
-    a.subtypes.length === b.subtypes.length &&
-    a.subtypes.every((v, i) => v === b.subtypes[i])
-  );
+  return !!a && !!b && a.typeKey === b.typeKey && a.subtypeKey === b.subtypeKey;
 }
 
 // Zentraler TYP-/SUBTYP-Index über alle Markdown-Dateien (Pfad -> Werte).
@@ -104,7 +95,8 @@ class TypIndex extends Events {
   read(file) {
     const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
     const rawType = frontmatter?.[TYP_PROPERTY] ?? null;
-    return { typeKey: typeKeyOf(rawType), rawType, subtypes: subtypeList(frontmatter?.[SUBTYP_PROPERTY]) };
+    const rawSubtype = frontmatter?.[SUBTYP_PROPERTY] ?? null;
+    return { typeKey: typeKeyOf(rawType), rawType, subtypeKey: typeKeyOf(rawSubtype), rawSubtype };
   }
 
   ensureBuilt() {
@@ -175,6 +167,11 @@ class TypIndex extends Events {
     return this.entryFor(file).typeKey;
   }
 
+  // SUBTYP-Schlüssel (siehe typeKeyOf) oder null.
+  subtypeOf(file) {
+    return this.entryFor(file).subtypeKey;
+  }
+
   // Ein tatsächlicher Frontmatter-Wert zu einem Schlüssel - für Anzeige, Suche
   // und Normalisierung unregistrierter Einträge (alle Notizen eines Schlüssels
   // haben per Definition dieselbe Rohform).
@@ -193,11 +190,20 @@ class TypIndex extends Events {
   // Dateien mit genau diesem TYP-Schlüssel, unter Beachtung der
   // "Ignorierte Notizen berücksichtigen"-Einstellung.
   filesWithType(typeKey) {
+    return this.filesMatching((entry) => entry.typeKey === typeKey);
+  }
+
+  // Dateien mit genau diesem TYP- und SUBTYP-Schlüssel.
+  filesWithSubtype(typeKey, subtypeKey) {
+    return this.filesMatching((entry) => entry.typeKey === typeKey && entry.subtypeKey === subtypeKey);
+  }
+
+  filesMatching(predicate) {
     this.ensureBuilt();
     const includeIgnored = !!this.plugin.settings.includeIgnoredFiles;
     const files = [];
     for (const [path, entry] of this.entries) {
-      if (entry.typeKey !== typeKey) continue;
+      if (!predicate(entry)) continue;
       if (!includeIgnored && this.app.metadataCache.isUserIgnored(path)) continue;
       const file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) files.push(file);
@@ -209,8 +215,7 @@ class TypIndex extends Events {
   // tragen auch Plugins wie Hide Folders ausgeblendete Ordner ein. Über die
   // Einstellung "Ignorierte Notizen berücksichtigen" abschaltbar.
   //
-  // Mehrfach-SUBTYP (Array-Wert) zählt für jeden seiner SUBTYP-Buckets. Eine
-  // Notiz ohne TYP hat keinen SUBTYP-Kontext.
+  // Eine Notiz ohne TYP hat keinen SUBTYP-Kontext.
   aggregate() {
     this.ensureBuilt();
     const includeIgnored = !!this.plugin.settings.includeIgnoredFiles;
@@ -220,7 +225,7 @@ class TypIndex extends Events {
     const rawByKey = new Map();
     const subtypesByType = new Map();
     let noType = 0;
-    for (const [path, { typeKey, rawType, subtypes }] of this.entries) {
+    for (const [path, { typeKey, rawType, subtypeKey, rawSubtype }] of this.entries) {
       if (!includeIgnored && this.app.metadataCache.isUserIgnored(path)) continue;
       if (typeKey === null) {
         noType++;
@@ -230,11 +235,15 @@ class TypIndex extends Events {
       if (!rawByKey.has(typeKey)) rawByKey.set(typeKey, rawType);
       let bucket = subtypesByType.get(typeKey);
       if (!bucket) {
-        bucket = { counts: new Map(), noSubtype: 0 };
+        bucket = { counts: new Map(), noSubtype: 0, rawByKey: new Map() };
         subtypesByType.set(typeKey, bucket);
       }
-      if (subtypes.length === 0) bucket.noSubtype++;
-      else for (const sub of subtypes) bucket.counts.set(sub, (bucket.counts.get(sub) ?? 0) + 1);
+      if (subtypeKey === null) {
+        bucket.noSubtype++;
+      } else {
+        bucket.counts.set(subtypeKey, (bucket.counts.get(subtypeKey) ?? 0) + 1);
+        if (!bucket.rawByKey.has(subtypeKey)) bucket.rawByKey.set(subtypeKey, rawSubtype);
+      }
     }
     this.aggregates = { includeIgnored, counts, noType, rawByKey, subtypesByType };
     return this.aggregates;
@@ -246,11 +255,17 @@ class TypIndex extends Events {
     return { counts, noType };
   }
 
-  // TYP -> { counts: Map(SUBTYP -> Anzahl), noSubtype }. Zwischengespeichert -
-  // nicht verändern.
+  // TYP -> { counts: Map(SUBTYP-Schlüssel -> Anzahl), noSubtype, rawByKey }.
+  // Zwischengespeichert - nicht verändern.
   subtypeCounts() {
     return this.aggregate().subtypesByType;
   }
+
+  subtypeBucket(typeKey) {
+    return this.subtypeCounts().get(typeKey) ?? EMPTY_BUCKET;
+  }
 }
 
-module.exports = { TypIndex, typeKeyOf, TYP_PROPERTY };
+const EMPTY_BUCKET = Object.freeze({ counts: new Map(), noSubtype: 0, rawByKey: new Map() });
+
+module.exports = { TypIndex, typeKeyOf, TYP_PROPERTY, SUBTYP_PROPERTY };

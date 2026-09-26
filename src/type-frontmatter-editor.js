@@ -1,22 +1,61 @@
 const { MarkdownView, Menu } = require("obsidian");
 const { isPlaceholderToken } = require("./frontmatter-placeholders");
 const { EDITOR_CLASS: PLACEHOLDER_SUGGEST_EDITOR_CLASS } = require("./placeholder-suggest");
+const { getSubtype, ensureSubtype } = require("./subtypes");
 
 const TYP_PROPERTY = "TYP";
+const SUBTYP_PROPERTY = "SUBTYP";
+const SYSTEM_PROPERTIES = [TYP_PROPERTY.toLowerCase(), SUBTYP_PROPERTY.toLowerCase()];
 
-// Der Wert der TYP-Property ist per Definition immer der TYP-Name selbst -
-// als "Standard"-Property wäre sie also redundant und könnte bei einer
-// Umbenennung des TYPs (unbemerkt) vom tatsächlichen Namen abweichen. Sie
-// darf deshalb in diesem Editor gar nicht erst als eigene Zeile auftauchen.
+// Der Wert der TYP- bzw. SUBTYP-Property ist per Definition immer der Name des
+// TYPs/Subtyps selbst - als "Standard"-Property wäre sie also redundant und
+// könnte bei einer Umbenennung (unbemerkt) vom tatsächlichen Namen abweichen.
+// Sie darf deshalb in diesem Editor gar nicht erst als eigene Zeile auftauchen.
 // Mutiert "frontmatter" in-place (statt eine Kopie zurückzugeben) - Obsidians
 // Property-Editor scheint beim synchronize() auf eine stabile Objektreferenz
 // angewiesen zu sein; eine neu erzeugte Kopie hat beim allerersten Rendern zu
 // einem Stack Overflow in Obsidians eigener renderProperty()-Pipeline geführt.
 function stripTypProperty(frontmatter) {
   for (const key of Object.keys(frontmatter)) {
-    if (key.trim().toLowerCase() === TYP_PROPERTY.toLowerCase()) delete frontmatter[key];
+    if (SYSTEM_PROPERTIES.includes(key.trim().toLowerCase())) delete frontmatter[key];
   }
   return frontmatter;
+}
+
+// Speicherort eines Frontmatter-Blocks in den Plugin-Settings - entweder das
+// Standard-Frontmatter eines TYPs (typeDefaultFrontmatter/typeFloatingKeys)
+// oder der Block eines seiner Subtypen (typeSubtypes, siehe subtypes.js).
+// Editor, Floating-Menü und Property-Umbenennung arbeiten ausschließlich über
+// diese Schnittstelle und müssen den Unterschied nicht kennen.
+function typeStore(plugin, type) {
+  return {
+    type,
+    subtype: null,
+    getFrontmatter: () => plugin.settings.typeDefaultFrontmatter[type] ?? {},
+    setFrontmatter: (frontmatter) => {
+      plugin.settings.typeDefaultFrontmatter[type] = frontmatter;
+    },
+    getFloating: () => plugin.settings.typeFloatingKeys[type] ?? [],
+    setFloating: (keys) => {
+      if (keys.length > 0) plugin.settings.typeFloatingKeys[type] = keys;
+      else delete plugin.settings.typeFloatingKeys[type];
+    },
+  };
+}
+
+function subtypeStore(plugin, type, subtype) {
+  return {
+    type,
+    subtype,
+    getFrontmatter: () => getSubtype(plugin.settings, type, subtype)?.frontmatter ?? {},
+    setFrontmatter: (frontmatter) => {
+      ensureSubtype(plugin.settings, type, subtype).frontmatter = frontmatter;
+    },
+    getFloating: () => getSubtype(plugin.settings, type, subtype)?.floatingKeys ?? [],
+    setFloating: (keys) => {
+      ensureSubtype(plugin.settings, type, subtype).floatingKeys = keys;
+    },
+  };
 }
 
 // Obsidians eigenes Frontmatter-Widget ("Properties") ist keine offizielle
@@ -78,7 +117,7 @@ function getPropertyRowClass(app, editor) {
 
 // Ergänzt das Rechtsklick-Kontextmenü einer Property-Zeile um einen Toggle
 // "Floating" GANZ OBEN - aber exklusiv für Zeilen dieses Plugins
-// eigener TYP-Detailansicht (erkannt an owner.fredView, siehe unten), nie in
+// eigener TYP-Detailansicht (erkannt an owner.fredStore, siehe unten), nie in
 // echten Notizen. Unabhängig vom "+"-Button links neben dem normalen
 // (fredPendingFloatingAdd), der nur beim NEUEN Anlegen greift - dieser Toggle
 // wirkt auf JEDE bereits vorhandene Property, in beide Richtungen.
@@ -107,15 +146,13 @@ function ensurePropertyMenuPatch(app, editor) {
   const originalShowPropertyMenu = RowClass.prototype.showPropertyMenu;
   RowClass.prototype.showPropertyMenu = function (event) {
     const owner = this.metadataEditor?.owner;
-    if (!owner?.fredView) return originalShowPropertyMenu.call(this, event);
+    if (!owner?.fredStore) return originalShowPropertyMenu.call(this, event);
 
     const row = this;
     const originalShowAtMouseEvent = Menu.prototype.showAtMouseEvent;
     Menu.prototype.showAtMouseEvent = function (mouseEvent) {
       Menu.prototype.showAtMouseEvent = originalShowAtMouseEvent;
-      const isFloating = (owner.fredView.plugin.settings.typeFloatingKeys[owner.fredType] ?? []).includes(
-        row.entry.key
-      );
+      const isFloating = owner.fredStore.getFloating().includes(row.entry.key);
       // "title" ist die erste der von showPropertyMenu registrierten
       // Sections (addSections([...])) und auf dem Desktop sonst leer (nur
       // auf Mobile mit einem reinen Label-Eintrag belegt) - landet also
@@ -128,7 +165,7 @@ function ensurePropertyMenuPatch(app, editor) {
           .setIcon("pin-off")
           .setChecked(isFloating)
           .setSection("title")
-          .onClick(() => toggleFloatingProperty(owner.fredView, owner.fredType, row.entry.key))
+          .onClick(() => toggleFloatingProperty(owner.fredView, owner.fredStore, row.entry.key))
       );
       return originalShowAtMouseEvent.call(this, mouseEvent);
     };
@@ -137,11 +174,9 @@ function ensurePropertyMenuPatch(app, editor) {
   };
 }
 
-function toggleFloatingProperty(view, type, key) {
-  const floating = view.plugin.settings.typeFloatingKeys[type] ?? [];
-  const next = floating.includes(key) ? floating.filter((k) => k !== key) : [...floating, key];
-  if (next.length > 0) view.plugin.settings.typeFloatingKeys[type] = next;
-  else delete view.plugin.settings.typeFloatingKeys[type];
+function toggleFloatingProperty(view, store, key) {
+  const floating = store.getFloating();
+  store.setFloating(floating.includes(key) ? floating.filter((k) => k !== key) : [...floating, key]);
   view.plugin.saveSettings();
   // Aktualisiert die Fett-/Kursiv-Markierung sofort - sowohl in dieser
   // Detailansicht als auch in bereits offenen Notizen dieses Typs.
@@ -160,14 +195,15 @@ function toggleFloatingProperty(view, type, key) {
 // echte Datei gibt es hier nichts Sinnvolles zurückzugeben, aber die Methode
 // muss existieren, sonst crasht das Widget beim Rendern jeder Property.
 //
-// Eine einzige Editor-Instanz pro Typ, gebunden an typeDefaultFrontmatter[type]
-// - Standard- und Floating Properties (siehe typeFloatingKeys in settings.js)
-// teilen sich dieselbe Liste und Reihenfolge, nur Floating-markierte Keys
-// werden von getTypeDefaults() (main.js) nicht automatisch ausgeliefert.
-// editor.fredPendingFloatingAdd wird von typ-view.js vor addBlankProperty()
-// gesetzt, um die als nächstes hinzugefügte (bzw. umbenannte) Property als
-// Floating zu markieren - siehe saveFrontmatter unten.
-function mountTypeFrontmatterEditor(view, containerEl, type) {
+// Eine Editor-Instanz je Block (TYP bzw. Subtyp), gebunden an den Speicherort
+// aus store (siehe typeStore/subtypeStore) - Standard- und Floating Properties
+// (siehe typeFloatingKeys in settings.js) teilen sich dieselbe Liste und
+// Reihenfolge, nur Floating-markierte Keys werden von getTypeDefaults()
+// (main.js) nicht automatisch ausgeliefert. editor.fredPendingFloatingAdd wird
+// von typ-view.js vor addBlankProperty() gesetzt, um die als nächstes
+// hinzugefügte (bzw. umbenannte) Property als Floating zu markieren - siehe
+// saveFrontmatter unten.
+function mountFrontmatterEditor(view, containerEl, store) {
   const app = view.app;
   const EditorClass = getMetadataEditorClass(app);
   if (!EditorClass) {
@@ -182,10 +218,10 @@ function mountTypeFrontmatterEditor(view, containerEl, type) {
     app,
     // Marker für ensurePropertyMenuPatch() oben: identifiziert Property-
     // Zeilen dieses Plugin-eigenen Editors (nie einer echten Notiz) und
-    // liefert Typ/View, die der globale Menü-Patch pro Zeile dynamisch
-    // braucht (die Patch-Installation selbst passiert nur einmal, unabhängig
-    // davon, welcher Typ dabei gerade offen war).
-    fredType: type,
+    // liefert Speicherort/View, die der globale Menü-Patch pro Zeile
+    // dynamisch braucht (die Patch-Installation selbst passiert nur einmal,
+    // unabhängig davon, welcher Block dabei gerade offen war).
+    fredStore: store,
     fredView: view,
     getFile() {
       return null;
@@ -205,18 +241,18 @@ function mountTypeFrontmatterEditor(view, containerEl, type) {
     // Floating-Markierung unten robust nachführbar, ohne Zwischenzustände
     // während des Tippens verfolgen zu müssen.
     saveFrontmatter(frontmatter) {
-      // Falls hier gerade eine Zeile "TYP" eingegeben wurde: nicht übernehmen.
+      // Falls hier gerade eine Zeile "TYP"/"SUBTYP" eingegeben wurde: nicht übernehmen.
       // Sie bleibt bis zum nächsten Neu-Mounten sichtbar (kein erneuter
       // synchronize()-Aufruf hier, siehe Kommentar an stripTypProperty).
       stripTypProperty(frontmatter);
 
-      const previous = view.plugin.settings.typeDefaultFrontmatter[type] ?? {};
+      const previous = store.getFrontmatter();
       const previousKeys = Object.keys(previous).filter((key) => key !== "");
       const currentKeys = Object.keys(frontmatter).filter((key) => key !== "");
       const removedKeys = previousKeys.filter((key) => !currentKeys.includes(key));
       const addedKeys = currentKeys.filter((key) => !previousKeys.includes(key));
 
-      let floating = view.plugin.settings.typeFloatingKeys[type] ?? [];
+      let floating = store.getFloating();
       if (removedKeys.length === 1 && addedKeys.length === 1) {
         // Umbenennung einer bestehenden Property - Floating-Markierung wandert mit um.
         floating = floating.map((key) => (key === removedKeys[0] ? addedKeys[0] : key));
@@ -227,10 +263,8 @@ function mountTypeFrontmatterEditor(view, containerEl, type) {
           editor.fredPendingFloatingAdd = false;
         }
       }
-      if (floating.length > 0) view.plugin.settings.typeFloatingKeys[type] = floating;
-      else delete view.plugin.settings.typeFloatingKeys[type];
-
-      view.plugin.settings.typeDefaultFrontmatter[type] = frontmatter;
+      store.setFloating(floating);
+      store.setFrontmatter(frontmatter);
       view.plugin.saveSettings();
       // Damit die Fett-/Kursiv-Markierung in bereits offenen Notizen dieses
       // Typs sofort mitzieht, wenn sich hier die Property-Liste ändert.
@@ -245,8 +279,8 @@ function mountTypeFrontmatterEditor(view, containerEl, type) {
   containerEl.appendChild(editor.containerEl);
   view.addChild(editor);
 
-  const defaults = view.plugin.settings.typeDefaultFrontmatter[type] ?? {};
-  const hadTyp = Object.keys(defaults).some((key) => key.trim().toLowerCase() === TYP_PROPERTY.toLowerCase());
+  const defaults = store.getFrontmatter();
+  const hadTyp = Object.keys(defaults).some((key) => SYSTEM_PROPERTIES.includes(key.trim().toLowerCase()));
   stripTypProperty(defaults);
   // Ein beim Laden noch vorhandenes TYP (z. B. aus einer älteren Plugin-Version)
   // dauerhaft entfernen, statt es nur für diese Session zu verstecken.
@@ -294,11 +328,11 @@ function addBlankProperty(editor) {
     editor.synchronize(current);
   }
   editor.focusKey("");
-  // Deckt den Fall ab, dass mountTypeFrontmatterEditor() bei einem zu diesem
+  // Deckt den Fall ab, dass mountFrontmatterEditor() bei einem zu diesem
   // Zeitpunkt noch ganz leeren Typ (und ohne offene Notiz) keine Zeilen-Klasse
   // zum Patchen finden konnte - jetzt existiert mit der gerade angelegten
   // Zeile garantiert mindestens eine.
   ensurePropertyMenuPatch(editor.owner.app, editor);
 }
 
-module.exports = { mountTypeFrontmatterEditor, addBlankProperty };
+module.exports = { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore };

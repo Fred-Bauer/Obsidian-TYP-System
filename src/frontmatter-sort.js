@@ -1,3 +1,5 @@
+const { getSubtype } = require("./subtypes");
+
 const TYP_PROPERTY = "TYP";
 const SUBTYP_PROPERTY = "SUBTYP";
 
@@ -39,8 +41,9 @@ function normalizeGlobalOrder(order) {
  *    aliases; Einstellungen -> TYP -> Globale Property-Reihenfolge),
  *  - der TYP-Property selbst,
  *  - der SUBTYP-Property selbst,
- *  - dem Block "TYP Properties" (Standard-Frontmatter-Liste des
- *    jeweiligen Typs, siehe type-frontmatter-editor.js), und
+ *  - dem Block "TYP-Frontmatter" (Standard-Frontmatter-Liste des
+ *    jeweiligen Typs, siehe type-frontmatter-editor.js, gefolgt vom
+ *    Frontmatter-Block seines SUBTYPs), und
  *  - dem Block "Sonstige Properties" (alles Übrige, in bisheriger
  *    Reihenfolge).
  * Ergänzt dabei keine fehlenden Standard-Properties und ändert keine
@@ -56,10 +59,22 @@ function normalizeGlobalOrder(order) {
 // (main.js) an Templater ausgeliefert, sollen aber trotzdem an ihrer
 // Listenposition landen, sobald eine Notiz sie doch trägt. null, wenn kein
 // Typ übergeben wurde oder für den Typ keine Standardliste gepflegt ist.
-function orderedDefaultKeys(plugin, type) {
+//
+// Mit subtype direkt dahinter die Keys aus dessen Frontmatter-Block (siehe
+// subtypes.js), soweit sie nicht schon beim TYP stehen - ein überschriebener
+// Key behält seine Position aus der TYP-Liste.
+function orderedDefaultKeys(plugin, type, subtype = null) {
   if (!type) return null;
-  const standard = plugin.settings.typeDefaultFrontmatter[type] ?? {};
-  const keys = Object.keys(standard).filter((key) => key !== "" && key.toLowerCase() !== TYP_PROPERTY.toLowerCase());
+  const isSystemKey = (key) => key === "" || [TYP_PROPERTY, SUBTYP_PROPERTY].some((p) => key.toLowerCase() === p.toLowerCase());
+  const keys = Object.keys(plugin.settings.typeDefaultFrontmatter[type] ?? {}).filter((key) => !isSystemKey(key));
+  if (subtype) {
+    const seen = new Set(keys.map((key) => key.toLowerCase()));
+    for (const key of Object.keys(getSubtype(plugin.settings, type, subtype)?.frontmatter ?? {})) {
+      if (isSystemKey(key) || seen.has(key.toLowerCase())) continue;
+      keys.push(key);
+      seen.add(key.toLowerCase());
+    }
+  }
   return keys.length > 0 ? keys : null;
 }
 
@@ -178,7 +193,7 @@ async function sortSingleFileFrontmatter(app, plugin, file) {
   // Unsaubere TYP-Werte (Liste, Randleerzeichen) haben keine Standardliste -
   // dann greift nur die globale Reihenfolge (siehe typeKeyOf in typ-index.js).
   const type = plugin.typIndex.typeOf(file);
-  const typeDefaultKeys = orderedDefaultKeys(plugin, type);
+  const typeDefaultKeys = orderedDefaultKeys(plugin, type, plugin.typIndex.subtypeOf(file));
   return sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys);
 }
 
@@ -204,7 +219,7 @@ async function sortAllFrontmatter(app, plugin, onlyType) {
     const type = plugin.typIndex.typeOf(file);
     if (onlyType && type !== onlyType) continue;
 
-    const typeDefaultKeys = orderedDefaultKeys(plugin, type);
+    const typeDefaultKeys = orderedDefaultKeys(plugin, type, plugin.typIndex.subtypeOf(file));
     checked++;
     if (await sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys)) changed++;
   }

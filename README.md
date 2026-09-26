@@ -34,7 +34,7 @@ Per Klick auf einen registrierten Typ:
   - `{{today}}` – heutiges Datum (JJJJ-MM-TT)
   - `{{now}}` – aktuelles Datum mit Uhrzeit (JJJJ-MM-TT HH:mm)
   - `{{created}}` – Erstellungsdatum der Datei (JJJJ-MM-TT), nicht der Aufrufzeitpunkt
-  - `{{tp.<Skriptname>}}` – ruft beim Anlegen einer Notiz dynamisch das gleichnamige Templater-Skript (`tp.user.<Skriptname>`) auf und übernimmt dessen Rückgabewert (siehe *Templater-Integration*)
+  - `{{tp.<Skriptname>}}` – ruft beim Anlegen einer Notiz dynamisch das gleichnamige Templater-Skript (`tp.user.<Skriptname>`) auf und übernimmt dessen Rückgabewert – ein einzelner Wert, oder ein Objekt mit Werten für mehrere Properties des TYPs (z. B. `{{tp.waehleQuelle}}` bei `Quelle` füllt zusätzlich `Titel`/`Autor`); siehe *Templater-Integration*
 
   Erkannte Platzhalter werden farblich hervorgehoben, Obsidians „Type mismatch“-Warnung wird für sie unterdrückt.
 
@@ -88,7 +88,17 @@ Das Plugin selbst enthält keine Templater-Logik, stellt aber eine kleine API au
 - `getTypes({ includeManualOff })` – Typen mit Beschreibung und Notiz-Anzahl, in der aktuellen TYP-Pane-Sortierung
 - `getTypeDefaults(type, { includeFloating, file })` – aufgelöstes Standard-Frontmatter des Typs (feste Platzhalter wie `{{today}}` bereits eingesetzt); mit `includeFloating: true` zusätzlich die Floating Properties des Typs (standardmäßig ausgeklammert); `file` wird an `{{created}}` durchgereicht (Erstellungsdatum der Datei statt des Aufrufzeitpunkts) und sollte beim Anlegen einer neuen Notiz mitgegeben werden
 - `pickType({ includeManualOff, includeUnregistered })` – öffnet den nativen TYP-Picker, löst mit dem gewählten Typ oder `null` auf
-- `matchDynamicPlaceholder(value)` – erkennt einen `{{tp.<Skriptname>}}`-Wert und liefert den Skriptnamen (die Auflösung selbst – der Aufruf von `tp.user.<Skriptname>` – kann nur Templater übernehmen, da das Plugin keinen `tp`-Zugriff hat)
+- `matchDynamicPlaceholder(value)` – erkennt einen `{{tp.<Skriptname>}}`-Wert und liefert den Skriptnamen (die Auflösung selbst – der Aufruf von `tp.user.<Skriptname>` – kann nur Templater übernehmen, da das Plugin keinen `tp`-Zugriff hat). Skriptnamen dürfen Umlaute, `-` und Leerzeichen enthalten, nur keine geschweiften Klammern
+
+### Konvention für `{{tp.<Skriptname>}}`-Skripte
+
+Umgesetzt in `TYP.js`, damit möglichst jedes Templater-Skript als Shortcut im Standard-Frontmatter taugt:
+
+- **Aufruf:** `tp.user.<Skriptname>(tp, newFile, { typ, key, werte })` – `newFile` ist die neue Notiz, `key` die Property des Platzhalters, `werte` die bis dahin aufgelösten Standardwerte (Skripte laufen nacheinander in der Reihenfolge des Standard-Frontmatters). Skripte, die nur `tp` erwarten, funktionieren unverändert
+- **Rückgabe – Einzelwert** (Text, Zahl, Liste, `null`/`undefined`): wird Wert dieser Property
+- **Rückgabe – einfaches Objekt:** Werte für mehrere Properties. Die Property des Platzhalters bekommt ihren Eintrag daraus; weitere Einträge füllen nur Properties, die zum TYP gehören (Standard-Frontmatter inkl. Floating Properties) und noch leer sind – alles andere im Objekt wird ignoriert. Floating Properties werden dabei nur angelegt, wenn sie tatsächlich einen Wert bekommen
+- Hat die Notiz für die Property schon einen Wert (erneutes Ausführen auf einer bestehenden Notiz), wird das Skript nicht aufgerufen
+- Fehlt das Skript oder wirft es einen Fehler, erscheint eine Notice und die Property bleibt leer – TYP und übrige Properties werden trotzdem geschrieben
 
 ## Technische Hinweise
 

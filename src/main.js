@@ -106,7 +106,7 @@ module.exports = class TypSystemPlugin extends Plugin {
   matchDynamicPlaceholder(value) {
     if (typeof value !== "string") return null;
     const match = value.match(DYNAMIC_PLACEHOLDER_PATTERN);
-    return match ? match[1] : null;
+    return match ? match[1].trim() : null;
   }
 
   // Für _obsidian/templater-scripts/TYP.js: die im TYP-View registrierten TYPen

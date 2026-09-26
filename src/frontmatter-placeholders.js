@@ -36,11 +36,14 @@ const FRONTMATTER_PLACEHOLDERS = [
 // keinen Zugriff auf tp) - nur als Muster erkennbar, damit die Warnungs-
 // Unterdrückung/Einfärbung im Standard-Frontmatter-Editor trotzdem greift.
 // Die eigentliche Auflösung übernimmt TYP.js selbst, vor dem Schreiben ins
-// Frontmatter.
-const DYNAMIC_PLACEHOLDER_PATTERN = /^\{\{tp\.([a-zA-Z0-9_]+)\}\}$/;
+// Frontmatter (Aufruf- und Rückgabe-Konvention siehe dort bzw. README).
+// Skriptname = Dateiname in templater-scripts/ ohne ".js", daher auch mit
+// Umlauten, "-" oder Leerzeichen erlaubt - nur keine geschweiften Klammern.
+const DYNAMIC_PLACEHOLDER_PATTERN = /^\{\{tp\.([^{}]*[^{}\s][^{}]*)\}\}$/;
 const DYNAMIC_PLACEHOLDER_INFO = {
   token: "{{tp.<Skriptname>}}",
-  description: "Ruft beim Anlegen tp.user.<Skriptname> auf und übernimmt dessen Rückgabewert",
+  description:
+    "Ruft beim Anlegen tp.user.<Skriptname>(tp, newFile, ctx) auf – Rückgabe: Wert dieser Property, oder ein Objekt mit Werten für mehrere Properties des TYPs",
 };
 
 // Kopie von frontmatter mit aufgelösten Platzhaltern - nur exakte Werte

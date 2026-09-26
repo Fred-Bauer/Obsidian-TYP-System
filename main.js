@@ -579,10 +579,10 @@ var require_frontmatter_placeholders = __commonJS({
         resolve: (file) => moment(file?.stat?.ctime ?? Date.now()).format("YYYY-MM-DD")
       }
     ];
-    var DYNAMIC_PLACEHOLDER_PATTERN2 = /^\{\{tp\.([a-zA-Z0-9_]+)\}\}$/;
+    var DYNAMIC_PLACEHOLDER_PATTERN2 = /^\{\{tp\.([^{}]*[^{}\s][^{}]*)\}\}$/;
     var DYNAMIC_PLACEHOLDER_INFO = {
       token: "{{tp.<Skriptname>}}",
-      description: "Ruft beim Anlegen tp.user.<Skriptname> auf und \xFCbernimmt dessen R\xFCckgabewert"
+      description: "Ruft beim Anlegen tp.user.<Skriptname>(tp, newFile, ctx) auf \u2013 R\xFCckgabe: Wert dieser Property, oder ein Objekt mit Werten f\xFCr mehrere Properties des TYPs"
     };
     function resolveFrontmatterPlaceholders2(frontmatter, file) {
       const resolved = {};
@@ -3075,7 +3075,7 @@ module.exports = class TypSystemPlugin extends Plugin {
   matchDynamicPlaceholder(value) {
     if (typeof value !== "string") return null;
     const match = value.match(DYNAMIC_PLACEHOLDER_PATTERN);
-    return match ? match[1] : null;
+    return match ? match[1].trim() : null;
   }
   // Für _obsidian/templater-scripts/TYP.js: die im TYP-View registrierten TYPen
   // samt ihrer dort gepflegten Beschreibung, statt sie aus _obsidian/Typen.md zu parsen -

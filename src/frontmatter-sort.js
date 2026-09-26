@@ -5,8 +5,8 @@ const SUBTYP_PROPERTY = "SUBTYP";
 // Order-Editor benutzt - alle vier Platzhalter-Blöcke sind dort per UI nicht
 // entfernbar, nur verschiebbar (siehe frontmatter-order-editor.js).
 // "typValue" ist die TYP-Property selbst, "subtypValue" analog die SUBTYP-
-// Property (siehe subtyp-view.js), "typ" die Standard-Frontmatter-Liste des
-// TYPs (siehe type-frontmatter-editor.js), "other" alles Übrige.
+// Property, "typ" die Standard-Frontmatter-Liste des TYPs (siehe
+// type-frontmatter-editor.js), "other" alles Übrige.
 const DEFAULT_GLOBAL_ORDER = [{ kind: "typValue" }, { kind: "subtypValue" }, { kind: "typ" }, { kind: "other" }];
 
 // Stellt sicher, dass genau je ein Eintrag pro Platzhalter-Art vorhanden ist -

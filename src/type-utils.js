@@ -1,15 +1,10 @@
-// Von typ-view.js UND subtyp-view.js genutzte, reine Hilfsfunktionen ohne
-// eigenen State - ausgelagert, damit beide Module sie nutzen können, ohne
-// dass eines das jeweils andere require()n muss (typ-view.js bindet
-// SubtypPane aus subtyp-view.js ein; ein Require in die Gegenrichtung wäre
-// ein zyklischer require, der je nach Ladereihenfolge ein unvollständiges
-// module.exports-Objekt liefern könnte).
+// Reine Hilfsfunktionen ohne eigenen State rund um TYP-Namen und deren
+// Sortierung.
 
-// TYPen UND SUBTYPen werden ausschließlich in Großbuchstaben angelegt/
-// umbenannt - beim Anlegen wie beim Umbenennen. Betrifft nur über die
-// jeweilige Liste getippte Namen, nicht Werte, die z. B. direkt im
-// Frontmatter einer Notiz in Kleinschreibung stehen (siehe "unregistrierte"
-// Zeilen in typ-view.js/subtyp-view.js).
+// TYPen werden ausschließlich in Großbuchstaben angelegt/umbenannt - beim
+// Anlegen wie beim Umbenennen. Betrifft nur über die Liste getippte Namen,
+// nicht Werte, die z. B. direkt im Frontmatter einer Notiz in Kleinschreibung
+// stehen (siehe "unregistrierte" Zeilen in typ-view.js).
 function normalizeTypeName(raw) {
   return raw.trim().toUpperCase();
 }

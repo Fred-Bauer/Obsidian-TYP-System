@@ -2,13 +2,11 @@ const { ItemView, Menu, Modal, Notice, setIcon, debounce } = require("obsidian")
 const { mountTypeFrontmatterEditor, addBlankProperty } = require("./type-frontmatter-editor");
 const { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require("./frontmatter-placeholders");
 const { normalizeTypeName, compareTypes, sortTypesByMode } = require("./type-utils");
-const { SubtypPane } = require("./subtyp-view");
 const { typeKeyOf, TYP_PROPERTY } = require("./typ-index");
 
 const VIEW_TYPE_TYP = "fred-typ-view";
 const DEFAULT_TYPE_COLOR = "#888888";
 const DEFAULT_SORT_ORDER = "count-desc";
-const DEFAULT_SUBTYP_PANE_RATIO = 0.5;
 
 const SORT_OPTIONS = [
   // Nutzt (anders als die übrigen Modi) keinen eigenen Vergleich, sondern die
@@ -186,8 +184,7 @@ class ConfirmMergeTypeModal extends ConfirmRenameTypeModal {
     contentEl.createEl("p", {
       text:
         `${this.affectedCount} Notiz(en) werden auf ${this.newType} umgestellt. ` +
-        `Farbe, Beschreibung und Standard-Frontmatter von ${this.oldType} entfallen, ` +
-        `seine SUBTYPen werden übernommen.`,
+        `Farbe, Beschreibung und Standard-Frontmatter von ${this.oldType} entfallen.`,
     });
 
     const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
@@ -227,7 +224,6 @@ class TypView extends ItemView {
 
     this.contentEl.empty();
     this.contentEl.addClass("fred-typ-view");
-    this.buildSplitPanes();
 
     this.registerDomEvent(this.contentEl, "keydown", (event) => {
       if (event.key === "Escape" && this.selectedType !== null) this.closeTypeSettings();
@@ -236,66 +232,6 @@ class TypView extends ItemView {
   }
 
   async onClose() {}
-
-  // Teilt den View-Content in zwei übereinander liegende, unabhängig
-  // scrollbare Bereiche: oben die bestehende TYP-Liste/-Detailansicht (siehe
-  // render()/renderTypeSettings(), rendern jetzt in paneTopEl statt direkt in
-  // contentEl), unten die neue, immer sichtbare SUBTYP-Liste (siehe
-  // SubtypPane in subtyp-view.js) - bleibt dadurch auch offen, während oben
-  // gerade eine TYP-Detailansicht steht. Größe per Ziehen am Splitter
-  // verstellbar, das Verhältnis wird in den Plugin-Settings gemerkt.
-  buildSplitPanes() {
-    this.splitEl = this.contentEl.createDiv({ cls: "fred-typ-split" });
-    this.paneTopEl = this.splitEl.createDiv({ cls: "fred-typ-pane fred-typ-pane-top" });
-    this.splitterEl = this.splitEl.createDiv({
-      cls: "fred-typ-splitter",
-      attr: { "aria-label": "Größe der SUBTYP-Liste anpassen" },
-    });
-    this.paneBottomEl = this.splitEl.createDiv({ cls: "fred-typ-pane fred-typ-pane-bottom" });
-
-    this.applyPaneRatio(this.plugin.settings.typSubtypPaneRatio ?? DEFAULT_SUBTYP_PANE_RATIO);
-    this.registerSplitterDrag();
-
-    this.subtypPane = new SubtypPane(this, this.paneBottomEl);
-  }
-
-  applyPaneRatio(ratio) {
-    const clamped = Math.min(0.85, Math.max(0.15, ratio));
-    this.paneBottomEl.style.flexBasis = `${clamped * 100}%`;
-  }
-
-  // Kein Obsidian-eigenes Splitter-Widget verfügbar (anders als z. B. zwischen
-  // Sidebar und Editor) - daher ein schlichter eigener Drag-Handler direkt auf
-  // pointermove/pointerup, nur für die Dauer eines einzelnen Drags registriert
-  // (statt über registerDomEvent, das erst beim Schließen der View wieder
-  // abmeldet) und deshalb im eigenen pointerup-Handler selbst wieder entfernt.
-  registerSplitterDrag() {
-    this.registerDomEvent(this.splitterEl, "pointerdown", (event) => {
-      event.preventDefault();
-      this.splitterEl.addClass("is-dragging");
-
-      const startY = event.clientY;
-      const totalHeight = this.splitEl.getBoundingClientRect().height;
-      const startBottomHeight = this.paneBottomEl.getBoundingClientRect().height;
-
-      const onMove = (moveEvent) => {
-        if (totalHeight <= 0) return;
-        const bottomHeight = startBottomHeight + (startY - moveEvent.clientY);
-        this.applyPaneRatio(bottomHeight / totalHeight);
-      };
-      const onUp = async () => {
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", onUp);
-        this.splitterEl.removeClass("is-dragging");
-        const ratio = totalHeight > 0 ? this.paneBottomEl.getBoundingClientRect().height / totalHeight : DEFAULT_SUBTYP_PANE_RATIO;
-        this.plugin.settings.typSubtypPaneRatio = Math.min(0.85, Math.max(0.15, ratio));
-        await this.plugin.saveSettings();
-      };
-
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", onUp);
-    });
-  }
 
   openSearch(type) {
     const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
@@ -469,7 +405,7 @@ class TypView extends ItemView {
         return;
       }
 
-      const contentEl = this.paneTopEl;
+      const { contentEl } = this;
       contentEl.empty();
 
       const { counts, noType } = this.plugin.typIndex.typeCounts();
@@ -514,12 +450,6 @@ class TypView extends ItemView {
       }
     } finally {
       this._rendering = false;
-      // Die SUBTYP-Liste ist von diesem selectedType-Wechsel abhängig (gefiltert
-      // auf einen offenen TYP, sonst ungefiltert, siehe SubtypPane.render() in
-      // subtyp-view.js) - bei jedem Neu-Rendern dieser View deshalb hier
-      // zentral mitgezogen, unabhängig davon, welcher der beiden obigen Zweige
-      // (Liste oder Detailansicht) gerade lief.
-      this.subtypPane?.render(this.selectedType);
     }
   }
 
@@ -786,7 +716,7 @@ class TypView extends ItemView {
   }
 
   renderTypeSettings(type) {
-    const contentEl = this.paneTopEl;
+    const { contentEl } = this;
     contentEl.empty();
 
     const header = contentEl.createDiv({ cls: "fred-typ-detail-header" });
@@ -912,10 +842,6 @@ class TypView extends ItemView {
       delete this.plugin.settings.typeDefaultFrontmatter[type];
       delete this.plugin.settings.typeFloatingKeys[type];
       delete this.ensureTypeManual()[type];
-      // SUBTYPen hängen an diesem TYP-Namen (siehe subtyp-view.js) - sonst
-      // blieben ihre Einträge verwaist unter dem gelöschten Namen liegen.
-      delete this.plugin.settings.subtypesByType[type];
-      delete this.plugin.settings.subtypeDescriptions[type];
       // Vor refreshTypColors() zurück zur Liste, aus demselben Grund wie beim
       // Umbenennen: refreshTypColors() rendert (u. a. über registerTypView)
       // synchron neu - stünde selectedType noch auf dem gerade gelöschten
@@ -972,18 +898,6 @@ class TypView extends ItemView {
       if (this.ensureTypeManual()[type] !== undefined) {
         this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
         delete this.plugin.settings.typeManual[type];
-      }
-      // SUBTYPen hängen am TYP-Namen (siehe subtyp-view.js) - ohne diese
-      // Migration blieben sie unter dem alten Namen verwaist und wären in der
-      // SUBTYP-Liste des umbenannten TYPs (jetzt unter "value" gefiltert)
-      // nicht mehr auffindbar.
-      if (this.plugin.settings.subtypesByType[type] !== undefined) {
-        this.plugin.settings.subtypesByType[value] = this.plugin.settings.subtypesByType[type];
-        delete this.plugin.settings.subtypesByType[type];
-      }
-      if (this.plugin.settings.subtypeDescriptions[type] !== undefined) {
-        this.plugin.settings.subtypeDescriptions[value] = this.plugin.settings.subtypeDescriptions[type];
-        delete this.plugin.settings.subtypeDescriptions[type];
       }
       // Vor refreshTypColors() setzen: das ruft (u. a. über den in
       // registerTypView zurückgegebenen Refresh) synchron render() auf -
@@ -1070,9 +984,7 @@ class TypView extends ItemView {
 
   // Legt source in target auf: Notizen werden auf target umgeschrieben,
   // source verschwindet aus der TYP-Liste samt eigener Einstellungen (target
-  // behält seine). Die SUBTYPen von source werden übernommen, da die
-  // umgeschriebenen Notizen sie weiterhin tragen - Beschreibungen nur, wo
-  // target für denselben SUBTYP noch keine hat.
+  // behält seine).
   async mergeType(source, target) {
     const settings = this.plugin.settings;
     const renamed = await renameTypeInNotes(this.plugin, source, target);
@@ -1083,23 +995,6 @@ class TypView extends ItemView {
     delete settings.typeDefaultFrontmatter[source];
     delete settings.typeFloatingKeys[source];
     delete this.ensureTypeManual()[source];
-
-    const sourceSubtypes = settings.subtypesByType?.[source] ?? [];
-    if (sourceSubtypes.length > 0) {
-      const targetSubtypes = (settings.subtypesByType[target] ??= []);
-      for (const subtyp of sourceSubtypes) {
-        if (!targetSubtypes.includes(subtyp)) targetSubtypes.push(subtyp);
-      }
-    }
-    const sourceDescriptions = settings.subtypeDescriptions?.[source];
-    if (sourceDescriptions) {
-      const targetDescriptions = (settings.subtypeDescriptions[target] ??= {});
-      for (const [subtyp, description] of Object.entries(sourceDescriptions)) {
-        if (targetDescriptions[subtyp] === undefined) targetDescriptions[subtyp] = description;
-      }
-    }
-    if (settings.subtypesByType) delete settings.subtypesByType[source];
-    if (settings.subtypeDescriptions) delete settings.subtypeDescriptions[source];
 
     // Vor refreshTypColors() setzen, aus demselben Grund wie in applyRename.
     this.selectedType = target;
@@ -1156,12 +1051,6 @@ function registerTypView(plugin) {
     id: "typ-hinzufuegen",
     name: "TYP - Neuen TYP hinzufügen",
     callback: () => addTypCommand(plugin),
-  });
-
-  plugin.addCommand({
-    id: "subtyp-hinzufuegen",
-    name: "SUBTYP - Neuen Subtyp hinzufügen",
-    callback: () => addSubtypCommand(plugin),
   });
 
   // Beim Hot-Reload bleibt der alte Leaf als Objekt unangetastet bestehen (nur
@@ -1274,20 +1163,6 @@ async function addTypCommand(plugin) {
   if (!(view instanceof TypView)) return;
   if (view.selectedType !== null) view.closeTypeSettings();
   view.startAdd();
-}
-
-// SUBTYPen hängen immer an einem TYP (siehe SubtypPane in subtyp-view.js) -
-// ohne offene TYP-Detailansicht (view.selectedType) gibt es daher keinen
-// Kontext, unter dem ein neuer Subtyp angelegt werden könnte.
-async function addSubtypCommand(plugin) {
-  await activateTypView(plugin);
-  const view = plugin.app.__fredTypLeaf?.view;
-  if (!(view instanceof TypView)) return;
-  if (view.selectedType === null) {
-    new Notice("Bitte zuerst einen TYP öffnen.");
-    return;
-  }
-  view.subtypPane?.startAdd();
 }
 
 module.exports = { registerTypView, VIEW_TYPE_TYP, compareTypes, sortTypesByMode, DEFAULT_SORT_ORDER, DEFAULT_TYPE_COLOR };

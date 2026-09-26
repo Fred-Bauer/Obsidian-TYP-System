@@ -85,12 +85,6 @@
     "EXTERN": false,
     "KONTAKT": false
   },
-  "subtypesByType": {
-    "KONTAKT": [
-      "TEST"
-    ]
-  },
-  "subtypeDescriptions": {},
   "globalPropertyOrder": [
     {
       "kind": "property",
@@ -123,7 +117,6 @@
   "noteTitleVerticalAlign": "bottom",
   "typSortOrder": "manual",
   "typListDescriptionEnabled": true,
-  "typSubtypPaneRatio": 0.4612035284770212,
   "includeIgnoredFiles": false,
   "graphTagColorEnabled": true,
   "graphTagColor": "#1c1c1c",

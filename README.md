@@ -22,7 +22,7 @@ Notiz-Typ-System für diesen Vault: eine eigene, links andockende **TYP-Pane** (
 Per Klick auf einen registrierten Typ:
 
 - **Zwei Umbenennen-Buttons** nebeneinander: der normale (Bleistift) ändert nur die Plugin-Einstellungen (Farbe, Beschreibung, Standard-Frontmatter etc.); der davor hervorgehobene (Akzentfarbe, ebenfalls Bleistift) schreibt zusätzlich den TYP-Wert **aller betroffenen Notizen** um – vor dem Speichern erscheint dafür ein Bestätigungs-Modal mit der Anzahl betroffener Notizen
-- **Zusammenlegen:** Umbenennen auf den Namen eines bereits registrierten Typs (egal über welchen der beiden Buttons) fragt, ob beide zusammengelegt werden sollen. Dabei werden die Notizen auf den Zieltyp umgeschrieben; Farbe, Beschreibung und Standard-Frontmatter des Quelltyps entfallen, seine SUBTYPen (samt Beschreibungen, sofern das Ziel keine eigene hat) werden übernommen
+- **Zusammenlegen:** Umbenennen auf den Namen eines bereits registrierten Typs (egal über welchen der beiden Buttons) fragt, ob beide zusammengelegt werden sollen. Dabei werden die Notizen auf den Zieltyp umgeschrieben; Farbe, Beschreibung und Standard-Frontmatter des Quelltyps entfallen
 - **Löschen**-Button mit Bestätigungs-Modal
 - In beiden Bestätigungs-Modalen wird der TYP-Name je nach Einstellung *TYP View einfärben* farbig oder mit vorangestelltem Farbpunkt dargestellt
 - Notiz-Anzahl direkt neben dem Namen (muted)

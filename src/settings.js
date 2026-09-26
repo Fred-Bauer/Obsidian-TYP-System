@@ -16,12 +16,6 @@ const DEFAULT_SETTINGS = {
   // nicht automatisch an (nur über den expliziten includeFloating-Parameter).
   typeFloatingKeys: {},
   typeManual: {},
-  // SUBTYP (siehe subtyp-view.js): je TYP eine eigene Liste registrierter
-  // Subtypen samt Beschreibung - anders als TYP ohne eigene Farbe, ohne
-  // "Manueller TYP"-Schalter und (bisher) ohne Standard-Frontmatter/
-  // Detailansicht, siehe Kommentar an SubtypPane.
-  subtypesByType: {},
-  subtypeDescriptions: {},
   // Siehe frontmatter-order-editor.js / frontmatter-sort.js: Reihenfolge aus
   // fest positionierten Einzel-Properties (kind: "property") sowie den vier
   // nicht entfernbaren Platzhaltern "typValue" (TYP-Property selbst),
@@ -46,9 +40,6 @@ const DEFAULT_SETTINGS = {
   noteTitleVerticalAlign: "top",
   typSortOrder: "count-desc",
   typListDescriptionEnabled: true,
-  // Höhenverhältnis der unteren SUBTYP-Hälfte im geteilten TYP-View (siehe
-  // buildSplitPanes in typ-view.js), per Splitter-Drag verstellbar.
-  typSubtypPaneRatio: 0.5,
   includeIgnoredFiles: false,
   graphTagColorEnabled: false,
   graphTagColor: "",

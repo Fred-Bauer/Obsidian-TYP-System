@@ -69,11 +69,16 @@ function keysForFile(plugin, file) {
   return splitKeys(blocksForType(plugin, type, subtype));
 }
 
-// Einzelner Block im Editor der TYP-Detailansicht (TYP selbst oder einer
-// seiner Subtypen, siehe typeStore/subtypeStore in type-frontmatter-editor.js).
+// Editor der TYP-Detailansicht: der gemeinsame Editor über alle Blöcke eines
+// TYPs (store.unified, siehe unified-frontmatter-editor.js) - Subtyp-Blöcke
+// nur mit dem Unter-Schalter "Subtyp" - bzw. ein einzelner Block (siehe
+// typeStore/subtypeStore in type-frontmatter-editor.js).
 function keysForStore(plugin, store) {
   const { colorViews } = plugin.settings;
   if (!colorViews.frontmatterDefaults || !store) return NO_KEYS;
+  if (store.unified) {
+    return splitKeys(blocksForType(plugin, store.type, colorViews.frontmatterDefaultsSubtyp ? ALL_SUBTYPES : null));
+  }
   if (store.subtype && !colorViews.frontmatterDefaultsSubtyp) return NO_KEYS;
   return splitKeys([blockOf(store.getFrontmatter(), store.getFloating())]);
 }
@@ -195,7 +200,6 @@ function applyFrontmatterDefaultHighlight(plugin) {
       const { standard, floating } = keysForStore(plugin, editor.owner?.fredStore);
       applyToContainer(editor.containerEl, standard, floating);
     }
-    leaf.view?.markOverriddenProperties?.();
   }
 
   applyToAllPropertiesView(plugin);

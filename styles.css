@@ -501,26 +501,22 @@
   color: var(--interactive-accent-hover);
 }
 
-/* Frontmatter-Blöcke der Detailansicht (Standard-Frontmatter und je Subtyp,
-   siehe renderFrontmatterBlock in typ-view.js) - im Stil der Gruppen in
-   Obsidians eigenen Einstellungen (.setting-group .setting-items): Rundung
-   und Rahmen von dort. Die Fläche aber nicht --setting-items-background -
-   das entspricht z. B. im Minimal-Theme genau dem Seitenleisten-Hintergrund
-   und wäre hier unsichtbar -, sondern --background-primary, das sich in
-   praktisch jedem Theme von der Seitenleiste (--background-secondary) abhebt.
-   Seitlicher Innenabstand bewusst knapp: unter 250px Breite bricht Obsidians
-   Property-Widget Name und Wert auf zwei Zeilen um (@container metadata). */
+/* Eigenständige Subtyp-Blöcke außerhalb des gemeinsamen Editors (nicht
+   erfasste Subtypen, neu angelegter Subtyp während der Namenseingabe) - im
+   Stil der Gruppen in Obsidians eigenen Einstellungen (.setting-group
+   .setting-items): Rundung und Rahmen von dort. Die Fläche aber nicht
+   --setting-items-background - das entspricht z. B. im Minimal-Theme genau
+   dem Seitenleisten-Hintergrund und wäre hier unsichtbar -, sondern
+   --background-primary, das sich in praktisch jedem Theme von der
+   Seitenleiste (--background-secondary) abhebt. Seitlicher Innenabstand
+   bewusst knapp: unter 250px Breite bricht Obsidians Property-Widget Name
+   und Wert auf zwei Zeilen um (@container metadata). Die Blöcke im
+   gemeinsamen Editor (.fred-typ-unified-card unten) nutzen dieselben Maße. */
 .fred-typ-frontmatter-block {
   background-color: var(--background-primary);
   border-radius: var(--setting-items-radius);
   border: var(--setting-items-border-width) solid var(--setting-items-border-color);
   padding: var(--size-4-2) var(--size-4-2);
-}
-
-/* Der Abstand unter dem Property-Block ist für Notizen gedacht (Abstand zum
-   Text darunter) - im Block selbst nur Leerraum. */
-.fred-typ-frontmatter-block .metadata-container {
-  margin-bottom: 0;
 }
 
 .fred-typ-frontmatter-block + .fred-typ-frontmatter-block {
@@ -540,6 +536,28 @@
   margin-left: var(--size-4-1);
 }
 
+/* Neu angelegter Subtyp während der Namenseingabe (siehe startAddSubtype) -
+   steht außerhalb des gemeinsamen Editors, übernimmt aber exakt dessen Maße
+   (Abstand, Überschrift, Abschluss, siehe .fred-typ-unified unten), damit
+   beim Abschließen nichts springt. */
+.fred-typ-subtype-pending {
+  margin-top: var(--size-4-3);
+  padding: 0 var(--size-4-2);
+}
+
+.fred-typ-subtype-pending .fred-typ-frontmatter-header {
+  margin: 0;
+  padding: var(--size-4-2) 0 var(--size-4-1);
+}
+
+.fred-typ-subtype-pending .fred-typ-section-footer {
+  height: var(--size-4-1);
+}
+
+.fred-typ-subtype-pending .fred-typ-frontmatter-add-group {
+  pointer-events: none;
+}
+
 /* Name eines gerade neu angelegten Subtyps (siehe startAddSubtype). */
 .fred-typ-subtype-name-input {
   min-width: 8em;
@@ -550,10 +568,57 @@
   outline: none;
 }
 
-/* Vom Block eines Subtyps überschriebene Zeile im Standard-Frontmatter des
-   TYPs - ganze Zeile samt Wert ausgegraut (siehe markOverriddenProperties). */
-.fred-typ-overridden-property {
-  opacity: 0.4;
+/* Gemeinsamer Editor über Standard-Frontmatter und Subtyp-Blöcke (siehe
+   unified-frontmatter-editor.js). Die Blöcke sind nur Optik: Überschrift
+   (.fred-typ-section-header) und Abschluss (.fred-typ-section-footer) stehen
+   als eigene Elemente zwischen Obsidians Zeilen, die Kartenfläche der
+   Subtyp-Blöcke liegt als eigene Ebene dahinter (.fred-typ-unified-card) -
+   gleiche Maße wie .fred-typ-frontmatter-block oben. */
+.fred-typ-unified {
+  position: relative;
+}
+
+.fred-typ-unified-cards {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.fred-typ-unified-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background-color: var(--background-primary);
+  border-radius: var(--setting-items-radius);
+  border: var(--setting-items-border-width) solid var(--setting-items-border-color);
+}
+
+/* Über der Kartenebene, sonst läge die (positionierte) Ebene darüber. */
+.fred-typ-unified > .metadata-container {
+  position: relative;
+  margin-bottom: 0;
+}
+
+.fred-typ-unified .metadata-properties {
+  padding: 0 var(--size-4-2);
+}
+
+/* Obsidians Property-Editor verkleinert in seinem Bereich die Icons - die
+   Überschriften stehen zwar in dessen Liste, sollen aber wie die übrige
+   Detailansicht aussehen (normale Icongröße der "+"-Buttons). */
+.fred-typ-unified .fred-typ-section-header {
+  margin: 0;
+  padding: var(--size-4-2) 0 var(--size-4-1);
+  --icon-size: var(--icon-m);
+  --icon-stroke: var(--icon-m-stroke-width);
+}
+
+.fred-typ-unified .fred-typ-section-header.fred-typ-section-sub {
+  margin-top: var(--size-4-3);
+}
+
+.fred-typ-unified .fred-typ-section-footer {
+  height: var(--size-4-1);
 }
 
 .fred-typ-subtype-add {
@@ -574,8 +639,23 @@
   height: var(--icon-s);
 }
 
+/* Nicht erfasste Subtypen (siehe renderUnregisteredSubtypes) - Blöcke wie die
+   registrierten, aber nur mit ausgegrauter Überschrift und als Ganzes
+   anklickbar. */
 .fred-typ-subtype-unregistered-list {
-  margin-top: var(--size-4-2);
+  margin-top: var(--size-4-3);
+}
+
+.fred-typ-subtype-unregistered {
+  cursor: var(--cursor);
+}
+
+.fred-typ-subtype-unregistered .fred-typ-frontmatter-header {
+  margin-bottom: 0;
+}
+
+.fred-typ-subtype-unregistered .fred-typ-detail-section-title {
+  color: var(--text-faint);
 }
 
 .fred-typ-frontmatter-unavailable {

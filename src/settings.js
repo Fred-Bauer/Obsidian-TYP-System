@@ -79,6 +79,13 @@ class TypSystemSettingTab extends PluginSettingTab {
   // Einträge würden stattdessen je als eigene kleine Box gerendert.
   display() {
     const { containerEl } = this;
+    // Scroll-Position über den Neuaufbau retten (display() wird auch von
+    // Schaltern mit Unter-Optionen aufgerufen): das Dropdown der
+    // TYP-Markierung misst sich beim setValue() (resizeToFit liest
+    // offsetWidth) und erzwingt so ein Layout, solange die Seite erst bis
+    // dorthin aufgebaut ist - der Browser kappt scrollTop dann auf diese
+    // Teilhöhe, die Ansicht spränge nach oben.
+    const { scrollTop } = containerEl;
     containerEl.empty();
 
     new SettingGroup(containerEl)
@@ -336,6 +343,8 @@ class TypSystemSettingTab extends PluginSettingTab {
           'Bestimmt die Reihenfolge, in der die Befehle "Frontmatter Sortierung aktualisieren" die in einer Notiz vorhandenen Properties anordnen (ergänzt oder ändert keine Werte). Einzelne Properties (z. B. cssclasses, aliases) lassen sich fest platzieren - "TYP" ist die TYP-Property selbst, "SUBTYP" analog die SUBTYP-Property, "TYP-Frontmatter" steht für die Standard-Frontmatter-Liste des jeweiligen Typs samt dahinter dem Block seines SUBTYPs, "Sonstige Properties" für alles Übrige. Reihenfolge per Drag & Drop änderbar, die vier Platzhalter-Zeilen lassen sich nicht entfernen.',
       });
     });
+
+    containerEl.scrollTop = scrollTop;
   }
 }
 

@@ -77,6 +77,50 @@ class TypPickerModal extends FuzzySuggestModal {
   }
 }
 
+// Auswahl eines Subtyps für einen bereits gewählten TYP (siehe pickSubtype).
+// Wie TypPickerModal, zusätzlich mit einem ausgegrauten Eintrag "Kein
+// Subtyp" am Ende (item.none). ESC löst mit null auf - TYP.js kehrt dann zur
+// TYP-Auswahl zurück. Subtypen haben keine eigene Farbe oder Beschreibung,
+// der Name steht daher neutral mit Notiz-Anzahl.
+class SubtypPickerModal extends TypPickerModal {
+  constructor(app, plugin, type, items, resolve) {
+    super(app, plugin, items, resolve);
+    this.setPlaceholder(`Subtyp für ${type} – ESC für zurück`);
+  }
+
+  renderSuggestion(match, el) {
+    const item = match.item;
+    el.addClass("fred-typ-picker-suggestion");
+    if (item.none) el.addClass("fred-typ-picker-unregistered");
+    el.createSpan({ cls: "fred-typ-picker-name", text: item.type });
+    el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
+  }
+
+  onChooseItem(item) {
+    this.resolve(item.none ? "" : item.type);
+  }
+}
+
+// Für _obsidian/templater-scripts/TYP.js: öffnet den Subtyp-Picker, sobald
+// der TYP mindestens einen registrierten Subtyp hat (in der Reihenfolge der
+// Blöcke in der TYP-Detailansicht). Löst auf mit
+//  - dem gewählten Subtyp,
+//  - "" für "Kein Subtyp" - bzw. sofort, ohne Picker, wenn der TYP gar keine
+//    Subtypen hat,
+//  - null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück).
+function pickSubtype(app, plugin, type) {
+  return new Promise((resolve) => {
+    const items = plugin.getSubtypes(type).map(({ subtype, count }) => ({ type: subtype, description: "", count }));
+    if (items.length === 0) {
+      resolve("");
+      return;
+    }
+    const noneCount = plugin.typIndex.subtypeBucket(type).noSubtype;
+    items.push({ type: "Kein Subtyp", description: "", count: noneCount, none: true });
+    new SubtypPickerModal(app, plugin, type, items, resolve).open();
+  });
+}
+
 // Nicht in plugin.settings.types registrierte TYPen, die aber tatsächlich in
 // Notizen vorkommen - analog zu den "unregistrierten" Zeilen der TYP-Liste
 // (siehe unregisteredRows in typ-view.js). Keine Beschreibung/Farbe, da für
@@ -116,4 +160,4 @@ function pickType(app, plugin, { includeManualOff = false, includeUnregistered =
   });
 }
 
-module.exports = { pickType };
+module.exports = { pickType, pickSubtype };

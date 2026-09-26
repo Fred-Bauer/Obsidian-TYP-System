@@ -169,22 +169,37 @@ async function sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys) {
 
   let changed = false;
   await app.fileManager.processFrontMatter(file, (frontmatter) => {
-    const existingKeys = Object.keys(frontmatter);
-    if (existingKeys.length <= 1) return;
-
-    const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys);
-    if (sortedKeys.every((key, i) => key === existingKeys[i])) return;
-
-    // In-place umsortieren (siehe Kommentar in type-frontmatter-editor.js zu
-    // saveFrontmatter/stripTypProperty): Objekt-Insertion-Order bestimmt die
-    // spätere YAML-Reihenfolge, daher alle Keys löschen und in neuer
-    // Reihenfolge wieder einfügen, statt ein neues Objekt zurückzugeben.
-    const snapshot = { ...frontmatter };
-    for (const key of existingKeys) delete frontmatter[key];
-    for (const key of sortedKeys) frontmatter[key] = snapshot[key];
-    changed = true;
+    changed = sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys);
   });
   return changed;
+}
+
+// Sortiert das von processFrontMatter gelieferte Objekt in-place (siehe
+// Kommentar in type-frontmatter-editor.js zu saveFrontmatter/stripTypProperty):
+// Objekt-Insertion-Order bestimmt die spätere YAML-Reihenfolge, daher alle
+// Keys löschen und in neuer Reihenfolge wieder einfügen, statt ein neues
+// Objekt zurückzugeben. Liefert true bei einer Änderung.
+function sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys) {
+  const existingKeys = Object.keys(frontmatter);
+  if (existingKeys.length <= 1) return false;
+
+  const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys);
+  if (sortedKeys.every((key, i) => key === existingKeys[i])) return false;
+
+  const snapshot = { ...frontmatter };
+  for (const key of existingKeys) delete frontmatter[key];
+  for (const key of sortedKeys) frontmatter[key] = snapshot[key];
+  return true;
+}
+
+// Für Aufrufer, die ohnehin gerade in processFrontMatter schreiben (z. B.
+// applyTypeProperties/_obsidian/templater-scripts/TYP.js): sortiert das
+// Objekt direkt mit ausdrücklich übergebenem TYP/Subtyp - der Index bzw.
+// Metadata-Cache kennt die gerade geschriebenen Werte zu diesem Zeitpunkt
+// noch nicht.
+function sortFrontmatterFor(plugin, frontmatter, type, subtype) {
+  const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
+  return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, type, subtype));
 }
 
 // Sortiert eine einzelne, bereits bekannte Notiz (z. B. die aktive Datei).
@@ -230,6 +245,7 @@ async function sortAllFrontmatter(app, plugin, onlyType) {
 module.exports = {
   sortAllFrontmatter,
   sortSingleFileFrontmatter,
+  sortFrontmatterFor,
   normalizeGlobalOrder,
   DEFAULT_GLOBAL_ORDER,
   TYP_PROPERTY,

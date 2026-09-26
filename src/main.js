@@ -2,7 +2,8 @@ const { Plugin } = require("obsidian");
 const { DEFAULT_SETTINGS, TypSystemSettingTab } = require("./settings");
 const { registerCommands } = require("./commands");
 const { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require("./typ-view");
-const { TypIndex } = require("./typ-index");
+const { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
+const { getSubtype, getSubtypeNames, enforceUniqueKeys } = require("./subtypes");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
 const { registerSearchColors } = require("./search-colors");
@@ -13,9 +14,9 @@ const { registerActiveTitleColors } = require("./active-title-colors");
 const { registerLinkColors } = require("./link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { registerPropertyRenameSync } = require("./property-rename-sync");
-const { normalizeGlobalOrder } = require("./frontmatter-sort");
+const { normalizeGlobalOrder, sortFrontmatterFor } = require("./frontmatter-sort");
 const { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require("./frontmatter-placeholders");
-const { pickType: pickTypeModal } = require("./type-picker");
+const { pickType: pickTypeModal, pickSubtype: pickSubtypeModal } = require("./type-picker");
 const { registerPlaceholderSuggest } = require("./placeholder-suggest");
 
 // Migriert Bestandsinstallationen von der alten, separaten
@@ -95,12 +96,66 @@ module.exports = class TypSystemPlugin extends Plugin {
   // file (optional) wird an resolveFrontmatterPlaceholders() durchgereicht -
   // nur für den "{{created}}"-Platzhalter relevant, der das Erstellungsdatum
   // der Ziel-Datei statt des Aufrufzeitpunkts liefert.
-  getTypeDefaults(type, { includeFloating = false, file } = {}) {
-    const defaults = { ...(this.settings.typeDefaultFrontmatter[type] ?? {}) };
+  //
+  // subtype (optional): ergänzt das Standard-Frontmatter um den Block dieses
+  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter. Jeder Key gehört
+  // zu genau einem Block (siehe enforceUniqueKeys) - käme er doch doppelt vor,
+  // bliebe seine Position aus der TYP-Liste, Wert und Floating-Markierung
+  // kämen aus dem Subtyp-Block.
+  getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
+    const defaults = {};
+    const isFloating = new Map();
+    const addBlock = (frontmatter, floatingKeys) => {
+      const actualKeys = new Map(Object.keys(defaults).map((key) => [key.toLowerCase(), key]));
+      for (const [key, value] of Object.entries(frontmatter ?? {})) {
+        if (key === "") continue;
+        const target = actualKeys.get(key.toLowerCase()) ?? key;
+        defaults[target] = value;
+        isFloating.set(target, (floatingKeys ?? []).includes(key));
+      }
+    };
+    addBlock(this.settings.typeDefaultFrontmatter[type], this.settings.typeFloatingKeys[type]);
+    const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
+    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
+
     if (!includeFloating) {
-      for (const key of this.settings.typeFloatingKeys[type] ?? []) delete defaults[key];
+      for (const [key, floating] of isFloating) if (floating) delete defaults[key];
     }
     return resolveFrontmatterPlaceholders(defaults, file);
+  }
+
+  // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
+  // der Reihenfolge ihrer Blöcke, samt Notiz-Anzahl.
+  getSubtypes(type) {
+    const { counts } = this.typIndex.subtypeBucket(type);
+    return getSubtypeNames(this.settings, type).map((subtype) => ({ subtype, count: counts.get(subtype) ?? 0 }));
+  }
+
+  // Für _obsidian/templater-scripts/TYP.js: Subtyp-Picker (siehe
+  // type-picker.js). Löst mit dem gewählten Subtyp auf, mit "" für "Kein
+  // Subtyp" (bzw. ohne Picker, wenn der TYP keine Subtypen hat), oder mit
+  // null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück).
+  pickSubtype(type) {
+    return pickSubtypeModal(this.app, this, type);
+  }
+
+  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter:
+  // setzt TYP und SUBTYP in einheitlicher Schreibweise - eine abweichend
+  // geschriebene Property ("typ", "Subtyp") wird an ihrer Stelle umbenannt
+  // statt verdoppelt. subtype null entfernt einen vorhandenen SUBTYP.
+  applyTypeProperties(frontmatter, type, subtype) {
+    setCanonicalProperty(frontmatter, TYP_PROPERTY, type);
+    if (subtype) setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, subtype);
+    else deleteProperty(frontmatter, SUBTYP_PROPERTY);
+  }
+
+  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter
+  // und nach allen übrigen Änderungen: bringt das Frontmatter in die
+  // Reihenfolge der Frontmatter-Sortierung (globale Reihenfolge, TYP-
+  // Frontmatter samt Subtyp-Block) - sonst landen neu ergänzte Properties
+  // (z. B. SUBTYP in einer bestehenden Notiz) am Ende.
+  sortFrontmatter(frontmatter, type, subtype = null) {
+    return sortFrontmatterFor(this, frontmatter, type, subtype);
   }
 
   // Für _obsidian/templater-scripts/TYP.js: erkennt einen dynamischen
@@ -155,6 +210,9 @@ module.exports = class TypSystemPlugin extends Plugin {
     // Zeit vor "TYP als Listeneintrag" stammt (siehe frontmatter-sort.js).
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
     migrateFloatingFrontmatter(this.settings);
+    // Jeder Key nur in einem Block je TYP (siehe enforceUniqueKeys) - räumt
+    // Daten aus der Zeit auf, als Subtypen Keys noch überschreiben konnten.
+    for (const type of Object.keys(this.settings.typeSubtypes ?? {})) enforceUniqueKeys(this.settings, type);
   }
 
   async saveSettings() {

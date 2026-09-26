@@ -1,5 +1,6 @@
 const { Notice } = require("obsidian");
 const { typeStore, subtypeStore } = require("./type-frontmatter-editor");
+const { getSubtypeNames } = require("./subtypes");
 
 const TYP_PROPERTY = "TYP";
 const SUBTYP_PROPERTY = "SUBTYP";
@@ -54,6 +55,27 @@ function renameInStore(store, oldKey, newKey) {
   return true;
 }
 
+// Entfernt oldKey samt Floating-Markierung aus store (ein anderer Block
+// desselben TYPs), weil owner newKey bereits führt - dessen leerer Wert
+// übernimmt dabei den alten. Liefert true bei einer Änderung.
+function moveIntoOwner(store, owner, oldKey, newKey) {
+  const defaults = store.getFrontmatter();
+  const sourceKey = Object.keys(defaults).find((key) => sameKey(key, oldKey));
+  if (sourceKey === undefined) return false;
+
+  const next = { ...defaults };
+  delete next[sourceKey];
+  store.setFrontmatter(next);
+  store.setFloating(store.getFloating().filter((key) => key !== sourceKey));
+
+  const ownerDefaults = owner.getFrontmatter();
+  const targetKey = Object.keys(ownerDefaults).find((key) => sameKey(key, newKey));
+  if (isEmptyValue(ownerDefaults[targetKey]) && !isEmptyValue(defaults[sourceKey])) {
+    owner.setFrontmatter({ ...ownerDefaults, [targetKey]: defaults[sourceKey] });
+  }
+  return true;
+}
+
 // Einzel-Property-Einträge der globalen Reihenfolge - dort sind keine
 // Dopplungen erlaubt, ein bereits vorhandener Zieleintrag behält daher seine
 // Position und der alte entfällt.
@@ -80,12 +102,25 @@ async function syncRename(plugin, oldKey, newKey) {
   const { settings } = plugin;
   let typeCount = 0;
   let subtypeCount = 0;
-  for (const type of Object.keys(settings.typeDefaultFrontmatter)) {
-    if (renameInStore(typeStore(plugin, type), oldKey, newKey)) typeCount++;
-  }
-  for (const [type, subtypes] of Object.entries(settings.typeSubtypes ?? {})) {
-    for (const subtype of Object.keys(subtypes)) {
-      if (renameInStore(subtypeStore(plugin, type, subtype), oldKey, newKey)) subtypeCount++;
+  const count = (store) => (store.subtype ? subtypeCount++ : typeCount++);
+  const types = new Set([...Object.keys(settings.typeDefaultFrontmatter), ...Object.keys(settings.typeSubtypes ?? {})]);
+  for (const type of types) {
+    const stores = [typeStore(plugin, type), ...getSubtypeNames(settings, type).map((subtype) => subtypeStore(plugin, type, subtype))];
+
+    // Jeder Key gehört zu genau einem Block eines TYPs (siehe
+    // enforceUniqueKeys in subtypes.js): gibt es newKey schon in einem Block,
+    // behält dieser ihn - aus den übrigen verschwindet oldKey, sein Wert wird
+    // nur übernommen, wenn der bestehende Eintrag leer ist. Bei einer reinen
+    // Änderung der Groß-/Kleinschreibung ist das nie der Fall.
+    const owner = sameKey(oldKey, newKey)
+      ? null
+      : stores.find((store) => Object.keys(store.getFrontmatter()).some((key) => sameKey(key, newKey)));
+    for (const store of stores) {
+      if (!owner || store === owner) {
+        if (renameInStore(store, oldKey, newKey)) count(store);
+      } else if (moveIntoOwner(store, owner, oldKey, newKey)) {
+        count(store);
+      }
     }
   }
   const orderChanged = renameInGlobalOrder(settings, oldKey, newKey);

@@ -87,7 +87,22 @@
   },
   "typeSubtypes": {
     "PROJEKT": {
-      "TEST": {
+      "Test": {
+        "frontmatter": {
+          "test2": null,
+          "test1": null
+        },
+        "floatingKeys": []
+      },
+      "Tecdf": {
+        "frontmatter": {},
+        "floatingKeys": []
+      },
+      "Sx": {
+        "frontmatter": {},
+        "floatingKeys": []
+      },
+      "Sdfsd": {
         "frontmatter": {},
         "floatingKeys": []
       }

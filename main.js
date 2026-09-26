@@ -7,8 +7,8 @@ var __commonJS = (cb, mod) => function __require() {
 var require_typ_index = __commonJS({
   "src/typ-index.js"(exports2, module2) {
     var { Events, TFile, debounce } = require("obsidian");
-    var TYP_PROPERTY = "TYP";
-    var SUBTYP_PROPERTY = "SUBTYP";
+    var TYP_PROPERTY2 = "TYP";
+    var SUBTYP_PROPERTY2 = "SUBTYP";
     var EMPTY_ENTRY = Object.freeze({ typeKey: null, rawType: null, subtypeKey: null, rawSubtype: null });
     var FLUSH_DELAY_MS = 100;
     function rawItem(value) {
@@ -23,6 +23,36 @@ var require_typ_index = __commonJS({
       }
       const text = rawItem(value);
       return text.trim() === "" ? null : text;
+    }
+    function propertyKeyOf(frontmatter, name) {
+      if (!frontmatter) return void 0;
+      if (Object.prototype.hasOwnProperty.call(frontmatter, name)) return name;
+      const lower = name.toLowerCase();
+      return Object.keys(frontmatter).find((key) => key.toLowerCase() === lower);
+    }
+    function propertyValue(frontmatter, name) {
+      const key = propertyKeyOf(frontmatter, name);
+      return key === void 0 ? void 0 : frontmatter[key];
+    }
+    function setCanonicalProperty2(frontmatter, name, value) {
+      const lower = name.toLowerCase();
+      const keys = Object.keys(frontmatter);
+      if (!keys.some((key) => key !== name && key.toLowerCase() === lower)) {
+        frontmatter[name] = value;
+        return;
+      }
+      const snapshot = { ...frontmatter };
+      for (const key of keys) delete frontmatter[key];
+      for (const key of keys) {
+        if (key.toLowerCase() !== lower) frontmatter[key] = snapshot[key];
+        else if (!(name in frontmatter)) frontmatter[name] = value;
+      }
+    }
+    function deleteProperty2(frontmatter, name) {
+      const lower = name.toLowerCase();
+      for (const key of Object.keys(frontmatter)) {
+        if (key.toLowerCase() === lower) delete frontmatter[key];
+      }
     }
     function sameEntry(a, b) {
       return !!a && !!b && a.typeKey === b.typeKey && a.subtypeKey === b.subtypeKey;
@@ -57,8 +87,8 @@ var require_typ_index = __commonJS({
       }
       read(file) {
         const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-        const rawType = frontmatter?.[TYP_PROPERTY] ?? null;
-        const rawSubtype = frontmatter?.[SUBTYP_PROPERTY] ?? null;
+        const rawType = propertyValue(frontmatter, TYP_PROPERTY2) ?? null;
+        const rawSubtype = propertyValue(frontmatter, SUBTYP_PROPERTY2) ?? null;
         return { typeKey: typeKeyOf(rawType), rawType, subtypeKey: typeKeyOf(rawSubtype), rawSubtype };
       }
       ensureBuilt() {
@@ -207,18 +237,21 @@ var require_typ_index = __commonJS({
       }
     };
     var EMPTY_BUCKET = Object.freeze({ counts: /* @__PURE__ */ new Map(), noSubtype: 0, rawByKey: /* @__PURE__ */ new Map() });
-    module2.exports = { TypIndex: TypIndex2, typeKeyOf, TYP_PROPERTY, SUBTYP_PROPERTY };
+    module2.exports = { TypIndex: TypIndex2, typeKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, deleteProperty: deleteProperty2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 };
   }
 });
 
 // src/subtypes.js
 var require_subtypes = __commonJS({
   "src/subtypes.js"(exports2, module2) {
-    var { typeKeyOf, SUBTYP_PROPERTY } = require_typ_index();
-    function getSubtypeNames(settings, type) {
+    var { typeKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
+    function normalizeSubtypeName(raw) {
+      return raw.trim().replace(/\S+/g, (word) => word.charAt(0).toLocaleUpperCase("de") + word.slice(1).toLocaleLowerCase("de"));
+    }
+    function getSubtypeNames2(settings, type) {
       return Object.keys(settings.typeSubtypes?.[type] ?? {});
     }
-    function getSubtype(settings, type, subtype) {
+    function getSubtype2(settings, type, subtype) {
       return settings.typeSubtypes?.[type]?.[subtype] ?? null;
     }
     function ensureSubtype(settings, type, subtype) {
@@ -236,11 +269,30 @@ var require_subtypes = __commonJS({
     function deleteTypeSubtypes(settings, type) {
       if (settings.typeSubtypes) delete settings.typeSubtypes[type];
     }
+    function enforceUniqueKeys2(settings, type) {
+      const seen = new Set(Object.keys(settings.typeDefaultFrontmatter[type] ?? {}).map((key) => key.toLowerCase()));
+      let changed = false;
+      for (const subtype of getSubtypeNames2(settings, type)) {
+        const data = settings.typeSubtypes[type][subtype];
+        for (const key of Object.keys(data.frontmatter)) {
+          if (key === "") continue;
+          const lower = key.toLowerCase();
+          if (seen.has(lower)) {
+            delete data.frontmatter[key];
+            data.floatingKeys = data.floatingKeys.filter((k) => k !== key);
+            changed = true;
+          } else {
+            seen.add(lower);
+          }
+        }
+      }
+      return changed;
+    }
     function mergeTypeSubtypes(settings, source, target) {
       const sourceSubtypes = settings.typeSubtypes?.[source];
       if (!sourceSubtypes) return;
       for (const [name, sourceData] of Object.entries(sourceSubtypes)) {
-        const targetData = getSubtype(settings, target, name);
+        const targetData = getSubtype2(settings, target, name);
         if (!targetData) {
           ensureSubtype(settings, target, name);
           settings.typeSubtypes[target][name] = sourceData;
@@ -254,14 +306,15 @@ var require_subtypes = __commonJS({
         }
       }
       delete settings.typeSubtypes[source];
+      enforceUniqueKeys2(settings, target);
     }
     async function renameSubtypeInNotes(plugin, type, oldKey, newValue) {
       let changed = 0;
       for (const file of plugin.typIndex.filesWithSubtype(type, oldKey)) {
         let matched = false;
         await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-          if (typeKeyOf(frontmatter[SUBTYP_PROPERTY]) !== oldKey) return;
-          frontmatter[SUBTYP_PROPERTY] = newValue;
+          if (typeKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY2)) !== oldKey) return;
+          setCanonicalProperty2(frontmatter, SUBTYP_PROPERTY2, newValue);
           matched = true;
         });
         if (matched) changed++;
@@ -269,9 +322,11 @@ var require_subtypes = __commonJS({
       return changed;
     }
     module2.exports = {
-      getSubtypeNames,
-      getSubtype,
+      normalizeSubtypeName,
+      getSubtypeNames: getSubtypeNames2,
+      getSubtype: getSubtype2,
       ensureSubtype,
+      enforceUniqueKeys: enforceUniqueKeys2,
       moveTypeSubtypes,
       deleteTypeSubtypes,
       mergeTypeSubtypes,
@@ -283,9 +338,9 @@ var require_subtypes = __commonJS({
 // src/frontmatter-sort.js
 var require_frontmatter_sort = __commonJS({
   "src/frontmatter-sort.js"(exports2, module2) {
-    var { getSubtype } = require_subtypes();
-    var TYP_PROPERTY = "TYP";
-    var SUBTYP_PROPERTY = "SUBTYP";
+    var { getSubtype: getSubtype2 } = require_subtypes();
+    var TYP_PROPERTY2 = "TYP";
+    var SUBTYP_PROPERTY2 = "SUBTYP";
     var DEFAULT_GLOBAL_ORDER = [{ kind: "typValue" }, { kind: "subtypValue" }, { kind: "typ" }, { kind: "other" }];
     function normalizeGlobalOrder2(order) {
       const result = Array.isArray(order) ? order.filter((entry) => entry && typeof entry === "object") : [];
@@ -301,11 +356,11 @@ var require_frontmatter_sort = __commonJS({
     }
     function orderedDefaultKeys(plugin, type, subtype = null) {
       if (!type) return null;
-      const isSystemKey = (key) => key === "" || [TYP_PROPERTY, SUBTYP_PROPERTY].some((p) => key.toLowerCase() === p.toLowerCase());
+      const isSystemKey = (key) => key === "" || [TYP_PROPERTY2, SUBTYP_PROPERTY2].some((p) => key.toLowerCase() === p.toLowerCase());
       const keys = Object.keys(plugin.settings.typeDefaultFrontmatter[type] ?? {}).filter((key) => !isSystemKey(key));
       if (subtype) {
         const seen = new Set(keys.map((key) => key.toLowerCase()));
-        for (const key of Object.keys(getSubtype(plugin.settings, type, subtype)?.frontmatter ?? {})) {
+        for (const key of Object.keys(getSubtype2(plugin.settings, type, subtype)?.frontmatter ?? {})) {
           if (isSystemKey(key) || seen.has(key.toLowerCase())) continue;
           keys.push(key);
           seen.add(key.toLowerCase());
@@ -319,8 +374,8 @@ var require_frontmatter_sort = __commonJS({
       const pinned = new Set(
         globalOrder.filter((entry) => entry.kind === "property").map((entry) => resolve(entry.name)).filter(Boolean)
       );
-      const typKey = resolve(TYP_PROPERTY);
-      const subtypKey = resolve(SUBTYP_PROPERTY);
+      const typKey = resolve(TYP_PROPERTY2);
+      const subtypKey = resolve(SUBTYP_PROPERTY2);
       const typBlockKeys = new Set(
         (typeDefaultKeys ?? []).map(resolve).filter((key) => key && key !== typKey && !pinned.has(key))
       );
@@ -366,16 +421,23 @@ var require_frontmatter_sort = __commonJS({
       if (cachedSorted.every((key, i) => key === cachedKeys[i])) return false;
       let changed = false;
       await app.fileManager.processFrontMatter(file, (frontmatter) => {
-        const existingKeys = Object.keys(frontmatter);
-        if (existingKeys.length <= 1) return;
-        const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys);
-        if (sortedKeys.every((key, i) => key === existingKeys[i])) return;
-        const snapshot = { ...frontmatter };
-        for (const key of existingKeys) delete frontmatter[key];
-        for (const key of sortedKeys) frontmatter[key] = snapshot[key];
-        changed = true;
+        changed = sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys);
       });
       return changed;
+    }
+    function sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys) {
+      const existingKeys = Object.keys(frontmatter);
+      if (existingKeys.length <= 1) return false;
+      const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys);
+      if (sortedKeys.every((key, i) => key === existingKeys[i])) return false;
+      const snapshot = { ...frontmatter };
+      for (const key of existingKeys) delete frontmatter[key];
+      for (const key of sortedKeys) frontmatter[key] = snapshot[key];
+      return true;
+    }
+    function sortFrontmatterFor2(plugin, frontmatter, type, subtype) {
+      const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
+      return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, type, subtype));
     }
     async function sortSingleFileFrontmatter(app, plugin, file) {
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
@@ -401,10 +463,11 @@ var require_frontmatter_sort = __commonJS({
     module2.exports = {
       sortAllFrontmatter,
       sortSingleFileFrontmatter,
+      sortFrontmatterFor: sortFrontmatterFor2,
       normalizeGlobalOrder: normalizeGlobalOrder2,
       DEFAULT_GLOBAL_ORDER,
-      TYP_PROPERTY,
-      SUBTYP_PROPERTY
+      TYP_PROPERTY: TYP_PROPERTY2,
+      SUBTYP_PROPERTY: SUBTYP_PROPERTY2
     };
   }
 });
@@ -413,7 +476,7 @@ var require_frontmatter_sort = __commonJS({
 var require_frontmatter_order_editor = __commonJS({
   "src/frontmatter-order-editor.js"(exports2, module2) {
     var { setIcon, Notice } = require("obsidian");
-    var { TYP_PROPERTY, SUBTYP_PROPERTY, sortAllFrontmatter } = require_frontmatter_sort();
+    var { TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2, sortAllFrontmatter } = require_frontmatter_sort();
     var PLACEHOLDER_LABELS = {
       typValue: "TYP",
       subtypValue: "SUBTYP",
@@ -444,7 +507,7 @@ var require_frontmatter_order_editor = __commonJS({
       let draftEntry = null;
       const isDuplicateName = (value, ownEntry) => {
         const lower = value.toLowerCase();
-        if (lower === TYP_PROPERTY.toLowerCase() || lower === SUBTYP_PROPERTY.toLowerCase()) return true;
+        if (lower === TYP_PROPERTY2.toLowerCase() || lower === SUBTYP_PROPERTY2.toLowerCase()) return true;
         return order().some((other) => other !== ownEntry && other.kind === "property" && other.name.toLowerCase() === lower);
       };
       const render = () => {
@@ -629,6 +692,7 @@ var require_settings = __commonJS({
       // Einträge würden stattdessen je als eigene kleine Box gerendert.
       display() {
         const { containerEl } = this;
+        const { scrollTop } = containerEl;
         containerEl.empty();
         new SettingGroup(containerEl).setHeading("TYP-Liste").addSetting(
           (setting) => setting.setName("Beschreibungs-Textfeld anzeigen").setDesc("Zeigt in der TYP-Liste neben jedem registrierten TYP ein Textfeld zur Bearbeitung seiner Beschreibung.").addToggle(
@@ -808,6 +872,7 @@ var require_settings = __commonJS({
             text: 'Bestimmt die Reihenfolge, in der die Befehle "Frontmatter Sortierung aktualisieren" die in einer Notiz vorhandenen Properties anordnen (erg\xE4nzt oder \xE4ndert keine Werte). Einzelne Properties (z. B. cssclasses, aliases) lassen sich fest platzieren - "TYP" ist die TYP-Property selbst, "SUBTYP" analog die SUBTYP-Property, "TYP-Frontmatter" steht f\xFCr die Standard-Frontmatter-Liste des jeweiligen Typs samt dahinter dem Block seines SUBTYPs, "Sonstige Properties" f\xFCr alles \xDCbrige. Reihenfolge per Drag & Drop \xE4nderbar, die vier Platzhalter-Zeilen lassen sich nicht entfernen.'
           });
         });
+        containerEl.scrollTop = scrollTop;
       }
     };
     module2.exports = { DEFAULT_SETTINGS: DEFAULT_SETTINGS2, TypSystemSettingTab: TypSystemSettingTab2 };
@@ -1004,10 +1069,10 @@ var require_type_frontmatter_editor = __commonJS({
     var { MarkdownView, Menu } = require("obsidian");
     var { isPlaceholderToken } = require_frontmatter_placeholders();
     var { EDITOR_CLASS: PLACEHOLDER_SUGGEST_EDITOR_CLASS } = require_placeholder_suggest();
-    var { getSubtype, ensureSubtype } = require_subtypes();
-    var TYP_PROPERTY = "TYP";
-    var SUBTYP_PROPERTY = "SUBTYP";
-    var SYSTEM_PROPERTIES = [TYP_PROPERTY.toLowerCase(), SUBTYP_PROPERTY.toLowerCase()];
+    var { getSubtype: getSubtype2, ensureSubtype } = require_subtypes();
+    var TYP_PROPERTY2 = "TYP";
+    var SUBTYP_PROPERTY2 = "SUBTYP";
+    var SYSTEM_PROPERTIES = [TYP_PROPERTY2.toLowerCase(), SUBTYP_PROPERTY2.toLowerCase()];
     function stripTypProperty(frontmatter) {
       for (const key of Object.keys(frontmatter)) {
         if (SYSTEM_PROPERTIES.includes(key.trim().toLowerCase())) delete frontmatter[key];
@@ -1033,11 +1098,11 @@ var require_type_frontmatter_editor = __commonJS({
       return {
         type,
         subtype,
-        getFrontmatter: () => getSubtype(plugin.settings, type, subtype)?.frontmatter ?? {},
+        getFrontmatter: () => getSubtype2(plugin.settings, type, subtype)?.frontmatter ?? {},
         setFrontmatter: (frontmatter) => {
           ensureSubtype(plugin.settings, type, subtype).frontmatter = frontmatter;
         },
-        getFloating: () => getSubtype(plugin.settings, type, subtype)?.floatingKeys ?? [],
+        getFloating: () => getSubtype2(plugin.settings, type, subtype)?.floatingKeys ?? [],
         setFloating: (keys) => {
           ensureSubtype(plugin.settings, type, subtype).floatingKeys = keys;
         }
@@ -1161,8 +1226,8 @@ var require_type_frontmatter_editor = __commonJS({
               editor.fredPendingFloatingAdd = false;
             }
           }
-          store.setFloating(floating);
           store.setFrontmatter(frontmatter);
+          store.setFloating(floating);
           view.plugin.saveSettings();
           view.plugin.refreshTypColors?.();
         }
@@ -1198,7 +1263,212 @@ var require_type_frontmatter_editor = __commonJS({
       editor.focusKey("");
       ensurePropertyMenuPatch(editor.owner.app, editor);
     }
-    module2.exports = { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore };
+    module2.exports = { mountFrontmatterEditor, addBlankProperty, ensurePropertyMenuPatch, typeStore, subtypeStore };
+  }
+});
+
+// src/unified-frontmatter-editor.js
+var require_unified_frontmatter_editor = __commonJS({
+  "src/unified-frontmatter-editor.js"(exports2, module2) {
+    var { mountFrontmatterEditor, ensurePropertyMenuPatch } = require_type_frontmatter_editor();
+    var { getSubtypeNames: getSubtypeNames2, getSubtype: getSubtype2, ensureSubtype } = require_subtypes();
+    function unifiedStore(plugin, type) {
+      const layout = /* @__PURE__ */ new Map();
+      let current = {};
+      const sections = () => [null, ...getSubtypeNames2(plugin.settings, type)];
+      const load = () => {
+        layout.clear();
+        current = {};
+        const seen = /* @__PURE__ */ new Set();
+        const add = (frontmatter, section) => {
+          for (const [key, value] of Object.entries(frontmatter ?? {})) {
+            if (key === "" || seen.has(key.toLowerCase())) continue;
+            seen.add(key.toLowerCase());
+            current[key] = value;
+            layout.set(key, section);
+          }
+        };
+        add(plugin.settings.typeDefaultFrontmatter[type], null);
+        for (const subtype of getSubtypeNames2(plugin.settings, type)) add(getSubtype2(plugin.settings, type, subtype)?.frontmatter, subtype);
+      };
+      load();
+      const sectionOf = (key) => layout.has(key) ? layout.get(key) : null;
+      return {
+        type,
+        subtype: null,
+        unified: true,
+        layout,
+        sections,
+        sectionOf,
+        getFrontmatter: () => current,
+        // Verteilt das vollständige Property-Set wieder auf die Blöcke. Neue Keys
+        // landen im Block der zuvor angelegten Leerzeile (layout ""), eine
+        // Umbenennung (genau ein Key weg, einer neu) behält den Block, sonst
+        // entscheidet der davor stehende Key.
+        setFrontmatter(frontmatter) {
+          const keys = Object.keys(frontmatter);
+          const removed = [...layout.keys()].filter((key) => key !== "" && !Object.hasOwn(frontmatter, key));
+          const added = keys.filter((key) => key !== "" && !layout.has(key));
+          if (removed.length === 1 && added.length === 1) {
+            layout.set(added[0], layout.get(removed[0]));
+          } else {
+            for (const key of added) {
+              if (layout.has("")) {
+                layout.set(key, layout.get(""));
+              } else {
+                const before = keys.slice(0, keys.indexOf(key)).reverse().find((k) => layout.has(k));
+                layout.set(key, before === void 0 ? null : layout.get(before));
+              }
+            }
+          }
+          for (const key of removed) layout.delete(key);
+          if (!Object.hasOwn(frontmatter, "")) layout.delete("");
+          const blocks = new Map(sections().map((section) => [section, {}]));
+          for (const key of keys) {
+            if (key === "") continue;
+            (blocks.get(sectionOf(key)) ?? blocks.get(null))[key] = frontmatter[key];
+          }
+          plugin.settings.typeDefaultFrontmatter[type] = blocks.get(null);
+          for (const subtype of getSubtypeNames2(plugin.settings, type)) {
+            ensureSubtype(plugin.settings, type, subtype).frontmatter = blocks.get(subtype);
+          }
+          current = frontmatter;
+        },
+        getFloating() {
+          return [
+            ...plugin.settings.typeFloatingKeys[type] ?? [],
+            ...getSubtypeNames2(plugin.settings, type).flatMap((subtype) => getSubtype2(plugin.settings, type, subtype)?.floatingKeys ?? [])
+          ];
+        },
+        setFloating(keys) {
+          const bySection = new Map(sections().map((section) => [section, []]));
+          for (const key of keys) (bySection.get(sectionOf(key)) ?? bySection.get(null)).push(key);
+          const typeKeys = bySection.get(null);
+          if (typeKeys.length > 0) plugin.settings.typeFloatingKeys[type] = typeKeys;
+          else delete plugin.settings.typeFloatingKeys[type];
+          for (const subtype of getSubtypeNames2(plugin.settings, type)) {
+            ensureSubtype(plugin.settings, type, subtype).floatingKeys = bySection.get(subtype);
+          }
+        }
+      };
+    }
+    function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, renderFooter }) {
+      const store = unifiedStore(view.plugin, type);
+      const wrapper = containerEl.createDiv({ cls: "fred-typ-unified" });
+      const cardLayer = wrapper.createDiv({ cls: "fred-typ-unified-cards" });
+      const editor = mountFrontmatterEditor(view, wrapper, store);
+      if (!editor) return null;
+      const listEl = editor.propertyListEl;
+      const layoutCards = () => {
+        cardLayer.empty();
+        const base = wrapper.getBoundingClientRect();
+        for (const header of listEl.querySelectorAll(":scope > .fred-typ-section-header.fred-typ-section-sub")) {
+          const footer = header.fredFooter;
+          if (!footer?.isConnected) continue;
+          const top = header.getBoundingClientRect().top - base.top;
+          const bottom = footer.getBoundingClientRect().bottom - base.top;
+          const card = cardLayer.createDiv({ cls: "fred-typ-unified-card" });
+          card.style.top = `${top}px`;
+          card.style.height = `${bottom - top}px`;
+        }
+      };
+      let injected = [];
+      let injecting = false;
+      const injectSections = () => {
+        if (injecting || !listEl.isConnected) return;
+        injecting = true;
+        try {
+          for (const el of injected) el.detach();
+          injected = [];
+          const sections = store.sections();
+          const rows = [...listEl.children];
+          const rowsBySection = new Map(sections.map((section) => [section, []]));
+          for (const rowEl of rows) {
+            const row = editor.rendered.find((r) => r.containerEl === rowEl);
+            const section = store.sectionOf(row?.entry.key);
+            (rowsBySection.get(section) ?? rowsBySection.get(null)).push(rowEl);
+          }
+          const ordered = [...rowsBySection.values()].flat();
+          const inOrder = ordered.every((rowEl, i) => rowEl === rows[i]);
+          let anchor = listEl.firstChild;
+          for (const [section, sectionRows] of rowsBySection) {
+            const sub = section !== null;
+            const header = createDiv({ cls: "fred-typ-frontmatter-header fred-typ-section-header" });
+            const footer = createDiv({ cls: "fred-typ-section-footer" });
+            header.toggleClass("fred-typ-section-sub", sub);
+            footer.toggleClass("fred-typ-section-sub", sub);
+            header.fredSection = section;
+            header.fredFooter = footer;
+            renderHeader(section, header, editor);
+            renderFooter?.(section, footer, editor);
+            injected.push(header, footer);
+            for (const rowEl of sectionRows) rowEl.toggleClass("fred-typ-section-sub", sub);
+            if (!inOrder) continue;
+            listEl.insertBefore(header, anchor);
+            if (sectionRows.length > 0) anchor = sectionRows[sectionRows.length - 1].nextSibling;
+            listEl.insertBefore(footer, anchor);
+          }
+          if (!inOrder) {
+            const children = [];
+            for (let i = 0; i < injected.length; i += 2) {
+              const header = injected[i];
+              children.push(header, ...rowsBySection.get(header.fredSection), injected[i + 1]);
+            }
+            listEl.setChildrenInPlace(children);
+          }
+        } finally {
+          injecting = false;
+        }
+        layoutCards();
+      };
+      const originalSynchronize = editor.synchronize;
+      editor.synchronize = function(frontmatter) {
+        originalSynchronize.call(this, frontmatter);
+        injectSections();
+      };
+      editor.reorderKey = function() {
+        const serialized = this.serialize();
+        const frontmatter = {};
+        let section = null;
+        for (const el of listEl.children) {
+          if (el.hasClass("fred-typ-section-header")) {
+            section = el.fredSection;
+            continue;
+          }
+          const row = this.rendered.find((r) => r.containerEl === el);
+          if (!row) continue;
+          frontmatter[row.entry.key] = serialized[row.entry.key];
+          store.layout.set(row.entry.key, section);
+        }
+        this.owner.saveFrontmatter(frontmatter);
+      };
+      editor.fredAddBlank = function(section, floating = false) {
+        this.fredPendingFloatingAdd = floating;
+        store.layout.set("", section);
+        const current = this.serialize();
+        const next = {};
+        for (const s of store.sections()) {
+          for (const [key, value] of Object.entries(current)) {
+            if (key !== "" && store.sectionOf(key) === s) next[key] = value;
+          }
+          if (s === section) next[""] = null;
+        }
+        this.synchronize(next);
+        this.focusKey("");
+        ensurePropertyMenuPatch(view.app, this);
+      };
+      const mutationObserver = new MutationObserver(() => layoutCards());
+      mutationObserver.observe(listEl, { childList: true });
+      const resizeObserver = new ResizeObserver(() => layoutCards());
+      resizeObserver.observe(wrapper);
+      editor.register(() => {
+        mutationObserver.disconnect();
+        resizeObserver.disconnect();
+      });
+      injectSections();
+      return editor;
+    }
+    module2.exports = { mountUnifiedFrontmatterEditor };
   }
 });
 
@@ -1260,10 +1530,10 @@ var require_type_utils = __commonJS({
 var require_typ_view = __commonJS({
   "src/typ-view.js"(exports2, module2) {
     var { ItemView, Menu, Modal, Notice, setIcon, debounce } = require("obsidian");
-    var { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore } = require_type_frontmatter_editor();
+    var { mountUnifiedFrontmatterEditor } = require_unified_frontmatter_editor();
     var {
-      getSubtypeNames,
-      getSubtype,
+      normalizeSubtypeName,
+      getSubtypeNames: getSubtypeNames2,
       ensureSubtype,
       moveTypeSubtypes,
       deleteTypeSubtypes,
@@ -1272,7 +1542,7 @@ var require_typ_view = __commonJS({
     } = require_subtypes();
     var { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require_frontmatter_placeholders();
     var { normalizeTypeName, compareTypes, sortTypesByMode: sortTypesByMode2 } = require_type_utils();
-    var { typeKeyOf, TYP_PROPERTY, SUBTYP_PROPERTY } = require_typ_index();
+    var { typeKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
     var VIEW_TYPE_TYP = "fred-typ-view";
     var DEFAULT_TYPE_COLOR = "#888888";
     var DEFAULT_SORT_ORDER2 = "count-desc";
@@ -1296,19 +1566,19 @@ var require_typ_view = __commonJS({
       for (const file of plugin.typIndex.filesWithType(oldKey)) {
         let matched = false;
         await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-          if (typeKeyOf(frontmatter[TYP_PROPERTY]) !== oldKey) return;
-          frontmatter[TYP_PROPERTY] = newValue;
+          if (typeKeyOf(propertyValue(frontmatter, TYP_PROPERTY2)) !== oldKey) return;
+          setCanonicalProperty2(frontmatter, TYP_PROPERTY2, newValue);
           matched = true;
         });
         if (matched) changed++;
       }
       return changed;
     }
-    function normalizeRawType(raw) {
+    function normalizeRawType(raw, normalize = normalizeTypeName) {
       if (Array.isArray(raw)) {
-        return raw.map((v) => normalizeTypeName(String(v ?? ""))).filter(Boolean).join(", ");
+        return raw.map((v) => normalize(String(v ?? ""))).filter(Boolean).join(", ");
       }
-      return normalizeTypeName(String(raw));
+      return normalize(String(raw));
     }
     function displayTypeKey(typeKey) {
       return typeKey !== typeKey.trim() ? `"${typeKey}"` : typeKey;
@@ -1440,7 +1710,7 @@ var require_typ_view = __commonJS({
         const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
         if (!globalSearch) return;
         const raw = type === null ? void 0 : this.plugin.typIndex.rawValueOf(type);
-        const query = type === null ? `-["${TYP_PROPERTY}"] file:.md` : Array.isArray(raw) ? raw.map((v) => `["${TYP_PROPERTY}":"${String(v ?? "").trim()}"]`).join(" ") : `["${TYP_PROPERTY}":"${type}"]`;
+        const query = type === null ? `-["${TYP_PROPERTY2}"] file:.md` : Array.isArray(raw) ? raw.map((v) => `["${TYP_PROPERTY2}":"${String(v ?? "").trim()}"]`).join(" ") : `["${TYP_PROPERTY2}":"${type}"]`;
         globalSearch.instance.openGlobalSearch(query);
       }
       // typeKey kommt 1:1 aus den tatsächlichen Frontmatter-Werten (siehe
@@ -1866,19 +2136,11 @@ var require_typ_view = __commonJS({
           else delete this.plugin.settings.typeDescriptions[type];
           await this.plugin.saveSettings();
         });
-        body.createDiv({ cls: "fred-typ-detail-separator" });
         const bucket = this.plugin.typIndex.subtypeBucket(type);
-        this.frontmatterEditor = this.renderFrontmatterBlock(body, typeStore(this.plugin, type), "Standard-Frontmatter", {
-          count: bucket.noSubtype,
-          onContextMenu: () => this.openSubtypeSearch(type, null)
+        this.frontmatterEditor = mountUnifiedFrontmatterEditor(this, body, type, {
+          renderHeader: (section, el, editor) => this.renderSectionHeader(el, type, section, bucket, editor)
         });
-        for (const subtype of getSubtypeNames(this.plugin.settings, type)) {
-          this.renderFrontmatterBlock(body, subtypeStore(this.plugin, type, subtype), subtype, {
-            count: bucket.counts.get(subtype) ?? 0,
-            onContextMenu: () => this.openSubtypeSearch(type, subtype)
-          });
-        }
-        this.markOverriddenProperties();
+        if (this.frontmatterEditor) this.frontmatterEditors.push(this.frontmatterEditor);
         this.subtypeAddBtnEl = body.createEl("button", { cls: "mod-cta fred-typ-subtype-add" });
         setIcon(this.subtypeAddBtnEl.createSpan({ cls: "fred-typ-subtype-add-icon" }), "plus");
         this.subtypeAddBtnEl.createSpan({ text: "Subtyp hinzuf\xFCgen" });
@@ -1888,86 +2150,52 @@ var require_typ_view = __commonJS({
         this.renderPlaceholderList(body);
         this.plugin.refreshFrontmatterHighlight?.();
       }
-      // Ein Frontmatter-Block der Detailansicht (TYP selbst oder ein Subtyp): Kopf
-      // mit Titel und den beiden "Property hinzufügen"-Buttons, darunter Obsidians
-      // Property-Editor, gebunden an store (siehe type-frontmatter-editor.js).
-      // count/onContextMenu: Notiz-Anzahl neben dem Titel, Suche per Rechtsklick
-      // auf den Titel.
-      renderFrontmatterBlock(parent, store, title, { count, onContextMenu } = {}) {
-        const block = parent.createDiv({ cls: "fred-typ-frontmatter-block" + (store.subtype ? " fred-typ-subtype-block" : "") });
-        const sectionHeader = block.createDiv({ cls: "fred-typ-frontmatter-header" });
-        const titleGroup = sectionHeader.createDiv({ cls: "fred-typ-frontmatter-title-group" });
-        const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: title });
-        if (count !== void 0) titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
-        if (onContextMenu) {
-          titleEl.addEventListener("contextmenu", (event) => {
-            event.preventDefault();
-            onContextMenu();
-          });
-        }
-        const addButtons = sectionHeader.createDiv({ cls: "fred-typ-frontmatter-add-group" });
-        let editor = null;
+      // Überschrift eines Blocks im gemeinsamen Editor (siehe
+      // unified-frontmatter-editor.js): Titel mit Notiz-Anzahl (beim Standard-
+      // Frontmatter die Notizen ohne SUBTYP - für die gilt nur dieser Block),
+      // Suche per Rechtsklick auf den Titel, und die beiden "Property
+      // hinzufügen"-Buttons, die eine Leerzeile in genau diesem Block anlegen.
+      renderSectionHeader(el, type, section, bucket, editor) {
+        const titleGroup = el.createDiv({ cls: "fred-typ-frontmatter-title-group" });
+        const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? "Standard-Frontmatter" });
+        const count = section === null ? bucket.noSubtype : bucket.counts.get(section) ?? 0;
+        titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
+        titleEl.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          this.openSubtypeSearch(type, section);
+        });
+        const addButtons = el.createDiv({ cls: "fred-typ-frontmatter-add-group" });
         const addFloatingPropertyBtn = addButtons.createDiv({
           cls: "clickable-icon fred-typ-frontmatter-add-floating",
           attr: { "aria-label": "Floating Property hinzuf\xFCgen" }
         });
         setIcon(addFloatingPropertyBtn, "plus");
-        addFloatingPropertyBtn.addEventListener("click", () => {
-          if (editor) editor.fredPendingFloatingAdd = true;
-          addBlankProperty(editor);
-        });
+        addFloatingPropertyBtn.addEventListener("click", () => editor.fredAddBlank(section, true));
         const addPropertyBtn = addButtons.createDiv({
           cls: "clickable-icon fred-typ-frontmatter-add",
           attr: { "aria-label": "Property hinzuf\xFCgen" }
         });
         setIcon(addPropertyBtn, "plus");
-        addPropertyBtn.addEventListener("click", () => {
-          if (editor) editor.fredPendingFloatingAdd = false;
-          addBlankProperty(editor);
-        });
-        editor = mountFrontmatterEditor(this, block, store);
-        if (editor) this.frontmatterEditors.push(editor);
-        return editor;
-      }
-      // Graut im TYP-Block jede Property samt Wert aus, die mindestens ein Subtyp
-      // mit eigenem Wert überschreibt - der Tooltip nennt die Subtypen. Läuft nach
-      // dem Rendern und bei jedem Refresh der Fett-Markierung mit (siehe
-      // frontmatter-default-highlight.js), da Obsidians Editor seine Zeilen bei
-      // Änderungen selbst neu aufbaut.
-      markOverriddenProperties() {
-        const type = this.selectedType;
-        const containerEl = this.frontmatterEditor?.containerEl;
-        if (type === null || !containerEl) return;
-        const overriddenBy = /* @__PURE__ */ new Map();
-        for (const subtype of getSubtypeNames(this.plugin.settings, type)) {
-          for (const key of Object.keys(getSubtype(this.plugin.settings, type, subtype)?.frontmatter ?? {})) {
-            if (key === "") continue;
-            const lower = key.toLowerCase();
-            if (!overriddenBy.has(lower)) overriddenBy.set(lower, []);
-            overriddenBy.get(lower).push(subtype);
-          }
-        }
-        for (const row of containerEl.querySelectorAll(".metadata-property[data-property-key]")) {
-          const subtypes = overriddenBy.get(row.getAttribute("data-property-key").toLowerCase());
-          row.toggleClass("fred-typ-overridden-property", !!subtypes);
-          if (subtypes) row.setAttribute("aria-label", `\xDCberschrieben von: ${subtypes.join(", ")}`);
-          else row.removeAttribute("aria-label");
-        }
+        addPropertyBtn.addEventListener("click", () => editor.fredAddBlank(section, false));
       }
       // Wie die unregistrierten Einträge der TYP-Liste: SUBTYP-Werte von Notizen
       // dieses TYPs, die (noch) keinen eigenen Block haben (Notizen ganz ohne
-      // SUBTYP zählt stattdessen das Standard-Frontmatter). Linksklick übernimmt einen Wert als Subtyp, Rechtsklick öffnet die Suche.
+      // SUBTYP zählt stattdessen das Standard-Frontmatter). Dargestellt wie die
+      // Subtyp-Blöcke, aber nur mit (ausgegrauter) Überschrift samt Anzahl.
+      // Linksklick übernimmt einen Wert als Subtyp, Rechtsklick öffnet die Suche.
       renderUnregisteredSubtypes(parent, type, bucket) {
-        const registered = getSubtypeNames(this.plugin.settings, type);
+        const registered = getSubtypeNames2(this.plugin.settings, type);
         const unregistered = [...bucket.counts.keys()].filter((key) => !registered.includes(key)).sort((a, b) => bucket.counts.get(b) - bucket.counts.get(a) || a.localeCompare(b));
         if (unregistered.length === 0) return;
-        const listEl = parent.createDiv({ cls: "fred-typ-list fred-typ-subtype-unregistered-list" });
+        const listEl = parent.createDiv({ cls: "fred-typ-subtype-unregistered-list" });
         for (const key of unregistered) {
-          const self = listEl.createDiv({ cls: "tree-item" }).createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
-          self.createDiv({ cls: "tree-item-inner", text: displayTypeKey(key) });
-          this.renderCountFlair(self, bucket.counts.get(key));
-          self.addEventListener("click", () => this.registerSubtype(type, key, bucket));
-          self.addEventListener("contextmenu", (event) => {
+          const block = listEl.createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block fred-typ-subtype-unregistered" });
+          const header = block.createDiv({ cls: "fred-typ-frontmatter-header" });
+          const titleGroup = header.createDiv({ cls: "fred-typ-frontmatter-title-group" });
+          titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: displayTypeKey(key) });
+          titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(bucket.counts.get(key)) });
+          block.addEventListener("click", () => this.registerSubtype(type, key, bucket));
+          block.addEventListener("contextmenu", (event) => {
             event.preventDefault();
             event.stopPropagation();
             this.openSubtypeSearch(type, key);
@@ -1980,13 +2208,13 @@ var require_typ_view = __commonJS({
       openSubtypeSearch(type, subtypeKey) {
         const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
         if (!globalSearch) return;
-        const typClause = `["${TYP_PROPERTY}":"${type}"]`;
+        const typClause = `["${TYP_PROPERTY2}":"${type}"]`;
         let subtypClause;
         if (subtypeKey === null) {
-          subtypClause = `-["${SUBTYP_PROPERTY}"]`;
+          subtypClause = `-["${SUBTYP_PROPERTY2}"]`;
         } else {
           const raw = this.plugin.typIndex.subtypeBucket(type).rawByKey.get(subtypeKey);
-          subtypClause = Array.isArray(raw) ? raw.map((v) => `["${SUBTYP_PROPERTY}":"${String(v ?? "").trim()}"]`).join(" ") : `["${SUBTYP_PROPERTY}":"${subtypeKey}"]`;
+          subtypClause = Array.isArray(raw) ? raw.map((v) => `["${SUBTYP_PROPERTY2}":"${String(v ?? "").trim()}"]`).join(" ") : `["${SUBTYP_PROPERTY2}":"${subtypeKey}"]`;
         }
         globalSearch.instance.openGlobalSearch(`${typClause} ${subtypClause}`);
       }
@@ -1996,9 +2224,9 @@ var require_typ_view = __commonJS({
       // weise schon, landen die Notizen dort.
       async registerSubtype(type, subtypeKey, bucket) {
         const raw = bucket.rawByKey.get(subtypeKey);
-        const normalized = normalizeRawType(raw === void 0 ? subtypeKey : raw);
+        const normalized = normalizeRawType(raw === void 0 ? subtypeKey : raw, normalizeSubtypeName);
         if (!normalized) return;
-        const existing = getSubtypeNames(this.plugin.settings, type).find((name) => name.toLowerCase() === normalized.toLowerCase());
+        const existing = getSubtypeNames2(this.plugin.settings, type).find((name) => name.toLowerCase() === normalized.toLowerCase());
         const subtype = existing ?? normalized;
         ensureSubtype(this.plugin.settings, type, subtype);
         let renamed = 0;
@@ -2012,10 +2240,15 @@ var require_typ_view = __commonJS({
       startAddSubtype(type) {
         if (this.isEditing || !this.subtypeAddBtnEl) return;
         this.isEditing = true;
-        const block = createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block" });
+        const block = createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block fred-typ-subtype-pending" });
         this.subtypeAddBtnEl.parentElement.insertBefore(block, this.subtypeAddBtnEl);
         const header = block.createDiv({ cls: "fred-typ-frontmatter-header" });
-        const nameEl = header.createDiv({ cls: "fred-typ-detail-section-title fred-typ-subtype-name-input is-being-renamed" });
+        const titleGroup = header.createDiv({ cls: "fred-typ-frontmatter-title-group" });
+        const nameEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title fred-typ-subtype-name-input is-being-renamed" });
+        const addButtons = header.createDiv({ cls: "fred-typ-frontmatter-add-group" });
+        setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add-floating" }), "plus");
+        setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add" }), "plus");
+        block.createDiv({ cls: "fred-typ-section-footer" });
         nameEl.setAttribute("contenteditable", "true");
         nameEl.setAttribute("spellcheck", "false");
         nameEl.focus();
@@ -2024,9 +2257,9 @@ var require_typ_view = __commonJS({
           if (done) return;
           done = true;
           this.isEditing = false;
-          const value = normalizeTypeName(nameEl.textContent);
+          const value = normalizeSubtypeName(nameEl.textContent);
           if (commit && value) {
-            const existing = getSubtypeNames(this.plugin.settings, type).find((name) => name.toLowerCase() === value.toLowerCase());
+            const existing = getSubtypeNames2(this.plugin.settings, type).find((name) => name.toLowerCase() === value.toLowerCase());
             if (existing) {
               new Notice(`Subtyp ${existing} gibt es bei ${type} bereits.`);
             } else {
@@ -2269,7 +2502,7 @@ var require_typ_view = __commonJS({
       const app = plugin.app;
       const activeTypView = app.workspace.getActiveViewOfType(TypView);
       if (activeTypView && activeTypView.selectedType !== null) {
-        addBlankProperty(activeTypView.frontmatterEditor);
+        activeTypView.frontmatterEditor?.fredAddBlank(null);
         return;
       }
       const file = app.workspace.getActiveFile();
@@ -2282,7 +2515,7 @@ var require_typ_view = __commonJS({
       const view = app.__fredTypLeaf?.view;
       if (!(view instanceof TypView)) return;
       view.openTypeSettings(type);
-      addBlankProperty(view.frontmatterEditor);
+      view.frontmatterEditor?.fredAddBlank(null);
     }
     async function addTypCommand(plugin) {
       await activateTypView(plugin);
@@ -2842,15 +3075,15 @@ var require_link_colors = __commonJS({
 // src/frontmatter-default-highlight.js
 var require_frontmatter_default_highlight = __commonJS({
   "src/frontmatter-default-highlight.js"(exports2, module2) {
-    var { getSubtypeNames, getSubtype } = require_subtypes();
-    var TYP_PROPERTY = "TYP";
+    var { getSubtypeNames: getSubtypeNames2, getSubtype: getSubtype2 } = require_subtypes();
+    var TYP_PROPERTY2 = "TYP";
     var TYP_VIEW_TYPE = "fred-typ-view";
     var ALL_PROPERTIES_VIEW_TYPE = "all-properties";
     var HIGHLIGHT_CLASS = "fred-typ-default-property";
     var FLOATING_CLASS = "fred-typ-floating-property";
     function rawKeysForType(type, defaults) {
       if (!type || !defaults) return null;
-      const keys = Object.keys(defaults).filter((key) => key !== "" && key.toLowerCase() !== TYP_PROPERTY.toLowerCase());
+      const keys = Object.keys(defaults).filter((key) => key !== "" && key.toLowerCase() !== TYP_PROPERTY2.toLowerCase());
       return keys.length > 0 ? keys.map((key) => key.toLowerCase()) : null;
     }
     var ALL_SUBTYPES = Symbol("all-subtypes");
@@ -2861,9 +3094,9 @@ var require_frontmatter_default_highlight = __commonJS({
     function blocksForType(plugin, type, subtype) {
       const { settings } = plugin;
       const blocks = [blockOf(settings.typeDefaultFrontmatter[type], settings.typeFloatingKeys[type])];
-      const subtypeNames = subtype === ALL_SUBTYPES ? getSubtypeNames(settings, type) : subtype ? [subtype] : [];
+      const subtypeNames = subtype === ALL_SUBTYPES ? getSubtypeNames2(settings, type) : subtype ? [subtype] : [];
       for (const name of subtypeNames) {
-        const data = getSubtype(settings, type, name);
+        const data = getSubtype2(settings, type, name);
         if (data) blocks.push(blockOf(data.frontmatter, data.floatingKeys));
       }
       return blocks;
@@ -2890,6 +3123,9 @@ var require_frontmatter_default_highlight = __commonJS({
     function keysForStore(plugin, store) {
       const { colorViews } = plugin.settings;
       if (!colorViews.frontmatterDefaults || !store) return NO_KEYS;
+      if (store.unified) {
+        return splitKeys(blocksForType(plugin, store.type, colorViews.frontmatterDefaultsSubtyp ? ALL_SUBTYPES : null));
+      }
       if (store.subtype && !colorViews.frontmatterDefaultsSubtyp) return NO_KEYS;
       return splitKeys([blockOf(store.getFrontmatter(), store.getFloating())]);
     }
@@ -2966,7 +3202,6 @@ var require_frontmatter_default_highlight = __commonJS({
           const { standard, floating } = keysForStore(plugin, editor.owner?.fredStore);
           applyToContainer(editor.containerEl, standard, floating);
         }
-        leaf.view?.markOverriddenProperties?.();
       }
       applyToAllPropertiesView(plugin);
     }
@@ -2988,8 +3223,9 @@ var require_property_rename_sync = __commonJS({
   "src/property-rename-sync.js"(exports2, module2) {
     var { Notice } = require("obsidian");
     var { typeStore, subtypeStore } = require_type_frontmatter_editor();
-    var TYP_PROPERTY = "TYP";
-    var SUBTYP_PROPERTY = "SUBTYP";
+    var { getSubtypeNames: getSubtypeNames2 } = require_subtypes();
+    var TYP_PROPERTY2 = "TYP";
+    var SUBTYP_PROPERTY2 = "SUBTYP";
     function sameKey(a, b) {
       return a.toLowerCase() === b.toLowerCase();
     }
@@ -3021,6 +3257,21 @@ var require_property_rename_sync = __commonJS({
       }
       return true;
     }
+    function moveIntoOwner(store, owner, oldKey, newKey) {
+      const defaults = store.getFrontmatter();
+      const sourceKey = Object.keys(defaults).find((key) => sameKey(key, oldKey));
+      if (sourceKey === void 0) return false;
+      const next = { ...defaults };
+      delete next[sourceKey];
+      store.setFrontmatter(next);
+      store.setFloating(store.getFloating().filter((key) => key !== sourceKey));
+      const ownerDefaults = owner.getFrontmatter();
+      const targetKey = Object.keys(ownerDefaults).find((key) => sameKey(key, newKey));
+      if (isEmptyValue(ownerDefaults[targetKey]) && !isEmptyValue(defaults[sourceKey])) {
+        owner.setFrontmatter({ ...ownerDefaults, [targetKey]: defaults[sourceKey] });
+      }
+      return true;
+    }
     function renameInGlobalOrder(settings, oldKey, newKey) {
       const order = settings.globalPropertyOrder;
       const source = order.find((entry) => entry.kind === "property" && sameKey(entry.name, oldKey));
@@ -3035,16 +3286,21 @@ var require_property_rename_sync = __commonJS({
       if (typeof oldKey !== "string" || typeof newKey !== "string") return;
       newKey = newKey.trim();
       if (oldKey === "" || newKey === "" || oldKey === newKey) return;
-      if ([oldKey, newKey].some((key) => sameKey(key, TYP_PROPERTY) || sameKey(key, SUBTYP_PROPERTY))) return;
+      if ([oldKey, newKey].some((key) => sameKey(key, TYP_PROPERTY2) || sameKey(key, SUBTYP_PROPERTY2))) return;
       const { settings } = plugin;
       let typeCount = 0;
       let subtypeCount = 0;
-      for (const type of Object.keys(settings.typeDefaultFrontmatter)) {
-        if (renameInStore(typeStore(plugin, type), oldKey, newKey)) typeCount++;
-      }
-      for (const [type, subtypes] of Object.entries(settings.typeSubtypes ?? {})) {
-        for (const subtype of Object.keys(subtypes)) {
-          if (renameInStore(subtypeStore(plugin, type, subtype), oldKey, newKey)) subtypeCount++;
+      const count = (store) => store.subtype ? subtypeCount++ : typeCount++;
+      const types = /* @__PURE__ */ new Set([...Object.keys(settings.typeDefaultFrontmatter), ...Object.keys(settings.typeSubtypes ?? {})]);
+      for (const type of types) {
+        const stores = [typeStore(plugin, type), ...getSubtypeNames2(settings, type).map((subtype) => subtypeStore(plugin, type, subtype))];
+        const owner = sameKey(oldKey, newKey) ? null : stores.find((store) => Object.keys(store.getFrontmatter()).some((key) => sameKey(key, newKey)));
+        for (const store of stores) {
+          if (!owner || store === owner) {
+            if (renameInStore(store, oldKey, newKey)) count(store);
+          } else if (moveIntoOwner(store, owner, oldKey, newKey)) {
+            count(store);
+          }
         }
       }
       const orderChanged = renameInGlobalOrder(settings, oldKey, newKey);
@@ -3145,6 +3401,34 @@ var require_type_picker = __commonJS({
         if (!this.chosen) this.resolve(null);
       }
     };
+    var SubtypPickerModal = class extends TypPickerModal {
+      constructor(app, plugin, type, items, resolve) {
+        super(app, plugin, items, resolve);
+        this.setPlaceholder(`Subtyp f\xFCr ${type} \u2013 ESC f\xFCr zur\xFCck`);
+      }
+      renderSuggestion(match, el) {
+        const item = match.item;
+        el.addClass("fred-typ-picker-suggestion");
+        if (item.none) el.addClass("fred-typ-picker-unregistered");
+        el.createSpan({ cls: "fred-typ-picker-name", text: item.type });
+        el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
+      }
+      onChooseItem(item) {
+        this.resolve(item.none ? "" : item.type);
+      }
+    };
+    function pickSubtype(app, plugin, type) {
+      return new Promise((resolve) => {
+        const items = plugin.getSubtypes(type).map(({ subtype, count }) => ({ type: subtype, description: "", count }));
+        if (items.length === 0) {
+          resolve("");
+          return;
+        }
+        const noneCount = plugin.typIndex.subtypeBucket(type).noSubtype;
+        items.push({ type: "Kein Subtyp", description: "", count: noneCount, none: true });
+        new SubtypPickerModal(app, plugin, type, items, resolve).open();
+      });
+    }
     function unregisteredItems(app, plugin) {
       const registered = new Set(plugin.settings.types);
       const { counts } = plugin.typIndex.typeCounts();
@@ -3163,7 +3447,7 @@ var require_type_picker = __commonJS({
         new TypPickerModal(app, plugin, items, resolve).open();
       });
     }
-    module2.exports = { pickType };
+    module2.exports = { pickType, pickSubtype };
   }
 });
 
@@ -3172,7 +3456,8 @@ var { Plugin } = require("obsidian");
 var { DEFAULT_SETTINGS, TypSystemSettingTab } = require_settings();
 var { registerCommands } = require_commands();
 var { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require_typ_view();
-var { TypIndex } = require_typ_index();
+var { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require_typ_index();
+var { getSubtype, getSubtypeNames, enforceUniqueKeys } = require_subtypes();
 var { registerFileExplorerColors } = require_file_explorer_colors();
 var { registerGraphColors } = require_graph_colors();
 var { registerSearchColors } = require_search_colors();
@@ -3183,9 +3468,9 @@ var { registerActiveTitleColors } = require_active_title_colors();
 var { registerLinkColors } = require_link_colors();
 var { registerFrontmatterDefaultHighlight } = require_frontmatter_default_highlight();
 var { registerPropertyRenameSync } = require_property_rename_sync();
-var { normalizeGlobalOrder } = require_frontmatter_sort();
+var { normalizeGlobalOrder, sortFrontmatterFor } = require_frontmatter_sort();
 var { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require_frontmatter_placeholders();
-var { pickType: pickTypeModal } = require_type_picker();
+var { pickType: pickTypeModal, pickSubtype: pickSubtypeModal } = require_type_picker();
 var { registerPlaceholderSuggest } = require_placeholder_suggest();
 function migrateFloatingFrontmatter(settings) {
   if (!settings.typeFloatingFrontmatter) return;
@@ -3242,12 +3527,61 @@ module.exports = class TypSystemPlugin extends Plugin {
   // file (optional) wird an resolveFrontmatterPlaceholders() durchgereicht -
   // nur für den "{{created}}"-Platzhalter relevant, der das Erstellungsdatum
   // der Ziel-Datei statt des Aufrufzeitpunkts liefert.
-  getTypeDefaults(type, { includeFloating = false, file } = {}) {
-    const defaults = { ...this.settings.typeDefaultFrontmatter[type] ?? {} };
+  //
+  // subtype (optional): ergänzt das Standard-Frontmatter um den Block dieses
+  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter. Jeder Key gehört
+  // zu genau einem Block (siehe enforceUniqueKeys) - käme er doch doppelt vor,
+  // bliebe seine Position aus der TYP-Liste, Wert und Floating-Markierung
+  // kämen aus dem Subtyp-Block.
+  getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
+    const defaults = {};
+    const isFloating = /* @__PURE__ */ new Map();
+    const addBlock = (frontmatter, floatingKeys) => {
+      const actualKeys = new Map(Object.keys(defaults).map((key) => [key.toLowerCase(), key]));
+      for (const [key, value] of Object.entries(frontmatter ?? {})) {
+        if (key === "") continue;
+        const target = actualKeys.get(key.toLowerCase()) ?? key;
+        defaults[target] = value;
+        isFloating.set(target, (floatingKeys ?? []).includes(key));
+      }
+    };
+    addBlock(this.settings.typeDefaultFrontmatter[type], this.settings.typeFloatingKeys[type]);
+    const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
+    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
     if (!includeFloating) {
-      for (const key of this.settings.typeFloatingKeys[type] ?? []) delete defaults[key];
+      for (const [key, floating] of isFloating) if (floating) delete defaults[key];
     }
     return resolveFrontmatterPlaceholders(defaults, file);
+  }
+  // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
+  // der Reihenfolge ihrer Blöcke, samt Notiz-Anzahl.
+  getSubtypes(type) {
+    const { counts } = this.typIndex.subtypeBucket(type);
+    return getSubtypeNames(this.settings, type).map((subtype) => ({ subtype, count: counts.get(subtype) ?? 0 }));
+  }
+  // Für _obsidian/templater-scripts/TYP.js: Subtyp-Picker (siehe
+  // type-picker.js). Löst mit dem gewählten Subtyp auf, mit "" für "Kein
+  // Subtyp" (bzw. ohne Picker, wenn der TYP keine Subtypen hat), oder mit
+  // null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück).
+  pickSubtype(type) {
+    return pickSubtypeModal(this.app, this, type);
+  }
+  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter:
+  // setzt TYP und SUBTYP in einheitlicher Schreibweise - eine abweichend
+  // geschriebene Property ("typ", "Subtyp") wird an ihrer Stelle umbenannt
+  // statt verdoppelt. subtype null entfernt einen vorhandenen SUBTYP.
+  applyTypeProperties(frontmatter, type, subtype) {
+    setCanonicalProperty(frontmatter, TYP_PROPERTY, type);
+    if (subtype) setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, subtype);
+    else deleteProperty(frontmatter, SUBTYP_PROPERTY);
+  }
+  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter
+  // und nach allen übrigen Änderungen: bringt das Frontmatter in die
+  // Reihenfolge der Frontmatter-Sortierung (globale Reihenfolge, TYP-
+  // Frontmatter samt Subtyp-Block) - sonst landen neu ergänzte Properties
+  // (z. B. SUBTYP in einer bestehenden Notiz) am Ende.
+  sortFrontmatter(frontmatter, type, subtype = null) {
+    return sortFrontmatterFor(this, frontmatter, type, subtype);
   }
   // Für _obsidian/templater-scripts/TYP.js: erkennt einen dynamischen
   // "{{tp.<Skriptname>}}"-Platzhalter (siehe frontmatter-placeholders.js) in
@@ -3291,6 +3625,7 @@ module.exports = class TypSystemPlugin extends Plugin {
     this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
     migrateFloatingFrontmatter(this.settings);
+    for (const type of Object.keys(this.settings.typeSubtypes ?? {})) enforceUniqueKeys(this.settings, type);
   }
   async saveSettings() {
     await this.saveData(this.settings);

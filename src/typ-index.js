@@ -34,6 +34,51 @@ function typeKeyOf(value) {
   return text.trim() === "" ? null : text;
 }
 
+// Obsidian behandelt Property-Namen ohne Beachtung der Groß-/Kleinschreibung
+// ("Subtyp" und "SUBTYP" sind in "All properties" dieselbe Property) - TYP
+// und SUBTYP werden deshalb genauso gelesen. Die exakte Schreibweise hat
+// Vorrang, falls eine Notiz (fehlerhaft) mehrere Varianten trägt.
+function propertyKeyOf(frontmatter, name) {
+  if (!frontmatter) return undefined;
+  if (Object.prototype.hasOwnProperty.call(frontmatter, name)) return name;
+  const lower = name.toLowerCase();
+  return Object.keys(frontmatter).find((key) => key.toLowerCase() === lower);
+}
+
+function propertyValue(frontmatter, name) {
+  const key = propertyKeyOf(frontmatter, name);
+  return key === undefined ? undefined : frontmatter[key];
+}
+
+// Schreibt value unter der einheitlichen Schreibweise name (z. B. "SUBTYP")
+// in das von processFrontMatter gelieferte Objekt. Eine abweichend
+// geschriebene Variante ("Subtyp") wird dabei an Ort und Stelle umbenannt -
+// Objekt-Insertion-Order bestimmt die YAML-Reihenfolge, daher bei Bedarf alle
+// Keys in bisheriger Reihenfolge neu einfügen (wie in frontmatter-sort.js).
+function setCanonicalProperty(frontmatter, name, value) {
+  const lower = name.toLowerCase();
+  const keys = Object.keys(frontmatter);
+  if (!keys.some((key) => key !== name && key.toLowerCase() === lower)) {
+    frontmatter[name] = value;
+    return;
+  }
+  const snapshot = { ...frontmatter };
+  for (const key of keys) delete frontmatter[key];
+  for (const key of keys) {
+    if (key.toLowerCase() !== lower) frontmatter[key] = snapshot[key];
+    else if (!(name in frontmatter)) frontmatter[name] = value;
+  }
+}
+
+// Entfernt name in jeder Schreibweise aus dem von processFrontMatter
+// gelieferten Objekt.
+function deleteProperty(frontmatter, name) {
+  const lower = name.toLowerCase();
+  for (const key of Object.keys(frontmatter)) {
+    if (key.toLowerCase() === lower) delete frontmatter[key];
+  }
+}
+
 // SUBTYP wird genauso ausgelegt (typeKeyOf): eine Notiz hat höchstens einen
 // SUBTYP als sauberen Einzelwert, alles andere ist ein eigener, nicht
 // erfasster Schlüssel (siehe Subtyp-Blöcke in der TYP-Detailansicht).
@@ -94,8 +139,8 @@ class TypIndex extends Events {
 
   read(file) {
     const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    const rawType = frontmatter?.[TYP_PROPERTY] ?? null;
-    const rawSubtype = frontmatter?.[SUBTYP_PROPERTY] ?? null;
+    const rawType = propertyValue(frontmatter, TYP_PROPERTY) ?? null;
+    const rawSubtype = propertyValue(frontmatter, SUBTYP_PROPERTY) ?? null;
     return { typeKey: typeKeyOf(rawType), rawType, subtypeKey: typeKeyOf(rawSubtype), rawSubtype };
   }
 
@@ -268,4 +313,4 @@ class TypIndex extends Events {
 
 const EMPTY_BUCKET = Object.freeze({ counts: new Map(), noSubtype: 0, rawByKey: new Map() });
 
-module.exports = { TypIndex, typeKeyOf, TYP_PROPERTY, SUBTYP_PROPERTY };
+module.exports = { TypIndex, typeKeyOf, propertyValue, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY };

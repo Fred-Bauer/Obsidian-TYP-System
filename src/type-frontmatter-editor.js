@@ -263,8 +263,11 @@ function mountFrontmatterEditor(view, containerEl, store) {
           editor.fredPendingFloatingAdd = false;
         }
       }
-      store.setFloating(floating);
+      // Erst die Properties, dann die Floating-Markierungen - der Speicher des
+      // gemeinsamen Editors (unified-frontmatter-editor.js) verteilt letztere
+      // anhand der dabei ermittelten Block-Zuordnung.
       store.setFrontmatter(frontmatter);
+      store.setFloating(floating);
       view.plugin.saveSettings();
       // Damit die Fett-/Kursiv-Markierung in bereits offenen Notizen dieses
       // Typs sofort mitzieht, wenn sich hier die Property-Liste ändert.
@@ -335,4 +338,4 @@ function addBlankProperty(editor) {
   ensurePropertyMenuPatch(editor.owner.app, editor);
 }
 
-module.exports = { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore };
+module.exports = { mountFrontmatterEditor, addBlankProperty, ensurePropertyMenuPatch, typeStore, subtypeStore };

@@ -1,4 +1,11 @@
-const { typeKeyOf, SUBTYP_PROPERTY } = require("./typ-index");
+const { typeKeyOf, propertyValue, setCanonicalProperty, SUBTYP_PROPERTY } = require("./typ-index");
+
+// Subtyp-Namen werden (anders als TYPen, siehe normalizeTypeName) mit großem
+// Anfangsbuchstaben je Wort geschrieben, der Rest klein: "kurz GESCHICHTE" →
+// "Kurz Geschichte". Die Property SUBTYP selbst bleibt in Großbuchstaben.
+function normalizeSubtypeName(raw) {
+  return raw.trim().replace(/\S+/g, (word) => word.charAt(0).toLocaleUpperCase("de") + word.slice(1).toLocaleLowerCase("de"));
+}
 
 // Registrierte SUBTYPen je TYP (settings.typeSubtypes):
 //   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...] } } }
@@ -35,10 +42,37 @@ function deleteTypeSubtypes(settings, type) {
   if (settings.typeSubtypes) delete settings.typeSubtypes[type];
 }
 
+// Jeder Key gehört zu genau einem Block eines TYPs (Standard-Frontmatter ODER
+// ein Subtyp, Abgleich ohne Beachtung der Groß-/Kleinschreibung). Kommt er
+// trotzdem mehrfach vor (ältere Daten, Zusammenlegen zweier TYPen), bleibt er
+// im ersten Block - Standard-Frontmatter vor den Subtypen in ihrer
+// Reihenfolge - und verschwindet samt Floating-Markierung aus den übrigen.
+// Liefert true bei einer Änderung.
+function enforceUniqueKeys(settings, type) {
+  const seen = new Set(Object.keys(settings.typeDefaultFrontmatter[type] ?? {}).map((key) => key.toLowerCase()));
+  let changed = false;
+  for (const subtype of getSubtypeNames(settings, type)) {
+    const data = settings.typeSubtypes[type][subtype];
+    for (const key of Object.keys(data.frontmatter)) {
+      if (key === "") continue;
+      const lower = key.toLowerCase();
+      if (seen.has(lower)) {
+        delete data.frontmatter[key];
+        data.floatingKeys = data.floatingKeys.filter((k) => k !== key);
+        changed = true;
+      } else {
+        seen.add(lower);
+      }
+    }
+  }
+  return changed;
+}
+
 // Zusammenlegen zweier TYPen: Subtypen, die es nur bei source gibt, werden
 // übernommen. Gleichnamige Blöcke werden vereinigt - bei gleichem Key
 // gewinnen Wert und Floating-Markierung des Ziels, Keys nur aus source
-// werden hinten angehängt.
+// werden hinten angehängt. Danach gilt wieder "jeder Key nur in einem
+// Block" (enforceUniqueKeys).
 function mergeTypeSubtypes(settings, source, target) {
   const sourceSubtypes = settings.typeSubtypes?.[source];
   if (!sourceSubtypes) return;
@@ -57,6 +91,7 @@ function mergeTypeSubtypes(settings, source, target) {
     }
   }
   delete settings.typeSubtypes[source];
+  enforceUniqueKeys(settings, target);
 }
 
 // Schreibt den SUBTYP-Wert aller Notizen mit TYP-Schlüssel type und
@@ -67,8 +102,8 @@ async function renameSubtypeInNotes(plugin, type, oldKey, newValue) {
   for (const file of plugin.typIndex.filesWithSubtype(type, oldKey)) {
     let matched = false;
     await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      if (typeKeyOf(frontmatter[SUBTYP_PROPERTY]) !== oldKey) return;
-      frontmatter[SUBTYP_PROPERTY] = newValue;
+      if (typeKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY)) !== oldKey) return;
+      setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, newValue);
       matched = true;
     });
     if (matched) changed++;
@@ -77,9 +112,11 @@ async function renameSubtypeInNotes(plugin, type, oldKey, newValue) {
 }
 
 module.exports = {
+  normalizeSubtypeName,
   getSubtypeNames,
   getSubtype,
   ensureSubtype,
+  enforceUniqueKeys,
   moveTypeSubtypes,
   deleteTypeSubtypes,
   mergeTypeSubtypes,

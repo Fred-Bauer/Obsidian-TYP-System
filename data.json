@@ -36,13 +36,13 @@
     "ORGA": {},
     "TEXT": {
       "Titel": null,
-      "Autor": null,
+      "Urheber": null,
       "Erscheinung": null,
-      "Quelle": null
+      "Quelle": "{{tp.quelle}}"
     },
     "NOTIZ": {},
     "VORTRAG": {
-      "Autor": "{{tp.waehleAutorVortrag}}",
+      "Urheber": "{{tp.waehleAutorVortrag}}",
       "Datum": "{{created}}"
     },
     "PROJEKT": {

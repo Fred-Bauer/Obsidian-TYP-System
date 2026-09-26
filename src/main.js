@@ -12,9 +12,11 @@ const { registerBookmarksColors } = require("./bookmark-colors");
 const { registerActiveTitleColors } = require("./active-title-colors");
 const { registerLinkColors } = require("./link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
+const { registerPropertyRenameSync } = require("./property-rename-sync");
 const { normalizeGlobalOrder } = require("./frontmatter-sort");
 const { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require("./frontmatter-placeholders");
 const { pickType: pickTypeModal } = require("./type-picker");
+const { registerPlaceholderSuggest } = require("./placeholder-suggest");
 
 // Migriert Bestandsinstallationen von der alten, separaten
 // typeFloatingFrontmatter-Liste (eigenes Dict je Typ, immer hinter der
@@ -44,6 +46,10 @@ module.exports = class TypSystemPlugin extends Plugin {
 
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
+    // Umbenennungen über "All properties"/Bases auch ins Standard-Frontmatter
+    // der Typen übernehmen (siehe property-rename-sync.js).
+    registerPropertyRenameSync(this);
+    registerPlaceholderSuggest(this);
 
     // Separat gehalten (nicht nur Teil von refreshFns): die TYP-Detailansicht
     // braucht nach dem Mounten ihres Standard-Frontmatter-Editors gezielt nur

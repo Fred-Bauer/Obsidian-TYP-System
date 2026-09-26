@@ -607,11 +607,85 @@ var require_frontmatter_placeholders = __commonJS({
   }
 });
 
+// src/placeholder-suggest.js
+var require_placeholder_suggest = __commonJS({
+  "src/placeholder-suggest.js"(exports2, module2) {
+    var { TFile, Vault, debounce, normalizePath } = require("obsidian");
+    var { FRONTMATTER_PLACEHOLDERS } = require_frontmatter_placeholders();
+    var EDITOR_CLASS = "fred-typ-frontmatter-editor";
+    var SHORTCUT_MARKER = /^\s*(?:\/\/|\/\*|\*).*@typ-shortcut\b/m;
+    function registerPlaceholderSuggest2(plugin) {
+      const { app } = plugin;
+      const metadataCache = app.metadataCache;
+      let scriptFolder = null;
+      let shortcutScripts = [];
+      const currentScriptFolder = () => {
+        const folder = app.plugins.plugins["templater-obsidian"]?.settings?.user_scripts_folder;
+        return folder ? normalizePath(folder) : null;
+      };
+      const isInScriptFolder = (path) => !!scriptFolder && !!path && path.startsWith(scriptFolder + "/");
+      async function refreshScripts() {
+        const folderPath = currentScriptFolder();
+        scriptFolder = folderPath;
+        const folder = folderPath ? app.vault.getFolderByPath(folderPath) : null;
+        const files = [];
+        if (folder) {
+          Vault.recurseChildren(folder, (child) => {
+            if (child instanceof TFile && child.extension === "js") files.push(child);
+          });
+        }
+        const names = [];
+        for (const file of files) {
+          try {
+            if (SHORTCUT_MARKER.test(await app.vault.cachedRead(file))) names.push(file.basename);
+          } catch (e) {
+            console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
+          }
+        }
+        if (folderPath !== scriptFolder) return;
+        shortcutScripts = names.sort((a, b) => a.localeCompare(b));
+      }
+      const scheduleRefresh = debounce(refreshScripts, 300, true);
+      const onFileChange = (file, oldPath) => {
+        if (isInScriptFolder(file?.path) || isInScriptFolder(oldPath)) scheduleRefresh();
+      };
+      plugin.registerEvent(app.vault.on("create", onFileChange));
+      plugin.registerEvent(app.vault.on("modify", onFileChange));
+      plugin.registerEvent(app.vault.on("delete", onFileChange));
+      plugin.registerEvent(app.vault.on("rename", onFileChange));
+      app.workspace.onLayoutReady(refreshScripts);
+      const placeholderTokens = () => [
+        ...FRONTMATTER_PLACEHOLDERS.map((p) => p.token),
+        ...shortcutScripts.map((name) => `{{tp.${name}}}`)
+      ];
+      const original = metadataCache.getFrontmatterPropertyValuesForKey;
+      const wrapped = function(...args) {
+        const values = original.apply(this, args);
+        const inputEl = activeDocument.activeElement;
+        if (!inputEl?.closest?.(`.${EDITOR_CLASS}`)) return values;
+        const text = typeof inputEl.value === "string" ? inputEl.value : inputEl.textContent ?? "";
+        if (!text.trimStart().startsWith("{")) return values;
+        if (currentScriptFolder() !== scriptFolder) scheduleRefresh();
+        const tokens = placeholderTokens();
+        return [...tokens, ...values.filter((v) => !tokens.includes(v))];
+      };
+      metadataCache.getFrontmatterPropertyValuesForKey = wrapped;
+      plugin.register(() => {
+        if (metadataCache.getFrontmatterPropertyValuesForKey === wrapped) {
+          metadataCache.getFrontmatterPropertyValuesForKey = original;
+        }
+      });
+    }
+    module2.exports = { registerPlaceholderSuggest: registerPlaceholderSuggest2, EDITOR_CLASS };
+  }
+});
+
 // src/type-frontmatter-editor.js
 var require_type_frontmatter_editor = __commonJS({
   "src/type-frontmatter-editor.js"(exports2, module2) {
     var { MarkdownView, Menu } = require("obsidian");
     var { isPlaceholderToken } = require_frontmatter_placeholders();
+    var { EDITOR_CLASS: PLACEHOLDER_SUGGEST_EDITOR_CLASS } = require_placeholder_suggest();
     var TYP_PROPERTY = "TYP";
     function stripTypProperty(frontmatter) {
       for (const key of Object.keys(frontmatter)) {
@@ -750,6 +824,7 @@ var require_type_frontmatter_editor = __commonJS({
       };
       const editor = new EditorClass(app, owner);
       editor.fredPendingFloatingAdd = false;
+      editor.containerEl.addClass(PLACEHOLDER_SUGGEST_EDITOR_CLASS);
       containerEl.appendChild(editor.containerEl);
       view.addChild(editor);
       const defaults = view.plugin.settings.typeDefaultFrontmatter[type] ?? {};
@@ -2902,6 +2977,96 @@ var require_frontmatter_default_highlight = __commonJS({
   }
 });
 
+// src/property-rename-sync.js
+var require_property_rename_sync = __commonJS({
+  "src/property-rename-sync.js"(exports2, module2) {
+    var { Notice } = require("obsidian");
+    var TYP_PROPERTY = "TYP";
+    function sameKey(a, b) {
+      return a.toLowerCase() === b.toLowerCase();
+    }
+    function isEmptyValue(value) {
+      return value === null || value === void 0 || value === "";
+    }
+    function renameInType(settings, type, oldKey, newKey) {
+      const defaults = settings.typeDefaultFrontmatter[type];
+      if (!defaults) return false;
+      const keys = Object.keys(defaults);
+      const sourceKey = keys.find((key) => sameKey(key, oldKey));
+      if (sourceKey === void 0) return false;
+      const targetKey = keys.find((key) => key !== sourceKey && sameKey(key, newKey));
+      if (targetKey === void 0 && sourceKey === newKey) return false;
+      const next = {};
+      for (const key of keys) {
+        if (key !== sourceKey) {
+          next[key] = defaults[key];
+        } else if (targetKey === void 0) {
+          next[newKey] = defaults[sourceKey];
+        }
+      }
+      if (targetKey !== void 0 && isEmptyValue(next[targetKey])) next[targetKey] = defaults[sourceKey];
+      settings.typeDefaultFrontmatter[type] = next;
+      const floating = settings.typeFloatingKeys[type];
+      if (floating) {
+        const nextFloating = targetKey !== void 0 ? floating.filter((key) => key !== sourceKey) : floating.map((key) => key === sourceKey ? newKey : key);
+        if (nextFloating.length > 0) settings.typeFloatingKeys[type] = nextFloating;
+        else delete settings.typeFloatingKeys[type];
+      }
+      return true;
+    }
+    function renameInGlobalOrder(settings, oldKey, newKey) {
+      const order = settings.globalPropertyOrder;
+      const source = order.find((entry) => entry.kind === "property" && sameKey(entry.name, oldKey));
+      if (!source) return false;
+      const target = order.find((entry) => entry !== source && entry.kind === "property" && sameKey(entry.name, newKey));
+      if (target) settings.globalPropertyOrder = order.filter((entry) => entry !== source);
+      else if (source.name === newKey) return false;
+      else source.name = newKey;
+      return true;
+    }
+    async function syncRename(plugin, oldKey, newKey) {
+      if (typeof oldKey !== "string" || typeof newKey !== "string") return;
+      newKey = newKey.trim();
+      if (oldKey === "" || newKey === "" || oldKey === newKey) return;
+      if (sameKey(oldKey, TYP_PROPERTY) || sameKey(newKey, TYP_PROPERTY)) return;
+      const { settings } = plugin;
+      let typeCount = 0;
+      for (const type of Object.keys(settings.typeDefaultFrontmatter)) {
+        if (renameInType(settings, type, oldKey, newKey)) typeCount++;
+      }
+      const orderChanged = renameInGlobalOrder(settings, oldKey, newKey);
+      if (typeCount === 0 && !orderChanged) return;
+      await plugin.saveSettings();
+      plugin.refreshTypColors?.();
+      const parts = [];
+      if (typeCount > 0) parts.push(`${typeCount} TYP${typeCount === 1 ? "" : "en"}`);
+      if (orderChanged) parts.push("globaler Reihenfolge");
+      new Notice(`TYP-System: \u201E${oldKey}\u201C \u2192 \u201E${newKey}\u201C in ${parts.join(" und ")} umbenannt.`);
+    }
+    function registerPropertyRenameSync2(plugin) {
+      const fileManager = plugin.app.fileManager;
+      if (fileManager.__fredTypRenameSyncPatched) return;
+      fileManager.__fredTypRenameSyncPatched = true;
+      const original = fileManager.renameProperty;
+      fileManager.renameProperty = async function(oldKey, newKey, ...rest) {
+        const result = await original.call(this, oldKey, newKey, ...rest);
+        try {
+          await syncRename(plugin, oldKey, newKey);
+        } catch (error) {
+          console.error("TYP-System: Property-Umbenennung nicht \xFCbernommen", error);
+          new Notice(`TYP-System: Umbenennung von \u201E${oldKey}\u201C nicht \xFCbernommen \u2013 ${error.message}`);
+        }
+        return result;
+      };
+      plugin.register(() => {
+        fileManager.renameProperty = original;
+        delete fileManager.__fredTypRenameSyncPatched;
+      });
+    }
+    module2.exports = { registerPropertyRenameSync: registerPropertyRenameSync2 };
+  }
+});
+
 // src/type-picker.js
 var require_type_picker = __commonJS({
   "src/type-picker.js"(exports2, module2) {
@@ -3003,9 +3168,11 @@ var { registerBookmarksColors } = require_bookmark_colors();
 var { registerActiveTitleColors } = require_active_title_colors();
 var { registerLinkColors } = require_link_colors();
 var { registerFrontmatterDefaultHighlight } = require_frontmatter_default_highlight();
+var { registerPropertyRenameSync } = require_property_rename_sync();
 var { normalizeGlobalOrder } = require_frontmatter_sort();
 var { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require_frontmatter_placeholders();
 var { pickType: pickTypeModal } = require_type_picker();
+var { registerPlaceholderSuggest } = require_placeholder_suggest();
 function migrateFloatingFrontmatter(settings) {
   if (!settings.typeFloatingFrontmatter) return;
   for (const [type, floating] of Object.entries(settings.typeFloatingFrontmatter)) {
@@ -3023,6 +3190,8 @@ module.exports = class TypSystemPlugin extends Plugin {
     this.typIndex.register();
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
+    registerPropertyRenameSync(this);
+    registerPlaceholderSuggest(this);
     this.refreshFrontmatterHighlight = registerFrontmatterDefaultHighlight(this);
     const refreshFns = [
       registerTypView(this),

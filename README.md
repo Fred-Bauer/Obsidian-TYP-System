@@ -34,9 +34,11 @@ Per Klick auf einen registrierten Typ:
   - `{{today}}` – heutiges Datum (JJJJ-MM-TT)
   - `{{now}}` – aktuelles Datum mit Uhrzeit (JJJJ-MM-TT HH:mm)
   - `{{created}}` – Erstellungsdatum der Datei (JJJJ-MM-TT), nicht der Aufrufzeitpunkt
-  - `{{tp.<Skriptname>}}` – ruft beim Anlegen einer Notiz dynamisch das gleichnamige Templater-Skript (`tp.user.<Skriptname>`) auf und übernimmt dessen Rückgabewert – ein einzelner Wert, oder ein Objekt mit Werten für mehrere Properties des TYPs (z. B. `{{tp.waehleQuelle}}` bei `Quelle` füllt zusätzlich `Titel`/`Autor`); siehe *Templater-Integration*
+  - `{{tp.<Skriptname>}}` – ruft beim Anlegen einer Notiz dynamisch das gleichnamige Templater-Skript (`tp.user.<Skriptname>`) auf und übernimmt dessen Rückgabewert – ein einzelner Wert, oder ein Objekt mit Werten für mehrere Properties des TYPs (z. B. `{{tp.quelle}}` bei `Quelle` füllt zusätzlich `Titel`/`Autor`, `{{tp.quelleEditName}}` benennt die Notiz außerdem nach der gewählten PDF um); siehe *Templater-Integration*
 
   Erkannte Platzhalter werden farblich hervorgehoben, Obsidians „Type mismatch“-Warnung wird für sie unterdrückt.
+
+  **Vorschläge:** Beginnt ein Wert mit `{`, schlägt Obsidians normale Werte-Vorschlagsliste (nur bei Text- und Listen-Properties) zusätzlich alle Platzhalter vor – die festen sowie `{{tp.<Skriptname>}}` für jedes Templater-Skript im Templater-Skript-Ordner, das in einem Kommentar den Marker `@typ-shortcut` trägt (z. B. `// @typ-shortcut`). Reine Hilfsskripte ohne Marker erscheinen nicht. Gilt nur im Standard-Frontmatter-Editor, nicht in Notizen
 
 ## TYP-Picker
 
@@ -57,6 +59,7 @@ Bringt die in einer Notiz vorhandenen Properties in eine feste Reihenfolge (erg�
 - Befehl **„TYP Frontmatter Sortierung aktualisieren“** – fragt über den TYP-Picker (inkl. nicht registrierter und manuell deaktivierter Typen) einen Typ ab und sortiert nur dessen Notizen; ohne gepflegtes Standard-Frontmatter greift nur die globale Reihenfolge (mit entsprechendem Hinweis in der Rückmeldung)
 - Befehl **„Frontmatter Sortierung der aktiven Notiz aktualisieren“**
 - Jeder Lauf meldet per Notice geprüfte/sortierte Notizen bzw. bei einem Fehler dessen Meldung, statt lautlos nichts zu tun; ein Vorab-Check über den bereits im Speicher vorhandenen Metadata-Cache sorgt dafür, dass bereits korrekt sortierte Notizen bei wiederholten Läufen nicht extra geöffnet/geschrieben werden
+- **Umbenennen einer Property** über Obsidians „All properties“-Ansicht (bzw. in Bases beim Benennen einer neu angelegten Notiz-Property) wird automatisch ins Standard-Frontmatter aller Typen, deren Floating-Markierungen und die globale Reihenfolge übernommen – Position und Wert bleiben erhalten, Groß-/Kleinschreibung wird beim Abgleich ignoriert. Existiert der neue Name dort schon, werden beide zusammengelegt (der bestehende Eintrag bleibt, übernimmt aber den alten Wert, falls er selbst leer ist). Ein reiner Anzeigename in Bases ändert die Notizen nicht und daher auch hier nichts
 - optional: Property-Namen, die im Standard-Frontmatter eines Typs stehen, in Notizen (Frontmatter-Widget und „All Properties“-Ansicht) fett markieren – als Floating Property markierte darunter stattdessen kursiv
 
 ## Ignorierte Notizen
@@ -94,7 +97,8 @@ Das Plugin selbst enthält keine Templater-Logik, stellt aber eine kleine API au
 
 Umgesetzt in `TYP.js`, damit möglichst jedes Templater-Skript als Shortcut im Standard-Frontmatter taugt:
 
-- **Aufruf:** `tp.user.<Skriptname>(tp, newFile, { typ, key, werte })` – `newFile` ist die neue Notiz, `key` die Property des Platzhalters, `werte` die bis dahin aufgelösten Standardwerte (Skripte laufen nacheinander in der Reihenfolge des Standard-Frontmatters). Skripte, die nur `tp` erwarten, funktionieren unverändert
+- **Aufruf:** `tp.user.<Skriptname>(tp, newFile, { typ, key, werte, danach })` – `newFile` ist die neue Notiz, `key` die Property des Platzhalters, `werte` die bis dahin aufgelösten Standardwerte (Skripte laufen nacheinander in der Reihenfolge des Standard-Frontmatters). Skripte, die nur `tp` erwarten, funktionieren unverändert
+- **`danach(fn)`:** merkt eine (async) Aktion vor, die erst nach dem Schreiben des Frontmatters läuft, der Reihe nach – für Seiteneffekte an der Datei selbst, z. B. Umbenennen (`quelleEditName`). Ein eigener `tp.hooks.on_all_templates_executed`-Hook im Skript liefe dagegen parallel zum Schreiben und könnte bei einer Umbenennung eine zweite Datei erzeugen
 - **Rückgabe – Einzelwert** (Text, Zahl, Liste, `null`/`undefined`): wird Wert dieser Property
 - **Rückgabe – einfaches Objekt:** Werte für mehrere Properties. Die Property des Platzhalters bekommt ihren Eintrag daraus; weitere Einträge füllen nur Properties, die zum TYP gehören (Standard-Frontmatter inkl. Floating Properties) und noch leer sind – alles andere im Objekt wird ignoriert. Floating Properties werden dabei nur angelegt, wenn sie tatsächlich einen Wert bekommen
 - Hat die Notiz für die Property schon einen Wert (erneutes Ausführen auf einer bestehenden Notiz), wird das Skript nicht aufgerufen
@@ -104,7 +108,9 @@ Umgesetzt in `TYP.js`, damit möglichst jedes Templater-Skript als Shortcut im S
 
 - `src/` ist die Quelle, `main.js` das über esbuild gebaute Bundle (`npm run dev` für Watch-Modus, `node esbuild.config.mjs production` für einen einmaligen Build)
 - Die Graph-Einfärbung patcht `renderer.setData` zur Laufzeit (keine offizielle Obsidian-API dafür) – ähnlich wie es das Community-Plugin *graph-nested-tags* für Tag-Hierarchien tut
+- Die Übernahme von Property-Umbenennungen (`src/property-rename-sync.js`) wrappt `app.fileManager.renameProperty` – über diese eine Methode laufen sowohl die „All properties“-Ansicht als auch Bases. Die Plugin-Einstellungen werden erst nach erfolgreichem Umschreiben der Notizen angepasst
 - Die TYP-Pane hält sich beim Hot-Reload (z. B. über das Hot-Reload-Plugin) selbst offen, da Obsidian eigene Views beim Plugin-Unload nicht automatisch wiederherstellt
 - **TYP-Index** (`src/typ-index.js`): hält TYP und SUBTYP aller Notizen im Speicher und meldet per eigenem `change`-Event nur tatsächliche TYP-/SUBTYP-Änderungen (bzw. neue/gelöschte/umbenannte Notizen). Alle Einfärbungen und die TYP-Pane hängen an diesem Event statt direkt an `metadataCache` – normales Schreiben in einer Notiz löst damit kein Neu-Einfärben aus. Die Zählungen (TYP-Pane, Picker, `getTypes()`) werden dort zwischengespeichert. Zusätzlich lauscht die TYP-Pane auf das `vault`-Event `config-changed` (geänderte Excluded-Files-Liste)
 - **Link-Einfärbung** (`src/link-colors.js`): überschreibt je Link nur `--link-color`/`--link-color-hover`. Im Lese-Modus per Markdown-Post-Processor, in Live Preview per CodeMirror-ViewPlugin, der nur den sichtbaren Bereich betrachtet (Links in Code-Blöcken werden über den Syntaxbaum ausgeschlossen). `@codemirror/*` ist deshalb in `esbuild.config.mjs` als extern markiert
+- **Platzhalter-Vorschläge** (`src/placeholder-suggest.js`): umhüllen `metadataCache.getFrontmatterPropertyValuesForKey`, aus dem Obsidians Wert-Vorschläge ihre Kandidaten beziehen – nur wenn der Fokus in einem Wert-Feld des Standard-Frontmatter-Editors liegt und der Wert mit `{` beginnt, sonst unverändert. Die Liste markierter Skripte wird vorab aus Templaters Skript-Ordner gelesen und bei Dateiänderungen darin nachgeführt
 - Der Standard-Frontmatter-Editor je Typ nutzt Obsidians eigenes (undokumentiertes) Property-Editor-Widget, gebunden an ein Plain-Object statt an eine echte Datei. Die globale Property-Reihenfolge baut dagegen bewusst eine eigene, schlichte Liste statt desselben Widgets – für die nicht entfernbaren, aber verschiebbaren Platzhalter-Zeilen wäre ein erneutes `synchronize()` aus dessen `saveFrontmatter`-Callback heraus nötig, was nachweislich zu einem Stack Overflow führen kann

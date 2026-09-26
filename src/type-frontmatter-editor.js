@@ -1,5 +1,6 @@
 const { MarkdownView, Menu } = require("obsidian");
 const { isPlaceholderToken } = require("./frontmatter-placeholders");
+const { EDITOR_CLASS: PLACEHOLDER_SUGGEST_EDITOR_CLASS } = require("./placeholder-suggest");
 
 const TYP_PROPERTY = "TYP";
 
@@ -239,6 +240,8 @@ function mountTypeFrontmatterEditor(view, containerEl, type) {
 
   const editor = new EditorClass(app, owner);
   editor.fredPendingFloatingAdd = false;
+  // Grenzt die Platzhalter-Vorschläge (placeholder-suggest.js) auf diesen Editor ein.
+  editor.containerEl.addClass(PLACEHOLDER_SUGGEST_EDITOR_CLASS);
   containerEl.appendChild(editor.containerEl);
   view.addChild(editor);
 

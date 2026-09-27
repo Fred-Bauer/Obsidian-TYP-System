@@ -14,7 +14,7 @@ const { registerActiveTitleColors } = require("./active-title-colors");
 const { registerLinkColors } = require("./link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { registerPropertyRenameSync } = require("./property-rename-sync");
-const { normalizeGlobalOrder, sortFrontmatterFor } = require("./frontmatter-sort");
+const { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require("./frontmatter-sort");
 const { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require("./frontmatter-placeholders");
 const {
   pickType: pickTypeModal,
@@ -163,6 +163,14 @@ module.exports = class TypSystemPlugin extends Plugin {
   // (z. B. SUBTYP in einer bestehenden Notiz) am Ende.
   sortFrontmatter(frontmatter, type, subtype = null) {
     return sortFrontmatterFor(this, frontmatter, type, subtype);
+  }
+
+  // Innerhalb von processFrontMatter: setzt nur die Property key an ihren
+  // Platz laut Frontmatter-Sortierung (TYP/SUBTYP aus dem Objekt selbst),
+  // alles Übrige bleibt, wie es ist - z. B. für Freds Property-Backlinking,
+  // damit eine neu angelegte Property nicht am Ende landet.
+  placeProperty(frontmatter, key) {
+    return placePropertyFor(this, frontmatter, key);
   }
 
   // Für _obsidian/templater-scripts/TYP.js: erkennt einen dynamischen

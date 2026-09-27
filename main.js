@@ -383,6 +383,7 @@ var require_subtypes = __commonJS({
 var require_frontmatter_sort = __commonJS({
   "src/frontmatter-sort.js"(exports2, module2) {
     var { getSubtype: getSubtype2 } = require_subtypes();
+    var { typeKeyOf, propertyValue } = require_typ_index();
     var TYP_PROPERTY2 = "TYP";
     var SUBTYP_PROPERTY2 = "SUBTYP";
     var DEFAULT_GLOBAL_ORDER = [{ kind: "typValue" }, { kind: "subtypValue" }, { kind: "typ" }, { kind: "other" }];
@@ -486,6 +487,24 @@ var require_frontmatter_sort = __commonJS({
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
       return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, type, subtype));
     }
+    function placePropertyFor2(plugin, frontmatter, key) {
+      const existingKeys = Object.keys(frontmatter);
+      const actualKey = existingKeys.find((k) => k.toLowerCase() === key.toLowerCase());
+      if (!actualKey || existingKeys.length <= 1) return false;
+      const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
+      const type = typeKeyOf(propertyValue(frontmatter, TYP_PROPERTY2));
+      const subtype = typeKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY2));
+      const sortedKeys = computeSortedKeys(existingKeys, globalOrder, orderedDefaultKeys(plugin, type, subtype));
+      const rest = existingKeys.filter((k) => k !== actualKey);
+      const predecessor = sortedKeys.slice(0, sortedKeys.indexOf(actualKey)).pop();
+      const newKeys = [...rest];
+      newKeys.splice(predecessor === void 0 ? 0 : rest.indexOf(predecessor) + 1, 0, actualKey);
+      if (newKeys.every((k, i) => k === existingKeys[i])) return false;
+      const snapshot = { ...frontmatter };
+      for (const k of existingKeys) delete frontmatter[k];
+      for (const k of newKeys) frontmatter[k] = snapshot[k];
+      return true;
+    }
     async function sortSingleFileFrontmatter(app, plugin, file) {
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
       const type = plugin.typIndex.typeOf(file);
@@ -511,6 +530,7 @@ var require_frontmatter_sort = __commonJS({
       sortAllFrontmatter,
       sortSingleFileFrontmatter,
       sortFrontmatterFor: sortFrontmatterFor2,
+      placePropertyFor: placePropertyFor2,
       normalizeGlobalOrder: normalizeGlobalOrder2,
       DEFAULT_GLOBAL_ORDER,
       TYP_PROPERTY: TYP_PROPERTY2,
@@ -4281,7 +4301,7 @@ var { registerActiveTitleColors } = require_active_title_colors();
 var { registerLinkColors } = require_link_colors();
 var { registerFrontmatterDefaultHighlight } = require_frontmatter_default_highlight();
 var { registerPropertyRenameSync } = require_property_rename_sync();
-var { normalizeGlobalOrder, sortFrontmatterFor } = require_frontmatter_sort();
+var { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require_frontmatter_sort();
 var { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require_frontmatter_placeholders();
 var {
   pickType: pickTypeModal,
@@ -4402,6 +4422,13 @@ module.exports = class TypSystemPlugin extends Plugin {
   // (z. B. SUBTYP in einer bestehenden Notiz) am Ende.
   sortFrontmatter(frontmatter, type, subtype = null) {
     return sortFrontmatterFor(this, frontmatter, type, subtype);
+  }
+  // Innerhalb von processFrontMatter: setzt nur die Property key an ihren
+  // Platz laut Frontmatter-Sortierung (TYP/SUBTYP aus dem Objekt selbst),
+  // alles Übrige bleibt, wie es ist - z. B. für Freds Property-Backlinking,
+  // damit eine neu angelegte Property nicht am Ende landet.
+  placeProperty(frontmatter, key) {
+    return placePropertyFor(this, frontmatter, key);
   }
   // Für _obsidian/templater-scripts/TYP.js: erkennt einen dynamischen
   // "{{tp.<Skriptname>}}"-Platzhalter (siehe frontmatter-placeholders.js) in

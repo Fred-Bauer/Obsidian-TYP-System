@@ -1,4 +1,5 @@
 const { getSubtype } = require("./subtypes");
+const { typeKeyOf, propertyValue } = require("./typ-index");
 
 const TYP_PROPERTY = "TYP";
 const SUBTYP_PROPERTY = "SUBTYP";
@@ -206,6 +207,39 @@ function sortFrontmatterFor(plugin, frontmatter, type, subtype) {
   return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, type, subtype));
 }
 
+// Setzt nur die eine Property key an ihren Platz laut Frontmatter-Sortierung,
+// alle übrigen bleiben in ihrer bisherigen Reihenfolge - für Aufrufer, die
+// gerade eine Property neu angelegt haben (z. B. Freds Property-Backlinking),
+// die sonst am Ende landen würde, ohne dafür gleich das ganze, evtl. bewusst
+// anders sortierte Frontmatter umzustellen. TYP/SUBTYP werden aus dem
+// übergebenen Objekt gelesen, nicht aus Index/Cache (die kennen innerhalb von
+// processFrontMatter evtl. noch einen älteren Stand).
+//
+// Platz = direkt hinter dem nächsten Vorgänger, den key in der vollständig
+// sortierten Reihenfolge hätte (ganz nach vorn, wenn es keinen gibt). Liefert
+// true bei einer Änderung.
+function placePropertyFor(plugin, frontmatter, key) {
+  const existingKeys = Object.keys(frontmatter);
+  const actualKey = existingKeys.find((k) => k.toLowerCase() === key.toLowerCase());
+  if (!actualKey || existingKeys.length <= 1) return false;
+
+  const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
+  const type = typeKeyOf(propertyValue(frontmatter, TYP_PROPERTY));
+  const subtype = typeKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY));
+  const sortedKeys = computeSortedKeys(existingKeys, globalOrder, orderedDefaultKeys(plugin, type, subtype));
+
+  const rest = existingKeys.filter((k) => k !== actualKey);
+  const predecessor = sortedKeys.slice(0, sortedKeys.indexOf(actualKey)).pop();
+  const newKeys = [...rest];
+  newKeys.splice(predecessor === undefined ? 0 : rest.indexOf(predecessor) + 1, 0, actualKey);
+  if (newKeys.every((k, i) => k === existingKeys[i])) return false;
+
+  const snapshot = { ...frontmatter };
+  for (const k of existingKeys) delete frontmatter[k];
+  for (const k of newKeys) frontmatter[k] = snapshot[k];
+  return true;
+}
+
 // Sortiert eine einzelne, bereits bekannte Notiz (z. B. die aktive Datei).
 async function sortSingleFileFrontmatter(app, plugin, file) {
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
@@ -250,6 +284,7 @@ module.exports = {
   sortAllFrontmatter,
   sortSingleFileFrontmatter,
   sortFrontmatterFor,
+  placePropertyFor,
   normalizeGlobalOrder,
   DEFAULT_GLOBAL_ORDER,
   TYP_PROPERTY,

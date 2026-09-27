@@ -19,7 +19,7 @@ function registerCommands(plugin) {
 
   plugin.addCommand({
     id: "frontmatter-sortierung-alle",
-    name: "TYP - Frontmatter Sortierung GLOBAL aktualisieren",
+    name: "Frontmatter Sortierung GLOBAL aktualisieren",
     callback: runOrReportError("Frontmatter Sortierung", async () => {
       const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
       new Notice(
@@ -32,7 +32,7 @@ function registerCommands(plugin) {
 
   plugin.addCommand({
     id: "frontmatter-sortierung-typ",
-    name: "TYP - Frontmatter Sortierung für TYP aktualisieren",
+    name: "Frontmatter Sortierung für TYP aktualisieren",
     callback: runOrReportError("Frontmatter Sortierung", async () => {
       // Derselbe TYP-Picker wie überall sonst im Plugin (siehe type-picker.js) -
       // zeigt Farbe, Beschreibung und Notiz-Anzahl statt einer reinen Namensliste
@@ -59,7 +59,7 @@ function registerCommands(plugin) {
 
   plugin.addCommand({
     id: "frontmatter-sortierung-aktive-notiz",
-    name: "TYP - Frontmatter Sortierung der aktiven Notiz aktualisieren",
+    name: "Frontmatter Sortierung der aktiven Notiz aktualisieren",
     checkCallback: (checking) => {
       const file = plugin.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") return false;

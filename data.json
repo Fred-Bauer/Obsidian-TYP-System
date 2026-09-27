@@ -63,6 +63,16 @@
       "Nation": null,
       "Familie": null,
       "Freunde": null
+    },
+    "MEDIA": {
+      "Titel": null,
+      "Urheber": null,
+      "Herausgeber": null,
+      "Erscheinung": null,
+      "Bewertung": null,
+      "Medienstatus": null,
+      "Priorität": null,
+      "Besitz": false
     }
   },
   "typeFloatingKeys": {
@@ -79,6 +89,11 @@
       "E-Mail",
       "Handynummer",
       "Geburtstag"
+    ],
+    "MEDIA": [
+      "Herausgeber",
+      "Bewertung",
+      "Besitz"
     ]
   },
   "typeManual": {
@@ -102,7 +117,39 @@
         },
         "floatingKeys": [
           "Datum",
-          "Prüfungsform"
+          "Prüfungsform",
+          "Zeit"
+        ]
+      }
+    },
+    "MEDIA": {
+      "Buch": {
+        "frontmatter": {},
+        "floatingKeys": []
+      },
+      "Film": {
+        "frontmatter": {},
+        "floatingKeys": []
+      },
+      "Game": {
+        "frontmatter": {
+          "Story": null,
+          "Rounds": null,
+          "Endless": null,
+          "Multiplayer": null
+        },
+        "floatingKeys": [
+          "Multiplayer"
+        ]
+      },
+      "Serie": {
+        "frontmatter": {
+          "Staffel": null,
+          "Episode": null
+        },
+        "floatingKeys": [
+          "Staffel",
+          "Episode"
         ]
       }
     }

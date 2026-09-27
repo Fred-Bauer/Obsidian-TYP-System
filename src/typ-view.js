@@ -1590,19 +1590,19 @@ function registerTypView(plugin) {
 
   plugin.addCommand({
     id: "typ-view-oeffnen",
-    name: "TYP - TYP-View öffnen",
+    name: "TYP-View öffnen",
     callback: () => activateTypView(plugin),
   });
 
   plugin.addCommand({
     id: "typ-property-hinzufuegen",
-    name: "TYP - Standard-Property hinzufügen",
+    name: "TYP-Property hinzufügen",
     callback: () => addTypPropertyCommand(plugin),
   });
 
   plugin.addCommand({
     id: "typ-hinzufuegen",
-    name: "TYP - Neuen TYP hinzufügen",
+    name: "Neuen TYP hinzufügen",
     callback: () => addTypCommand(plugin),
   });
 
@@ -1680,8 +1680,10 @@ async function activateTypView(plugin, reveal = true, createIfMissing = true) {
 
 // Vorrangig in der bereits offenen TYP-Detailansicht (dann exakt wie der
 // dortige +-Button), sonst wird die Detailansicht für den TYP der aktiven
-// Notiz geöffnet und die Property dort ergänzt. Ist nur die TYPen-Liste
-// offen (kein selectedType), zählt das nicht als "aktive Detailansicht" -
+// Notiz geöffnet und die Property dort ergänzt. Ist keine Notiz offen oder
+// hat sie keinen TYP, dient eine zwar nicht fokussierte, aber in der
+// Detailansicht offene TYP-View als Rückfallebene. Ist nur die TYPen-Liste
+// offen (kein selectedType), zählt das nicht als "offene Detailansicht" -
 // dafür fehlt dort ein Frontmatter-Editor, an dem sich etwas hinzufügen ließe.
 async function addTypPropertyCommand(plugin) {
   const app = plugin.app;
@@ -1695,7 +1697,15 @@ async function addTypPropertyCommand(plugin) {
   const file = app.workspace.getActiveFile();
   const type = plugin.typIndex.typeOf(file);
   if (!type) {
-    new Notice("Aktive Notiz hat keinen TYP.");
+    const openLeaf = app.workspace
+      .getLeavesOfType(VIEW_TYPE_TYP)
+      .find((leaf) => leaf.view instanceof TypView && leaf.view.selectedType !== null);
+    if (openLeaf) {
+      await app.workspace.revealLeaf(openLeaf);
+      openLeaf.view.frontmatterEditor?.fredAddBlank(null);
+      return;
+    }
+    new Notice(file ? "Aktive Notiz hat keinen TYP und in der TYP-View ist kein TYP geöffnet." : "Keine Notiz offen und in der TYP-View ist kein TYP geöffnet.");
     return;
   }
 

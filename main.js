@@ -1154,7 +1154,7 @@ var require_commands = __commonJS({
       };
       plugin.addCommand({
         id: "frontmatter-sortierung-alle",
-        name: "TYP - Frontmatter Sortierung GLOBAL aktualisieren",
+        name: "Frontmatter Sortierung GLOBAL aktualisieren",
         callback: runOrReportError("Frontmatter Sortierung", async () => {
           const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
           new Notice(
@@ -1164,7 +1164,7 @@ var require_commands = __commonJS({
       });
       plugin.addCommand({
         id: "frontmatter-sortierung-typ",
-        name: "TYP - Frontmatter Sortierung f\xFCr TYP aktualisieren",
+        name: "Frontmatter Sortierung f\xFCr TYP aktualisieren",
         callback: runOrReportError("Frontmatter Sortierung", async () => {
           const type = await plugin.pickType({ includeManualOff: true, includeUnregistered: true });
           if (!type) return;
@@ -1178,7 +1178,7 @@ var require_commands = __commonJS({
       });
       plugin.addCommand({
         id: "frontmatter-sortierung-aktive-notiz",
-        name: "TYP - Frontmatter Sortierung der aktiven Notiz aktualisieren",
+        name: "Frontmatter Sortierung der aktiven Notiz aktualisieren",
         checkCallback: (checking) => {
           const file = plugin.app.workspace.getActiveFile();
           if (!file || file.extension !== "md") return false;
@@ -3155,17 +3155,17 @@ var require_typ_view = __commonJS({
       plugin.registerView(VIEW_TYPE_TYP, (leaf) => new TypView(leaf, plugin));
       plugin.addCommand({
         id: "typ-view-oeffnen",
-        name: "TYP - TYP-View \xF6ffnen",
+        name: "TYP-View \xF6ffnen",
         callback: () => activateTypView(plugin)
       });
       plugin.addCommand({
         id: "typ-property-hinzufuegen",
-        name: "TYP - Standard-Property hinzuf\xFCgen",
+        name: "TYP-Property hinzuf\xFCgen",
         callback: () => addTypPropertyCommand(plugin)
       });
       plugin.addCommand({
         id: "typ-hinzufuegen",
-        name: "TYP - Neuen TYP hinzuf\xFCgen",
+        name: "Neuen TYP hinzuf\xFCgen",
         callback: () => addTypCommand(plugin)
       });
       plugin.app.workspace.onLayoutReady(() => activateTypView(plugin, false, false));
@@ -3210,7 +3210,13 @@ var require_typ_view = __commonJS({
       const file = app.workspace.getActiveFile();
       const type = plugin.typIndex.typeOf(file);
       if (!type) {
-        new Notice("Aktive Notiz hat keinen TYP.");
+        const openLeaf = app.workspace.getLeavesOfType(VIEW_TYPE_TYP).find((leaf) => leaf.view instanceof TypView && leaf.view.selectedType !== null);
+        if (openLeaf) {
+          await app.workspace.revealLeaf(openLeaf);
+          openLeaf.view.frontmatterEditor?.fredAddBlank(null);
+          return;
+        }
+        new Notice(file ? "Aktive Notiz hat keinen TYP und in der TYP-View ist kein TYP ge\xF6ffnet." : "Keine Notiz offen und in der TYP-View ist kein TYP ge\xF6ffnet.");
         return;
       }
       await activateTypView(plugin);

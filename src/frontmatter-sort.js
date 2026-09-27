@@ -7,7 +7,7 @@ const SUBTYP_PROPERTY = "SUBTYP";
 // Order-Editor benutzt - alle vier Platzhalter-Blöcke sind dort per UI nicht
 // entfernbar, nur verschiebbar (siehe frontmatter-order-editor.js).
 // "typValue" ist die TYP-Property selbst, "subtypValue" analog die SUBTYP-
-// Property, "typ" die Standard-Frontmatter-Liste des TYPs (siehe
+// Property, "typ" die TYP-Frontmatter-Liste des TYPs (siehe
 // type-frontmatter-editor.js), "other" alles Übrige.
 const DEFAULT_GLOBAL_ORDER = [{ kind: "typValue" }, { kind: "subtypValue" }, { kind: "typ" }, { kind: "other" }];
 
@@ -41,7 +41,7 @@ function normalizeGlobalOrder(order) {
  *    aliases; Einstellungen -> TYP -> Globale Property-Reihenfolge),
  *  - der TYP-Property selbst,
  *  - der SUBTYP-Property selbst,
- *  - dem Block "TYP-Frontmatter" (Standard-Frontmatter-Liste des
+ *  - dem Block "TYP-Frontmatter" (TYP-Frontmatter-Liste des
  *    jeweiligen Typs, siehe type-frontmatter-editor.js, gefolgt vom
  *    Frontmatter-Block seines SUBTYPs), und
  *  - dem Block "Sonstige Properties" (alles Übrige, in bisheriger
@@ -62,7 +62,7 @@ function normalizeGlobalOrder(order) {
 //
 // Mit subtype zusätzlich die Keys aus dessen Frontmatter-Block (siehe
 // subtypes.js) - dahinter, oder davor, wenn der Subtyp-Block in der TYP-
-// Detailansicht über dem Standard-Frontmatter steht (aboveStandard). Käme ein
+// Detailansicht über dem TYP-Frontmatter steht (aboveStandard). Käme ein
 // Key doch in beiden vor, zählt seine erste Position.
 function orderedDefaultKeys(plugin, type, subtype = null) {
   if (!type) return null;
@@ -229,7 +229,7 @@ async function sortAllFrontmatter(app, plugin, onlyType) {
   // Nur aussagekräftig, wenn ein einzelner Typ eingegrenzt wurde (sonst
   // wechselt der Typ von Datei zu Datei) - für die Rückmeldung des Befehls
   // "TYP Frontmatter Sortierung aktualisieren", falls für den gewählten Typ
-  // gar keine Standard-Frontmatter-Liste gepflegt ist.
+  // gar keine TYP-Frontmatter-Liste gepflegt ist.
   const hasTypeDefaults = onlyType ? orderedDefaultKeys(plugin, onlyType) !== null : null;
 
   for (const file of app.vault.getMarkdownFiles()) {

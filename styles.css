@@ -43,7 +43,7 @@
   color: var(--text-muted);
 }
 
-/* Eintrag mit dem globalen Order-Editor in der Gruppe "Standard-Frontmatter"
+/* Eintrag mit dem globalen Order-Editor in der Gruppe "TYP-Frontmatter"
    (siehe settings.js) - hat kein Control, infoEl soll daher die volle Breite
    nutzen statt Obsidians Abstand zum (hier leeren) Control-Bereich. */
 .fred-order-setting > .setting-item-info {
@@ -165,6 +165,13 @@
   height: 0.6em;
   border-radius: 50%;
   background-color: var(--fred-typ-title-color);
+}
+
+/* Standardwert als hohler Ring, wie die Farbpunkte der TYP-View (siehe
+   resolveDot in active-title-colors.js). */
+.inline-title.fred-typ-title-dot-hollow::before {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 max(1.5px, 0.08em) var(--fred-typ-title-color);
 }
 
 /* Box (eingefärbt/ungefärbt): ebenfalls position:absolute mit right:100%
@@ -413,6 +420,13 @@
   flex-shrink: 0;
 }
 
+/* Nichts zurückzusetzen - die Farbe ist bereits der Standardwert (hohler
+   Ring, siehe paintColorDot in type-colors.js). */
+.fred-typ-color-reset.is-disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
 /* Hervorgehoben (Akzentfarbe) statt wie die übrigen Header-Icons neutral -
    markiert den folgenreicheren zweiten Umbenennen-Button, der zusätzlich
    Notizen umschreibt (siehe startDetailRename in typ-view.js). */
@@ -432,7 +446,7 @@
   margin-bottom: var(--size-4-3);
 }
 
-/* Label bodenbündig statt (wie die Standard-Frontmatter-Kopfzeile sonst)
+/* Label bodenbündig statt (wie die TYP-Frontmatter-Kopfzeile sonst)
    vertikal mittig - der größere Farbpunkt daneben macht die Zeile höher als
    das Label/den Schalter links, die dadurch sonst nicht mehr nahtlos über
    dem Textfeld sitzen. */
@@ -568,7 +582,7 @@
   outline: none;
 }
 
-/* Gemeinsamer Editor über Standard-Frontmatter und Subtyp-Blöcke (siehe
+/* Gemeinsamer Editor über TYP-Frontmatter und Subtyp-Blöcke (siehe
    unified-frontmatter-editor.js). Die Blöcke sind nur Optik: Überschrift
    (.fred-typ-section-header) und Abschluss (.fred-typ-section-footer) stehen
    als eigene Elemente zwischen Obsidians Zeilen, die Kartenfläche der
@@ -595,7 +609,7 @@
 
 /* Hover: Blockfläche leicht aufgehellt - Obsidians Hover-Hintergrund über der
    Kartenfarbe. Gilt ebenso für die nicht erfassten Subtypen, nicht aber für
-   das (transparente) Standard-Frontmatter. Die Karte bekommt is-hovered per
+   das (transparente) TYP-Frontmatter. Die Karte bekommt is-hovered per
    JS (siehe unified-frontmatter-editor.js), da die Liste über ihr liegt. */
 .fred-typ-unified-card.is-hovered,
 .fred-typ-subtype-unregistered:hover {
@@ -644,7 +658,7 @@ body.fred-typ-block-dragging * {
   --icon-stroke: var(--icon-m-stroke-width);
 }
 
-/* Abstand zwischen den Blöcken, egal an welcher Stelle das Standard-
+/* Abstand zwischen den Blöcken, egal an welcher Stelle das TYP-
    Frontmatter steht (Subtypen dürfen auch darüber liegen) - nur der
    oberste Block beginnt ohne. */
 .fred-typ-unified .fred-typ-section-header:not(:first-child) {
@@ -655,21 +669,74 @@ body.fred-typ-block-dragging * {
   height: var(--size-4-1);
 }
 
-/* Aktionen eines Subtyp-Blocks, zentriert im Abschluss (siehe
-   renderSectionFooter in typ-view.js) - Icongröße wie in den Überschriften. */
+/* Abschluss eines Subtyp-Blocks (siehe renderSectionFooter in typ-view.js):
+   links Farbpunkt und Zurücksetzen, rechts die Aktionen - Icongröße wie in
+   den Überschriften. */
 .fred-typ-unified .fred-typ-section-footer.fred-typ-subtype-actions,
 .fred-typ-subtype-pending .fred-typ-section-footer.fred-typ-subtype-actions {
   display: flex;
-  justify-content: center;
-  gap: var(--size-4-1);
+  align-items: center;
+  justify-content: space-between;
   height: auto;
   padding: var(--size-4-1) 0 var(--size-4-2);
   --icon-size: var(--icon-m);
   --icon-stroke: var(--icon-m-stroke-width);
 }
 
+.fred-typ-subtype-color-group,
+.fred-typ-subtype-action-group {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+/* Gleich groß wie der Farbpunkt im Kopf der TYP-Detailansicht. */
+.fred-typ-subtype-color-dot {
+  width: 1em;
+  height: 1em;
+  margin: 0 var(--size-4-1);
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .fred-typ-subtype-pending .fred-typ-subtype-actions {
   pointer-events: none;
+}
+
+/* Regler für die Subtyp-Farbe (siehe openSubtypeColorPopover in
+   typ-view.js) - "menu" liefert Hintergrund, Rahmen und Schatten wie bei
+   Obsidians Kontextmenüs. Die Leiste jedes Reglers zeigt als Verlauf die
+   erreichbaren Farben (--fred-track). */
+.fred-typ-subtype-color-popover {
+  position: fixed;
+  z-index: var(--layer-menu);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  padding: var(--size-4-3);
+  min-width: 260px;
+}
+
+.fred-typ-subtype-color-row {
+  display: grid;
+  grid-template-columns: 6.5em 1fr 3.5em;
+  align-items: center;
+  gap: var(--size-4-2);
+  font-size: var(--font-ui-small);
+}
+
+.fred-typ-subtype-color-value {
+  text-align: right;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="range"].fred-typ-subtype-color-slider {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--fred-track, var(--slider-track-background));
 }
 
 .fred-typ-subtype-add {
@@ -789,7 +856,7 @@ body.fred-typ-block-dragging * {
 }
 
 /* Property-Label (nicht der Wert) fett, wenn die Property Teil des
-   Standard-Frontmatters eines TYPs ist - im Frontmatter-Widget einer Notiz
+   TYP-Frontmatters eines TYPs ist - im Frontmatter-Widget einer Notiz
    (input.metadata-property-key-input) genauso wie in Obsidians "All
    Properties"-Ansicht (div.tree-item-inner-text), daher bewusst nur die
    Klasse als Selektor, ohne Element-Einschränkung. Dieselben Variablen wie

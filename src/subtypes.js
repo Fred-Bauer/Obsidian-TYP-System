@@ -13,7 +13,7 @@ function normalizeSubtypeName(raw) {
 // eigenständiger Subtyp) auch unter einem anderen TYP vorkommen. Die
 // Reihenfolge der Schlüssel ist die Anzeigereihenfolge der Blöcke in der
 // TYP-Detailansicht. frontmatter ergänzt bzw. überschreibt das
-// Standard-Frontmatter des TYPs, floatingKeys wie typeFloatingKeys.
+// TYP-Frontmatter des TYPs, floatingKeys wie typeFloatingKeys.
 
 function getSubtypeNames(settings, type) {
   return Object.keys(settings.typeSubtypes?.[type] ?? {});
@@ -42,10 +42,10 @@ function deleteTypeSubtypes(settings, type) {
   if (settings.typeSubtypes) delete settings.typeSubtypes[type];
 }
 
-// Jeder Key gehört zu genau einem Block eines TYPs (Standard-Frontmatter ODER
+// Jeder Key gehört zu genau einem Block eines TYPs (TYP-Frontmatter ODER
 // ein Subtyp, Abgleich ohne Beachtung der Groß-/Kleinschreibung). Kommt er
 // trotzdem mehrfach vor (ältere Daten, Zusammenlegen zweier TYPen), bleibt er
-// im ersten Block - Standard-Frontmatter vor den Subtypen in ihrer
+// im ersten Block - TYP-Frontmatter vor den Subtypen in ihrer
 // Reihenfolge - und verschwindet samt Floating-Markierung aus den übrigen.
 // Liefert true bei einer Änderung.
 function enforceUniqueKeys(settings, type) {
@@ -104,7 +104,7 @@ function renameSubtype(settings, type, oldName, newName) {
   );
 }
 
-// Reihenfolge aller Blöcke eines TYPs, null = Standard-Frontmatter. Subtypen
+// Reihenfolge aller Blöcke eines TYPs, null = TYP-Frontmatter. Subtypen
 // mit aboveStandard stehen davor - als Markierung am Subtyp selbst statt als
 // Position, damit sie Umbenennen, Löschen und Zusammenlegen ohne Nachpflege
 // übersteht. Bestimmt die Anzeige in der TYP-Detailansicht ebenso wie die
@@ -116,7 +116,7 @@ function getSectionOrder(settings, type) {
 }
 
 // Neue Block-Reihenfolge (Drag & Drop in der TYP-Detailansicht): order wie
-// getSectionOrder, samt null für das Standard-Frontmatter. Nicht genannte
+// getSectionOrder, samt null für das TYP-Frontmatter. Nicht genannte
 // Subtypen bleiben dahinter erhalten.
 function reorderSubtypes(settings, type, order) {
   const byName = settings.typeSubtypes?.[type];

@@ -1,7 +1,11 @@
 const { TFile } = require("obsidian");
-const { colorForFile } = require("./type-colors");
+const { colorForFile, subtypeColor, subtypeHasOwnColor } = require("./type-colors");
+const { getSubtype } = require("./subtypes");
 
 const DOT_CLASS = "fred-typ-title-dot";
+const DOT_HOLLOW_CLASS = "fred-typ-title-dot-hollow";
+// Wie DEFAULT_TYPE_COLOR in typ-view.js (Farbe eines TYPs ohne eigene Farbe).
+const DEFAULT_DOT_COLOR = "#888888";
 const BADGE_CLASS = "fred-typ-title-badge";
 const BADGE_PLAIN_CLASS = "fred-typ-title-badge-plain";
 const COLOR_VAR = "--fred-typ-title-color";
@@ -23,16 +27,59 @@ const BLOCK_COLOR_VAR = "--fred-typ-block-color";
 function resolveMarker(plugin, file) {
   const style = plugin.settings.noteTitleStyle;
   if (style === "none") return { kind: "none" };
-  if (style === "dot") return { kind: "dot", color: colorForFile(plugin, file) };
+  if (style === "dot") return { kind: "dot", ...resolveDot(plugin, file) };
 
-  // style === "badge"
-  const colored = plugin.settings.noteTitleBadgeColored;
-  const color = colored ? colorForFile(plugin, file) : null;
-  const typeName = colored ? (color ? plugin.typIndex.typeOf(file) : null) : plugin.typIndex.typeOf(file);
-  if (!typeName) return { kind: "none" };
+  // style === "badge" - farbig bei einem registrierten TYP ohne eigene Farbe
+  // in der grauen Standardfarbe (wie der Ring von resolveDot); ein nicht
+  // registrierter TYP bekommt farbig keine Box, wie auch keinen Punkt.
+  const { settings } = plugin;
+  const type = plugin.typIndex.typeOf(file);
+  if (!type) return { kind: "none" };
+  const colored = settings.noteTitleBadgeColored;
+  if (colored && !settings.typeColors[type] && !settings.types.includes(type)) return { kind: "none" };
+  const typeColor = settings.typeColors[type] ?? DEFAULT_DOT_COLOR;
 
-  const position = plugin.settings.noteTitleBadgePosition;
-  return { kind: position === "block" ? "block-badge" : "title-badge", colored, color, typeName };
+  const label = badgeLabel(plugin, file, type);
+  if (!label) return { kind: "none" };
+  const { text, useSubtypeColor, subtype } = label;
+  const color = colored ? (useSubtypeColor ? subtypeColor(settings, type, subtype) ?? typeColor : typeColor) : null;
+  const position = settings.noteTitleBadgePosition;
+  return { kind: position === "block" ? "block-badge" : "title-badge", colored, color, typeName: text };
+}
+
+// Beschriftung der Box (noteTitleBadgeLabel) samt der dazu passenden Farbe:
+// [TYP] in TYP-Farbe, [Subtyp] in Subtyp-Farbe (ohne Subtyp keine Box -
+// dann null), [TYP/Subtyp] je nach Schalter "Subtyp-Farbe"
+// (colorViews.noteTitleMarkerSubtyp). Ein nicht registrierter SUBTYP-Wert
+// steht als Text da, hat aber keine eigene Farbe (subtypeColor liefert dann
+// die des TYPs).
+function badgeLabel(plugin, file, type) {
+  const { settings } = plugin;
+  const subtype = plugin.typIndex.subtypeOf(file);
+  const mode = settings.noteTitleBadgeLabel ?? "type";
+  if (mode === "subtype") return subtype ? { text: subtype, useSubtypeColor: true, subtype } : null;
+  if (!subtype || mode === "type") return { text: type, useSubtypeColor: false, subtype };
+  return { text: `${type}/${subtype}`, useSubtypeColor: !!settings.colorViews.noteTitleMarkerSubtyp, subtype };
+}
+
+// Farbpunkt am Titel - wie die Farbpunkte der TYP-View (siehe paintColorDot
+// in type-colors.js) beim Standardwert als hohler Ring: ein registrierter TYP
+// ohne Farbe grau, ein Subtyp ohne eigene Einstellung (mit dem Unter-Schalter
+// "Subtyp") in der TYP-Farbe, die er übernimmt. Nicht registrierte TYPen
+// bleiben wie in der TYP-Liste ohne Punkt.
+function resolveDot(plugin, file) {
+  const type = plugin.typIndex.typeOf(file);
+  if (!type) return { color: null, hollow: false };
+  const { settings } = plugin;
+  const typeColor = settings.typeColors[type];
+  if (!typeColor) {
+    return settings.types.includes(type) ? { color: DEFAULT_DOT_COLOR, hollow: true } : { color: null, hollow: false };
+  }
+  const subtype = plugin.typIndex.subtypeOf(file);
+  if (settings.colorViews.noteTitleMarkerSubtyp && subtype && getSubtype(settings, type, subtype)) {
+    return { color: subtypeColor(settings, type, subtype), hollow: !subtypeHasOwnColor(settings, type, subtype) };
+  }
+  return { color: typeColor, hollow: false };
 }
 
 // Titel der Notiz selbst (.inline-title, sichtbar sofern Obsidians eigene
@@ -49,6 +96,7 @@ function applyStyleToTitle(titleEl, marker) {
   const isBadge = marker.kind === "title-badge";
 
   titleEl.classList.toggle(DOT_CLASS, isDot);
+  titleEl.classList.toggle(DOT_HOLLOW_CLASS, isDot && !!marker.hollow);
   titleEl.classList.toggle(BADGE_CLASS, isBadge && marker.colored);
   titleEl.classList.toggle(BADGE_PLAIN_CLASS, isBadge && !marker.colored);
 
@@ -97,7 +145,7 @@ function applyActiveTitleColors(plugin) {
     if (titleEl) {
       applyStyleToTitle(titleEl, marker);
 
-      const textColor = plugin.settings.colorViews.noteTitleColor ? colorForFile(plugin, typedFile) : null;
+      const textColor = plugin.settings.colorViews.noteTitleColor ? colorForFile(plugin, typedFile, "noteTitleColor") : null;
       if (textColor) titleEl.style.color = textColor;
       else titleEl.style.removeProperty("color");
     }

@@ -1,7 +1,7 @@
 const { TFile, Vault, debounce, normalizePath } = require("obsidian");
 const { FRONTMATTER_PLACEHOLDERS } = require("./frontmatter-placeholders");
 
-// Marker-Klasse am Container des Standard-Frontmatter-Editors (gesetzt in
+// Marker-Klasse am Container des TYP-Frontmatter-Editors (gesetzt in
 // mountFrontmatterEditor, type-frontmatter-editor.js) - grenzt die
 // Platzhalter-Vorschläge unten auf diesen Editor ein, echte Notizen bleiben
 // unberührt.
@@ -12,7 +12,7 @@ const EDITOR_CLASS = "fred-typ-frontmatter-editor";
 // toListIfMultiple, TYP selbst) ergeben als Shortcut keinen Sinn.
 const SHORTCUT_MARKER = /^\s*(?:\/\/|\/\*|\*).*@typ-shortcut\b/m;
 
-// Platzhalter-Vorschläge im Wert-Feld des Standard-Frontmatter-Editors,
+// Platzhalter-Vorschläge im Wert-Feld des TYP-Frontmatter-Editors,
 // sobald der Wert mit "{" beginnt: die festen Token ({{today}} usw.) sowie
 // "{{tp.<Skriptname>}}" für jedes markierte Templater-Skript.
 //

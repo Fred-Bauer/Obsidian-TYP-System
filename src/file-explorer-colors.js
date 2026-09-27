@@ -26,7 +26,7 @@ function applyColorToTitle(plugin, titleEl, file) {
   const contentEl = titleEl.querySelector(".nav-file-title-content, .nav-folder-title-content");
   if (!contentEl) return;
 
-  const color = plugin.settings.colorViews.fileExplorer ? colorForFile(plugin, file) : null;
+  const color = plugin.settings.colorViews.fileExplorer ? colorForFile(plugin, file, "fileExplorer") : null;
   if (color) contentEl.style.color = color;
   else contentEl.style.removeProperty("color");
 }

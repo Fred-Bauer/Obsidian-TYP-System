@@ -37,7 +37,7 @@ function colorForLinktext(plugin, linktext, sourcePath) {
   const linkpath = getLinkpath(target);
   if (!linkpath) return null;
   const file = plugin.app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
-  return colorForFile(plugin, file);
+  return colorForFile(plugin, file, "links");
 }
 
 // --- Lese-Modus ---------------------------------------------------------

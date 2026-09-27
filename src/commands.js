@@ -47,11 +47,11 @@ function registerCommands(plugin) {
         changed > 0
           ? `Frontmatter Sortierung ${type}: ${checked} Notizen geprüft, ${changed} sortiert.`
           : `Frontmatter Sortierung ${type}: ${checked} Notizen geprüft, bereits alle sortiert.`;
-      // Kein Fehler, aber ohne Standard-Frontmatter greift für diesen Typ nur
+      // Kein Fehler, aber ohne TYP-Frontmatter greift für diesen Typ nur
       // die globale Reihenfolge (TYP selbst, fest positionierte Properties) -
       // ohne diesen Hinweis wäre unklar, warum sich ggf. nichts geändert hat.
       if (hasTypeDefaults === false) {
-        message += ` Hinweis: Für ${type} ist kein Standard-Frontmatter hinterlegt - nur die globale Reihenfolge wurde angewendet.`;
+        message += ` Hinweis: Für ${type} ist kein TYP-Frontmatter hinterlegt - nur die globale Reihenfolge wurde angewendet.`;
       }
       new Notice(message);
     }),

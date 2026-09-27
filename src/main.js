@@ -51,13 +51,13 @@ module.exports = class TypSystemPlugin extends Plugin {
 
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
-    // Umbenennungen über "All properties"/Bases auch ins Standard-Frontmatter
+    // Umbenennungen über "All properties"/Bases auch ins TYP-Frontmatter
     // der Typen übernehmen (siehe property-rename-sync.js).
     registerPropertyRenameSync(this);
     registerPlaceholderSuggest(this);
 
     // Separat gehalten (nicht nur Teil von refreshFns): die TYP-Detailansicht
-    // braucht nach dem Mounten ihres Standard-Frontmatter-Editors gezielt nur
+    // braucht nach dem Mounten ihres TYP-Frontmatter-Editors gezielt nur
     // diesen einen Refresh (Fett-Markierung der Property-Zeilen) - das ganze
     // refreshTypColors()-Bündel würde dort auch unnötig registerTypView's
     // eigenen Render-Refresh mitanstoßen und sich damit selbst rekursiv
@@ -82,7 +82,7 @@ module.exports = class TypSystemPlugin extends Plugin {
   onunload() {}
 
   // Für _obsidian/templater-scripts/TYP.js: liefert die im TYP-View unter
-  // "Standard-Frontmatter" hinterlegten Properties für den gegebenen TYP, damit
+  // "TYP-Frontmatter" hinterlegten Properties für den gegebenen TYP, damit
   // Templater sie beim Anlegen einer neuen Notiz übernehmen kann, statt sie dort
   // ein zweites Mal zu pflegen. Werte wie "{{today}}" werden dabei erst hier
   // aufgelöst (siehe frontmatter-placeholders.js), nicht schon beim Speichern -
@@ -101,9 +101,9 @@ module.exports = class TypSystemPlugin extends Plugin {
   // nur für den "{{created}}"-Platzhalter relevant, der das Erstellungsdatum
   // der Ziel-Datei statt des Aufrufzeitpunkts liefert.
   //
-  // subtype (optional): ergänzt das Standard-Frontmatter um den Block dieses
+  // subtype (optional): ergänzt das TYP-Frontmatter um den Block dieses
   // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter - bzw. stehen
-  // davor, wenn der Subtyp-Block über dem Standard-Frontmatter liegt
+  // davor, wenn der Subtyp-Block über dem TYP-Frontmatter liegt
   // (aboveStandard; wichtig für die Reihenfolge der tp.-Platzhalter). Jeder
   // Key gehört zu genau einem Block (siehe enforceUniqueKeys) - käme er doch
   // doppelt vor, bliebe seine erste Position, Wert und Floating-Markierung
@@ -167,7 +167,7 @@ module.exports = class TypSystemPlugin extends Plugin {
 
   // Für _obsidian/templater-scripts/TYP.js: erkennt einen dynamischen
   // "{{tp.<Skriptname>}}"-Platzhalter (siehe frontmatter-placeholders.js) in
-  // einem Standard-Frontmatter-Wert und liefert den referenzierten Skriptnamen,
+  // einem TYP-Frontmatter-Wert und liefert den referenzierten Skriptnamen,
   // sonst null. Die eigentliche Auflösung (Aufruf von tp.user.<Skriptname>)
   // kann nur Templater selbst übernehmen - das Plugin hat keinen tp-Zugriff,
   // daher hier bewusst nur Erkennung statt Auflösung wie bei getTypeDefaults().

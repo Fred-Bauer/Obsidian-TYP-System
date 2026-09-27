@@ -23,7 +23,7 @@ function stripTypProperty(frontmatter) {
 }
 
 // Speicherort eines Frontmatter-Blocks in den Plugin-Settings - entweder das
-// Standard-Frontmatter eines TYPs (typeDefaultFrontmatter/typeFloatingKeys)
+// TYP-Frontmatter eines TYPs (typeDefaultFrontmatter/typeFloatingKeys)
 // oder der Block eines seiner Subtypen (typeSubtypes, siehe subtypes.js).
 // Editor, Floating-Menü und Property-Umbenennung arbeiten ausschließlich über
 // diese Schnittstelle und müssen den Unterschied nicht kennen.

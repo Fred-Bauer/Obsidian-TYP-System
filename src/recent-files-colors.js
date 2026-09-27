@@ -14,7 +14,7 @@ function applyRecentFilesColors(plugin) {
     titleEls.forEach((titleEl, index) => {
       const entry = recentFiles[index];
       const file = entry ? plugin.app.vault.getAbstractFileByPath(entry.path) : null;
-      const color = plugin.settings.colorViews.recentFiles ? colorForFile(plugin, file) : null;
+      const color = plugin.settings.colorViews.recentFiles ? colorForFile(plugin, file, "recentFiles") : null;
       if (color) titleEl.style.color = color;
       else titleEl.style.removeProperty("color");
     });

@@ -1,4 +1,5 @@
 const { getSubtypeNames, getSubtype } = require("./subtypes");
+const { subtypeColor } = require("./type-colors");
 
 const TYP_PROPERTY = "TYP";
 const TYP_VIEW_TYPE = "fred-typ-view";
@@ -21,7 +22,7 @@ function rawKeysForType(type, defaults) {
 }
 
 // Frontmatter-Blöcke eines TYPs als Liste von { keys, floating } (jeweils
-// lowercase): zuerst das Standard-Frontmatter des TYPs, danach - falls
+// lowercase): zuerst das TYP-Frontmatter des TYPs, danach - falls
 // gewünscht - der Block eines bestimmten Subtyps (subtype) bzw. aller seiner
 // Subtypen (subtype === ALL_SUBTYPES), siehe subtypes.js.
 const ALL_SUBTYPES = Symbol("all-subtypes");
@@ -138,6 +139,17 @@ function applyToContainer(containerEl, standardKeys, floatingKeys) {
 // um sie zuzuordnen. Nutzen mehrere Typen sie, wäre eine einzelne Farbe
 // irreführend, daher stattdessen fett (dieselbe Markierung wie im
 // Frontmatter-Widget einer Notiz).
+// Subtyp-Block eines TYPs, in dem ein Key steht (Vergleich ohne Groß-/
+// Kleinschreibung), sonst null (TYP-Frontmatter).
+function subtypeOfKey(plugin, type, key) {
+  const lower = key.toLowerCase();
+  return (
+    getSubtypeNames(plugin.settings, type).find((name) =>
+      Object.keys(getSubtype(plugin.settings, type, name)?.frontmatter ?? {}).some((k) => k.toLowerCase() === lower)
+    ) ?? null
+  );
+}
+
 function applyToAllPropertiesView(plugin) {
   const usageMap = typesUsingKeyMap(plugin);
   for (const leaf of plugin.app.workspace.getLeavesOfType(ALL_PROPERTIES_VIEW_TYPE)) {
@@ -159,7 +171,11 @@ function applyToAllPropertiesView(plugin) {
       if (count === 1) {
         const [[onlyType, onlyFloating]] = types;
         isFloating = onlyFloating;
-        const color = plugin.settings.typeColors[onlyType];
+        // Mit "Subtyp" in der Farbe des Subtyp-Blocks, aus dem die Property
+        // stammt (jeder Key steht in genau einem Block des TYPs).
+        const color = plugin.settings.colorViews.allPropertiesSubtyp
+          ? subtypeColor(plugin.settings, onlyType, subtypeOfKey(plugin, onlyType, key))
+          : plugin.settings.typeColors[onlyType];
         // !important via setProperty, da die Fett-Regel für .fred-typ-default-
         // property in styles.css ebenfalls !important color setzt und ein
         // Inline-Style ohne !important dagegen verlieren würde, falls die

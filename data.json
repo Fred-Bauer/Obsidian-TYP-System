@@ -13,8 +13,8 @@
   ],
   "typeColors": {
     "WIKI": "#ece879",
-    "ORGA": "#7a87e6",
-    "NOTIZ": "#e2aa69",
+    "ORGA": "#7878dc",
+    "NOTIZ": "#e8d368",
     "TEXT": "#d29f46",
     "MEDIA": "#42943d",
     "VORTRAG": "#a0701c",
@@ -49,7 +49,7 @@
       "Beschreibung": null,
       "Status": "Plan",
       "Mandatory": null,
-      "Termin": null
+      "Datum": null
     },
     "KONTAKT": {
       "Vorname": null,
@@ -67,7 +67,7 @@
   },
   "typeFloatingKeys": {
     "PROJEKT": [
-      "Termin",
+      "Datum",
       "Mandatory"
     ],
     "KONTAKT": [
@@ -86,10 +86,24 @@
     "KONTAKT": false
   },
   "typeSubtypes": {
-    "PROJEKT": {
-      "Tecxcvdf": {
-        "frontmatter": {},
-        "floatingKeys": []
+    "ORGA": {
+      "Lehrveranstaltung": {
+        "frontmatter": {
+          "Dozent": null,
+          "Studiengang": "[[JLU - Sozialwissenschaften]]",
+          "Semester": null,
+          "Modul": null,
+          "Prüfungsform": null,
+          "Zeit": null,
+          "Datum": null,
+          "Ort": null,
+          "Note": null,
+          "Bestanden": null
+        },
+        "floatingKeys": [
+          "Datum",
+          "Prüfungsform"
+        ]
       }
     }
   },
@@ -119,8 +133,9 @@
       "name": "tags"
     }
   ],
-  "noteTitleStyle": "none",
+  "noteTitleStyle": "badge",
   "noteTitleBadgeColored": false,
+  "noteTitleBadgeLabel": "subtype",
   "noteTitleBadgePosition": "block",
   "noteTitleVerticalAlign": "bottom",
   "typSortOrder": "manual",
@@ -131,6 +146,11 @@
   "graphTagColor": "#1c1c1c",
   "graphAttachmentColorEnabled": false,
   "graphAttachmentColor": "#9f8632",
+  "subtypeColorRanges": {
+    "h": 25,
+    "s": 30,
+    "l": 20
+  },
   "colorViews": {
     "fileExplorer": true,
     "graph": true,
@@ -138,6 +158,16 @@
     "recentFiles": true,
     "backlinks": true,
     "bookmarks": true,
+    "fileExplorerSubtyp": true,
+    "graphSubtyp": true,
+    "searchSubtyp": true,
+    "recentFilesSubtyp": true,
+    "backlinksSubtyp": true,
+    "bookmarksSubtyp": true,
+    "linksSubtyp": true,
+    "typListSubtyp": true,
+    "noteTitleColorSubtyp": true,
+    "noteTitleMarkerSubtyp": false,
     "frontmatterDefaults": true,
     "frontmatterDefaultsSubtyp": true,
     "typList": true,

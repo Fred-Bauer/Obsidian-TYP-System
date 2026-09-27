@@ -38,7 +38,7 @@ function patchRenderer(plugin, renderer) {
           color = plugin.settings.graphAttachmentColor;
         }
       } else if (plugin.settings.colorViews.graph) {
-        color = colorForFile(plugin, file);
+        color = colorForFile(plugin, file, "graph");
       }
 
       if (color) node.color = { a: 1, rgb: hexToInt(color) };

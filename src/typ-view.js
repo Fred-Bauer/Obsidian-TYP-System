@@ -17,6 +17,16 @@ const {
 const { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require("./frontmatter-placeholders");
 const { normalizeTypeName, compareTypes, sortTypesByMode } = require("./type-utils");
 const { typeKeyOf, propertyValue, setCanonicalProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
+const {
+  subtypeColor,
+  applyColorOffset,
+  hasColorOffset,
+  subtypeHasOwnColor,
+  paintColorDot,
+  colorRange,
+  clampedOffset,
+  SUBTYPE_COLOR_CHANNELS,
+} = require("./type-colors");
 
 const VIEW_TYPE_TYP = "fred-typ-view";
 const DEFAULT_TYPE_COLOR = "#888888";
@@ -88,12 +98,14 @@ function displayTypeKey(typeKey) {
 // renderSuggestion in type-picker.js) und in der TYP-Liste selbst. color wird
 // vom Aufrufer übergeben statt hier nachgeschlagen, damit z. B. bei einer
 // Umbenennung bewusst für alt UND neu dieselbe (die des alten Namens, die nach
-// dem Umbenennen erhalten bleibt) Farbe verwendet werden kann.
+// dem Umbenennen erhalten bleibt) Farbe verwendet werden kann. color null =
+// TYP ohne eigene Farbe (Name ungefärbt bzw. Punkt als hohler grauer Ring).
 function appendTypeName(parentEl, plugin, type, color) {
   if (plugin.settings.colorViews.typList) {
-    parentEl.createSpan({ cls: "fred-typ-inline-name", text: type }).style.color = color;
+    const nameEl = parentEl.createSpan({ cls: "fred-typ-inline-name", text: type });
+    if (color) nameEl.style.color = color;
   } else {
-    parentEl.createSpan({ cls: "fred-typ-inline-dot" }).style.backgroundColor = color;
+    paintColorDot(parentEl.createSpan({ cls: "fred-typ-inline-dot" }), color ?? DEFAULT_TYPE_COLOR, !color);
     parentEl.createSpan({ cls: "fred-typ-inline-name", text: type });
   }
 }
@@ -111,7 +123,7 @@ class ConfirmDeleteTypeModal extends Modal {
     this.modalEl.addClass("fred-confirm-delete-modal");
     const p = contentEl.createEl("p");
     p.appendText("Typ ");
-    appendTypeName(p, this.plugin, this.type, this.plugin.settings.typeColors[this.type] ?? DEFAULT_TYPE_COLOR);
+    appendTypeName(p, this.plugin, this.type, this.plugin.settings.typeColors[this.type] ?? null);
     p.appendText(" wirklich löschen?");
 
     const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
@@ -152,7 +164,7 @@ class ConfirmRenameTypeModal extends Modal {
     // Dieselbe Farbe für alt und neu (die des alten Namens) - der neue Name
     // hat vor dem eigentlichen Umbenennen noch keinen eigenen Eintrag in
     // typeColors, übernimmt aber die Farbe des alten (siehe applyRename).
-    const color = this.plugin.settings.typeColors[this.oldType] ?? DEFAULT_TYPE_COLOR;
+    const color = this.plugin.settings.typeColors[this.oldType] ?? null;
     const p = contentEl.createEl("p");
     p.appendText("TYP ");
     appendTypeName(p, this.plugin, this.oldType, color);
@@ -192,15 +204,15 @@ class ConfirmMergeTypeModal extends ConfirmRenameTypeModal {
     const settings = this.plugin.settings;
     const p = contentEl.createEl("p");
     p.appendText("TYP ");
-    appendTypeName(p, this.plugin, this.newType, settings.typeColors[this.newType] ?? DEFAULT_TYPE_COLOR);
+    appendTypeName(p, this.plugin, this.newType, settings.typeColors[this.newType] ?? null);
     p.appendText(" existiert bereits. ");
-    appendTypeName(p, this.plugin, this.oldType, settings.typeColors[this.oldType] ?? DEFAULT_TYPE_COLOR);
+    appendTypeName(p, this.plugin, this.oldType, settings.typeColors[this.oldType] ?? null);
     p.appendText(" damit zusammenlegen?");
 
     contentEl.createEl("p", {
       text:
         `${this.affectedCount} Notiz(en) werden auf ${this.newType} umgestellt. ` +
-        `Farbe, Beschreibung und Standard-Frontmatter von ${this.oldType} entfallen, ` +
+        `Farbe, Beschreibung und TYP-Frontmatter von ${this.oldType} entfallen, ` +
         `seine Subtypen werden übernommen (gleichnamige Subtyp-Blöcke zusammengeführt).`,
     });
 
@@ -285,7 +297,9 @@ class TypView extends ItemView {
     this.render();
   }
 
-  async onClose() {}
+  async onClose() {
+    this.closeSubtypeColorPopover?.();
+  }
 
   openSearch(type) {
     const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
@@ -577,12 +591,21 @@ class TypView extends ItemView {
 
   // Chromiums input[type=color] hat einen eigenen Mindest-Swatch, der sich nicht
   // unter Textgröße skalieren lässt - daher nur als unsichtbaren Picker-Trigger
-  // über dem frei skalierbaren Punkt platzieren.
+  // über dem frei skalierbaren Punkt platzieren. Ohne eigene Farbe steht der
+  // Punkt als hohler grauer Ring da (siehe paintColorDot); mit showReset
+  // (Detailansicht) nennt ein Tooltip den Zustand, und der Zurücksetzen-Button
+  // ist dann ausgegraut.
   renderColorPicker(parent, type, onChange, { showReset = false } = {}) {
     const currentColor = this.plugin.settings.typeColors[type] ?? DEFAULT_TYPE_COLOR;
     const colorWrap = parent.createDiv({ cls: "fred-typ-color-wrap" });
     const colorDot = colorWrap.createDiv({ cls: "fred-typ-color-dot" });
-    colorDot.style.backgroundColor = currentColor;
+    let resetBtn = null;
+    const showState = (color, isDefault) => {
+      paintColorDot(colorDot, color, isDefault);
+      if (!showReset) return;
+      colorWrap.setAttribute("aria-label", isDefault ? "Standard (keine Farbe)" : "Farbe ändern");
+      resetBtn?.toggleClass("is-disabled", isDefault);
+    };
 
     const colorInput = colorWrap.createEl("input", { type: "color", cls: "fred-typ-color-input" });
     colorInput.value = currentColor;
@@ -596,7 +619,7 @@ class TypView extends ItemView {
     // Picker damit sofort schließen würde - noch bevor man überhaupt eine Farbe
     // auswählen kann (schon beim ersten Klick, vor dem Loslassen der Taste).
     colorInput.addEventListener("input", async () => {
-      colorDot.style.backgroundColor = colorInput.value;
+      showState(colorInput.value, false);
       this.plugin.settings.typeColors[type] = colorInput.value;
       await this.plugin.saveSettings();
       onChange?.(colorInput.value);
@@ -608,7 +631,7 @@ class TypView extends ItemView {
     colorInput.addEventListener("change", () => this.plugin.refreshTypColors?.());
 
     if (showReset) {
-      const resetBtn = parent.createDiv({
+      resetBtn = parent.createDiv({
         cls: "clickable-icon fred-typ-color-reset",
         attr: { "aria-label": "Farbe zurücksetzen" },
       });
@@ -616,12 +639,13 @@ class TypView extends ItemView {
       resetBtn.addEventListener("click", async () => {
         delete this.plugin.settings.typeColors[type];
         colorInput.value = DEFAULT_TYPE_COLOR;
-        colorDot.style.backgroundColor = DEFAULT_TYPE_COLOR;
+        showState(DEFAULT_TYPE_COLOR, true);
         await this.plugin.saveSettings();
         this.plugin.refreshTypColors?.();
         onChange?.(DEFAULT_TYPE_COLOR);
       });
     }
+    showState(currentColor, this.plugin.settings.typeColors[type] === undefined);
 
     return colorWrap;
   }
@@ -821,7 +845,11 @@ class TypView extends ItemView {
       colorRow,
       type,
       (newColor) => {
-        if (this.plugin.settings.colorViews.typList) titleEl.style.color = newColor;
+        if (!this.plugin.settings.colorViews.typList) return;
+        titleEl.style.color = newColor;
+        // Überschrift des TYP-Frontmatter-Blocks (siehe renderSectionHeader)
+        // - wird bei jedem synchronize() neu erzeugt, daher hier gesucht.
+        for (const el of this.contentEl.querySelectorAll(".fred-typ-standard-title")) el.style.color = newColor;
       },
       { showReset: true }
     );
@@ -844,10 +872,10 @@ class TypView extends ItemView {
     // Trennt die Frontmatter-Blöcke von den übrigen Einstellungen des TYPs.
     // body.createDiv({ cls: "fred-typ-detail-separator" });
 
-    // Standard-Frontmatter und je registriertem Subtyp ein Block darunter, alle
+    // TYP-Frontmatter und je registriertem Subtyp ein Block darunter, alle
     // in einem gemeinsamen Property-Editor (siehe unified-frontmatter-editor.js)
     // - jeder Key gehört zu genau einem Block, Drag & Drop reicht über alle
-    // Blöcke. Ein Subtyp-Block ergänzt das Standard-Frontmatter für Notizen
+    // Blöcke. Ein Subtyp-Block ergänzt das TYP-Frontmatter für Notizen
     // mit diesem SUBTYP (siehe subtypes.js).
     const bucket = this.plugin.typIndex.subtypeBucket(type);
     this.frontmatterEditor = mountUnifiedFrontmatterEditor(this, body, type, {
@@ -885,17 +913,28 @@ class TypView extends ItemView {
   }
 
   // Überschrift eines Blocks im gemeinsamen Editor (siehe
-  // unified-frontmatter-editor.js): Titel mit Notiz-Anzahl (beim Standard-
+  // unified-frontmatter-editor.js): Titel mit Notiz-Anzahl (beim TYP-
   // Frontmatter die Notizen ohne SUBTYP - für die gilt nur dieser Block),
-  // Suche per Rechtsklick (beim Standard-Frontmatter auf den Titel), und die beiden "Property
+  // Suche per Rechtsklick (beim TYP-Frontmatter auf den Titel), und die beiden "Property
   // hinzufügen"-Buttons, die eine Leerzeile in genau diesem Block anlegen.
   renderSectionHeader(el, type, section, bucket, editor) {
     const titleGroup = el.createDiv({ cls: "fred-typ-frontmatter-title-group" });
-    const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? "Standard-Frontmatter" });
+    const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? `${type}-Frontmatter` });
+    if (section === null) {
+      // In der TYP-Farbe, wie der Titel der Detailansicht (nur mit "TYP View").
+      titleEl.addClass("fred-typ-standard-title");
+      const titleColor = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
+      if (titleColor) titleEl.style.color = titleColor;
+    } else {
+      titleEl.fredSubtype = section;
+      titleEl.addClass("fred-typ-subtype-title");
+      const titleColor = this.subtypeTitleColor(type, section);
+      if (titleColor) titleEl.style.color = titleColor;
+    }
     const count = section === null ? bucket.noSubtype : bucket.counts.get(section) ?? 0;
     titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
     // Subtyp-Blöcke reagieren auf ihrer ganzen Fläche (siehe
-    // onSectionContextMenu in renderTypeSettings), das Standard-Frontmatter
+    // onSectionContextMenu in renderTypeSettings), das TYP-Frontmatter
     // nur auf dem Titel.
     if (section === null) {
       titleEl.addEventListener("contextmenu", (event) => {
@@ -933,12 +972,38 @@ class TypView extends ItemView {
     addPropertyBtn.addEventListener("click", () => editor.fredAddBlank(section, false));
   }
 
-  // Abschluss eines Subtyp-Blocks: zentriert die Aktionen des Subtyps, wie im
-  // Kopf der TYP-Detailansicht (Umbenennen inkl. Notizen, Umbenennen, Löschen).
-  // Das Standard-Frontmatter hat keine. Der Titel wird erst beim Klick
-  // gesucht - Überschrift und Abschluss entstehen bei jedem synchronize() neu.
+  // Abschluss eines Subtyp-Blocks: links die Farbe des Subtyps (Farbpunkt, der
+  // die Regler öffnet, daneben Zurücksetzen), rechts die Aktionen wie im Kopf
+  // der TYP-Detailansicht (Umbenennen inkl. Notizen, Umbenennen, Löschen). Das
+  // TYP-Frontmatter hat keinen. Der Titel wird erst beim Klick gesucht -
+  // Überschrift und Abschluss entstehen bei jedem synchronize() neu.
   renderSectionFooter(el, type, subtype) {
     el.addClass("fred-typ-subtype-actions");
+    const colorGroup = el.createDiv({ cls: "fred-typ-subtype-color-group" });
+    // Ring auch, solange der TYP selbst keine Farbe hat - dann färbt auch
+    // eine eingestellte Abweichung nirgends ein.
+    const ownColor = subtypeHasOwnColor(this.plugin.settings, type, subtype);
+    const typeHasColor = !!this.plugin.settings.typeColors[type];
+    const colorDot = colorGroup.createDiv({
+      cls: "fred-typ-subtype-color-dot",
+      attr: { "aria-label": !typeHasColor ? "TYP hat keine Farbe" : ownColor ? "Farbe anpassen" : "Übernimmt TYP-Farbe" },
+    });
+    colorDot.fredSubtype = subtype;
+    paintColorDot(colorDot, subtypeColor(this.plugin.settings, type, subtype) ?? DEFAULT_TYPE_COLOR, !ownColor || !typeHasColor);
+    colorDot.addEventListener("click", () => this.openSubtypeColorPopover(colorDot, type, subtype));
+    const resetBtn = colorGroup.createDiv({ cls: "clickable-icon fred-typ-color-reset", attr: { "aria-label": "Farbe zurücksetzen" } });
+    resetBtn.toggleClass("is-disabled", !ownColor);
+    setIcon(resetBtn, "rotate-ccw");
+    resetBtn.addEventListener("click", async () => {
+      const data = getSubtype(this.plugin.settings, type, subtype);
+      if (!data?.color) return;
+      delete data.color;
+      await this.plugin.saveSettings();
+      this.plugin.refreshTypColors?.();
+      this.render();
+    });
+
+    const actions = el.createDiv({ cls: "fred-typ-subtype-action-group" });
     const titleEl = () => {
       let sibling = el.previousElementSibling;
       while (sibling && !sibling.hasClass("fred-typ-section-header")) sibling = sibling.previousElementSibling;
@@ -949,20 +1014,121 @@ class TypView extends ItemView {
       if (target) this.startSubtypeRename(type, subtype, target, { updateNotes });
     };
 
-    const renameWithNotesBtn = el.createDiv({
+    const renameWithNotesBtn = actions.createDiv({
       cls: "clickable-icon fred-typ-detail-rename-notes",
       attr: { "aria-label": "Umbenennen (inkl. Notizen anpassen)" },
     });
     setIcon(renameWithNotesBtn, "pencil");
     renameWithNotesBtn.addEventListener("click", () => rename(true));
 
-    const renameBtn = el.createDiv({ cls: "clickable-icon fred-typ-detail-rename", attr: { "aria-label": "Umbenennen" } });
+    const renameBtn = actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename", attr: { "aria-label": "Umbenennen" } });
     setIcon(renameBtn, "pencil");
     renameBtn.addEventListener("click", () => rename(false));
 
-    const deleteBtn = el.createDiv({ cls: "clickable-icon fred-typ-detail-delete", attr: { "aria-label": "Löschen" } });
+    const deleteBtn = actions.createDiv({ cls: "clickable-icon fred-typ-detail-delete", attr: { "aria-label": "Löschen" } });
     setIcon(deleteBtn, "trash");
     deleteBtn.addEventListener("click", () => this.deleteSubtypeWithConfirm(type, subtype));
+  }
+
+  // Titelfarbe eines Subtyp-Blocks: nur mit "TYP View" samt Unter-Schalter
+  // "Subtyp" (wie die TYP-Namen selbst nur mit "TYP View").
+  subtypeTitleColor(type, subtype) {
+    const { colorViews } = this.plugin.settings;
+    return colorViews.typList && colorViews.typListSubtyp ? subtypeColor(this.plugin.settings, type, subtype) : null;
+  }
+
+  // Popover unter dem Farbpunkt eines Subtyp-Blocks: je ein Regler für
+  // Farbton, Sättigung und Helligkeit, begrenzt auf die in den Einstellungen
+  // festgelegte Abweichung (siehe type-colors.js). Die Leiste jedes Reglers
+  // zeigt als Verlauf die Farben, die er erreichen kann. Beim Ziehen ändern
+  // sich nur Punkt und Titel hier; gespeichert und in die übrigen Ansichten
+  // übernommen wird beim Schließen (Klick daneben oder Escape) - ein
+  // refreshTypColors() rendert u. a. diese Ansicht neu.
+  openSubtypeColorPopover(anchorEl, type, subtype) {
+    this.closeSubtypeColorPopover?.();
+    const { settings } = this.plugin;
+    const data = getSubtype(settings, type, subtype);
+    if (!data) return;
+    const typeColor = settings.typeColors[type] ?? DEFAULT_TYPE_COLOR;
+    const offset = clampedOffset(settings, data.color) ?? { h: 0, s: 0, l: 0 };
+    const doc = anchorEl.doc;
+    const popover = doc.body.createDiv({ cls: "menu fred-typ-subtype-color-popover" });
+
+    const rows = [];
+    const update = () => {
+      const color = applyColorOffset(typeColor, offset);
+      for (const el of this.contentEl.querySelectorAll(".fred-typ-subtype-color-dot")) {
+        if (el.fredSubtype === subtype) paintColorDot(el, color, !hasColorOffset(offset) || !settings.typeColors[type]);
+      }
+      if (this.subtypeTitleColor(type, subtype) !== null) {
+        for (const el of this.contentEl.querySelectorAll(".fred-typ-subtype-title")) {
+          if (el.fredSubtype === subtype) el.style.color = color;
+        }
+      }
+      for (const row of rows) row();
+    };
+
+    for (const { key, label, unit } of SUBTYPE_COLOR_CHANNELS) {
+      const range = colorRange(settings, key);
+      const row = popover.createDiv({ cls: "fred-typ-subtype-color-row" });
+      row.createSpan({ cls: "fred-typ-subtype-color-label", text: label });
+      const input = row.createEl("input", { type: "range", cls: "slider fred-typ-subtype-color-slider" });
+      input.min = String(-range);
+      input.max = String(range);
+      input.step = "1";
+      input.value = String(offset[key]);
+      input.disabled = range === 0;
+      const valueEl = row.createSpan({ cls: "fred-typ-subtype-color-value" });
+      input.addEventListener("input", () => {
+        offset[key] = Number(input.value);
+        update();
+      });
+      rows.push(() => {
+        const steps = 8;
+        const stops = [];
+        for (let i = 0; i <= steps; i++) {
+          const value = -range + (2 * range * i) / steps;
+          stops.push(applyColorOffset(typeColor, { ...offset, [key]: value }));
+        }
+        input.style.setProperty("--fred-track", `linear-gradient(to right, ${stops.join(", ")})`);
+        valueEl.setText(`${offset[key] > 0 ? "+" : ""}${offset[key]}${unit}`);
+      });
+    }
+    update();
+
+    // Unter dem Punkt, aber innerhalb des Fensters.
+    const rect = anchorEl.getBoundingClientRect();
+    const win = doc.defaultView;
+    const width = popover.offsetWidth;
+    const height = popover.offsetHeight;
+    popover.style.left = `${Math.max(8, Math.min(rect.left, win.innerWidth - width - 8))}px`;
+    popover.style.top = `${rect.bottom + 6 + height > win.innerHeight - 8 ? rect.top - 6 - height : rect.bottom + 6}px`;
+
+    const onPointerDown = (event) => {
+      if (!popover.contains(event.target)) close();
+    };
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    };
+    const close = async () => {
+      this.closeSubtypeColorPopover = null;
+      doc.removeEventListener("mousedown", onPointerDown, true);
+      doc.removeEventListener("keydown", onKeyDown, true);
+      popover.remove();
+      const current = getSubtype(settings, type, subtype);
+      if (!current) return;
+      if (hasColorOffset(offset)) current.color = { ...offset };
+      else delete current.color;
+      await this.plugin.saveSettings();
+      this.plugin.refreshTypColors?.();
+      this.render();
+    };
+    this.closeSubtypeColorPopover = close;
+    doc.addEventListener("mousedown", onPointerDown, true);
+    doc.addEventListener("keydown", onKeyDown, true);
   }
 
   // Löscht den Subtyp-Block samt seiner Properties. Die Notizen behalten ihren
@@ -1087,7 +1253,7 @@ class TypView extends ItemView {
 
   // Wie die unregistrierten Einträge der TYP-Liste: SUBTYP-Werte von Notizen
   // dieses TYPs, die (noch) keinen eigenen Block haben (Notizen ganz ohne
-  // SUBTYP zählt stattdessen das Standard-Frontmatter). Dargestellt wie die
+  // SUBTYP zählt stattdessen das TYP-Frontmatter). Dargestellt wie die
   // Subtyp-Blöcke, aber nur mit (ausgegrauter) Überschrift samt Anzahl.
   // Linksklick übernimmt einen Wert als Subtyp, Rechtsklick öffnet die Suche.
   renderUnregisteredSubtypes(parent, type, bucket) {
@@ -1171,9 +1337,13 @@ class TypView extends ItemView {
     setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add-floating" }), "plus");
     setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add" }), "plus");
     const footer = block.createDiv({ cls: "fred-typ-section-footer fred-typ-subtype-actions" });
-    setIcon(footer.createDiv({ cls: "clickable-icon fred-typ-detail-rename-notes" }), "pencil");
-    setIcon(footer.createDiv({ cls: "clickable-icon fred-typ-detail-rename" }), "pencil");
-    setIcon(footer.createDiv({ cls: "clickable-icon fred-typ-detail-delete" }), "trash");
+    const colorGroup = footer.createDiv({ cls: "fred-typ-subtype-color-group" });
+    paintColorDot(colorGroup.createDiv({ cls: "fred-typ-subtype-color-dot" }), this.plugin.settings.typeColors[type] ?? DEFAULT_TYPE_COLOR, true);
+    setIcon(colorGroup.createDiv({ cls: "clickable-icon fred-typ-color-reset is-disabled" }), "rotate-ccw");
+    const actions = footer.createDiv({ cls: "fred-typ-subtype-action-group" });
+    setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename-notes" }), "pencil");
+    setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename" }), "pencil");
+    setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-delete" }), "trash");
     nameEl.setAttribute("contenteditable", "true");
     nameEl.setAttribute("spellcheck", "false");
     nameEl.focus();
@@ -1254,7 +1424,7 @@ class TypView extends ItemView {
     selection.addRange(range);
 
     // Migriert nur die Plugin-Einstellungen (Liste, Farbe, Beschreibung,
-    // Standard-Frontmatter, Manueller-TYP-Schalter) auf den neuen Namen -
+    // TYP-Frontmatter, Manueller-TYP-Schalter) auf den neuen Namen -
     // rührt keine Notizen an. Gemeinsam genutzt von beiden Umbenennen-Pfaden.
     const applyRename = async (value) => {
       const idx = this.plugin.settings.types.indexOf(type);
@@ -1392,7 +1562,7 @@ class TypView extends ItemView {
     flairOuter.createSpan({ cls: "tree-item-flair", text: String(count) });
   }
 
-  // Rein informativ, unter dem Standard-Frontmatter-Editor: der Hinweistext
+  // Rein informativ, unter dem TYP-Frontmatter-Editor: der Hinweistext
   // erklärt den Floating-Property-Toggle (Rechtsklick auf eine Property oben,
   // siehe ensurePropertyMenuPatch in type-frontmatter-editor.js), die Liste
   // darunter die Platzhalter, die als Wert einer Property eingetragen werden

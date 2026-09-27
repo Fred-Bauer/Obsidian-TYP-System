@@ -1,6 +1,6 @@
 const { moment } = require("obsidian");
 
-// Erkannte Platzhalter für Werte im Standard-Frontmatter eines TYPs (TYP-
+// Erkannte Platzhalter für Werte im TYP-Frontmatter eines TYPs (TYP-
 // Detailansicht). Als reiner Text-Wert ins Frontmatter-Widget eingetragen
 // (z. B. bei "Datum" als Wert "{{today}}" statt eines echten Datums) und erst
 // beim Abruf über getTypeDefaults() aufgelöst (siehe main.js) - nicht schon
@@ -34,7 +34,7 @@ const FRONTMATTER_PLACEHOLDERS = [
 // siehe _obsidian/templater-scripts/) auf und übernimmt dessen Rückgabewert.
 // Anders als die exakten Token oben hier NICHT auflösbar (das Plugin hat
 // keinen Zugriff auf tp) - nur als Muster erkennbar, damit die Warnungs-
-// Unterdrückung/Einfärbung im Standard-Frontmatter-Editor trotzdem greift.
+// Unterdrückung/Einfärbung im TYP-Frontmatter-Editor trotzdem greift.
 // Die eigentliche Auflösung übernimmt TYP.js selbst, vor dem Schreiben ins
 // Frontmatter (Aufruf- und Rückgabe-Konvention siehe dort bzw. README).
 // Skriptname = Dateiname in templater-scripts/ ohne ".js", daher auch mit

@@ -14,7 +14,7 @@ function applySearchColors(plugin) {
       const titleEl = resultDom.el?.querySelector(".search-result-file-title .tree-item-inner");
       if (!titleEl) continue;
 
-      const color = plugin.settings.colorViews.search ? colorForFile(plugin, file) : null;
+      const color = plugin.settings.colorViews.search ? colorForFile(plugin, file, "search") : null;
       if (color) titleEl.style.color = color;
       else titleEl.style.removeProperty("color");
     }

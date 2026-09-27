@@ -2,11 +2,11 @@ const { mountFrontmatterEditor, ensurePropertyMenuPatch } = require("./type-fron
 const { getSubtypeNames, getSubtype, ensureSubtype, getSectionOrder } = require("./subtypes");
 
 /* ============================================================
- * Ein einziger Property-Editor für das Standard-Frontmatter eines TYPs und
+ * Ein einziger Property-Editor für das TYP-Frontmatter eines TYPs und
  * alle seine Subtyp-Blöcke (TYP-Detailansicht, siehe renderTypeSettings in
  * typ-view.js).
  *
- * Jeder Key gehört zu genau einem Block (Standard-Frontmatter ODER ein
+ * Jeder Key gehört zu genau einem Block (TYP-Frontmatter ODER ein
  * Subtyp) - in einem gemeinsamen Objekt ist das automatisch gewährleistet,
  * und Obsidians eigenes Drag & Drop (samt Auto-Scroll und Tastatur-
  * Navigation) reicht so über alle Blöcke hinweg.
@@ -18,7 +18,7 @@ const { getSubtypeNames, getSubtype, ensureSubtype, getSectionOrder } = require(
  * als eigene Ebene HINTER der Liste, von der Überschrift bis zum Abschluss -
  * so bleiben die Hover-/Fokus-Hintergründe der Zeilen unangetastet.
  *
- * Section: null = Standard-Frontmatter, sonst der Subtyp-Name.
+ * Section: null = TYP-Frontmatter, sonst der Subtyp-Name.
  * ============================================================ */
 
 // Speicher-Schnittstelle wie typeStore/subtypeStore (type-frontmatter-editor.js),
@@ -120,7 +120,7 @@ function unifiedStore(plugin, type) {
 // renderHeader(section, el, editor) / renderFooter(section, el, editor)
 // füllen Überschrift bzw. Abschluss eines Blocks. onMoveSection(order) meldet
 // die neue Block-Reihenfolge nach einem Block-Drag (wie getSectionOrder, samt
-// null für das Standard-Frontmatter), onSectionContextMenu(section, event)
+// null für das TYP-Frontmatter), onSectionContextMenu(section, event)
 // einen Rechtsklick in einem Subtyp-Block.
 function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, renderFooter, onMoveSection, onSectionContextMenu }) {
   const store = unifiedStore(view.plugin, type);
@@ -135,7 +135,7 @@ function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, 
   const listEl = editor.propertyListEl;
 
   // Alle Blöcke in Anzeigereihenfolge, je { section, top, bottom, el } relativ
-  // zum wrapper - el ist die Kartenfläche (nur Subtyp-Blöcke, das Standard-
+  // zum wrapper - el ist die Kartenfläche (nur Subtyp-Blöcke, das TYP-
   // Frontmatter bleibt transparent). Zugleich Grundlage für Hover, Rechtsklick
   // und Block-Drag (siehe unten).
   let blocks = [];
@@ -281,7 +281,7 @@ function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, 
   // gelten im ganzen Subtyp-Block. Angefasst wird ein Block überall außerhalb
   // seiner Property-Zeilen: Überschrift, Abschluss und die seitlichen Ränder
   // (dort ist die Liste selbst das Ziel); Buttons und ein gerade bearbeiteter
-  // Titel bleiben ausgenommen. Das Standard-Frontmatter selbst ist nicht
+  // Titel bleiben ausgenommen. Das TYP-Frontmatter selbst ist nicht
   // verschiebbar, Subtypen dürfen aber auch darüber liegen.
   const blockAt = (event) => {
     const y = event.clientY - wrapper.getBoundingClientRect().top;
@@ -293,7 +293,7 @@ function mountUnifiedFrontmatterEditor(view, containerEl, type, { renderHeader, 
   };
 
   const isGrabTarget = (target) => {
-    if (target.closest(".clickable-icon, [contenteditable='true'], input, textarea")) return false;
+    if (target.closest(".clickable-icon, .fred-typ-subtype-color-dot, [contenteditable='true'], input, textarea")) return false;
     if (target === listEl) return true;
     return !!target.closest(".fred-typ-section-header.fred-typ-section-sub, .fred-typ-section-footer.fred-typ-section-sub");
   };

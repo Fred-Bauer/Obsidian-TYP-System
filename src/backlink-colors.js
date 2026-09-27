@@ -19,7 +19,7 @@ function getResultDomLookups(view) {
 }
 
 function colorTitleEl(plugin, el, file) {
-  const color = plugin.settings.colorViews.backlinks ? colorForFile(plugin, file) : null;
+  const color = plugin.settings.colorViews.backlinks ? colorForFile(plugin, file, "backlinks") : null;
   if (color) el.style.color = color;
   else el.style.removeProperty("color");
 }

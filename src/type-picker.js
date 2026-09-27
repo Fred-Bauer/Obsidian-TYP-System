@@ -1,5 +1,6 @@
 const { FuzzySuggestModal, Notice, prepareFuzzySearch } = require("obsidian");
 const { DEFAULT_TYPE_COLOR, compareTypes, DEFAULT_SORT_ORDER } = require("./typ-view");
+const { subtypeColor, subtypeHasOwnColor, paintColorDot } = require("./type-colors");
 
 // Nativer Ersatz für Templaters tp.system.suggester bei der TYP-Auswahl (siehe
 // _obsidian/templater-scripts/TYP.js): baut auf Obsidians eigenem
@@ -46,13 +47,20 @@ class TypPickerModal extends FuzzySuggestModal {
   }
 
   // Name in der Farbe von colorType - je nach Einstellung "TYP View einfärben"
-  // als eingefärbter Text oder mit vorangestelltem Farbpunkt.
-  renderColoredName(el, text, colorType) {
-    const color = this.plugin.settings.typeColors[colorType] ?? DEFAULT_TYPE_COLOR;
+  // als eingefärbter Text oder mit vorangestelltem Farbpunkt. Mit subtype
+  // (und dem Unter-Schalter "Subtyp" von "TYP View") in dessen Farbe. Der
+  // Punkt steht beim Standardwert als hohler Ring da (siehe paintColorDot):
+  // TYP ohne Farbe grau, Subtyp ohne eigene Einstellung in der TYP-Farbe.
+  renderColoredName(el, text, colorType, subtype = null) {
+    const { settings } = this.plugin;
+    const useSubtype = !!subtype && settings.colorViews.typListSubtyp;
+    const typeColor = settings.typeColors[colorType] ?? null;
+    const color = (useSubtype ? subtypeColor(settings, colorType, subtype) : typeColor) ?? DEFAULT_TYPE_COLOR;
+    const isDefault = !typeColor || (useSubtype && !subtypeHasOwnColor(settings, colorType, subtype));
     if (this.plugin.settings.colorViews.typList) {
       el.createSpan({ cls: "fred-typ-picker-name", text }).style.color = color;
     } else {
-      el.createSpan({ cls: "fred-typ-picker-dot" }).style.backgroundColor = color;
+      paintColorDot(el.createSpan({ cls: "fred-typ-picker-dot" }), color, isDefault);
       el.createSpan({ cls: "fred-typ-picker-name", text });
     }
   }
@@ -86,19 +94,24 @@ class TypPickerModal extends FuzzySuggestModal {
 // Auswahl eines Subtyps für einen bereits gewählten TYP (siehe pickSubtype).
 // Wie TypPickerModal, zusätzlich mit einem ausgegrauten Eintrag "Kein
 // Subtyp" am Ende (item.none). ESC löst mit null auf - TYP.js kehrt dann zur
-// TYP-Auswahl zurück. Subtypen haben keine eigene Farbe oder Beschreibung,
-// der Name steht daher neutral mit Notiz-Anzahl.
+// TYP-Auswahl zurück. Subtypen haben keine Beschreibung, der Name steht in
+// der Farbe des Subtyps (bzw. des TYPs) mit Notiz-Anzahl.
 class SubtypPickerModal extends TypPickerModal {
   constructor(app, plugin, type, items, resolve) {
     super(app, plugin, items, resolve);
+    this.type = type;
     this.setPlaceholder(`Subtyp für ${type} – ESC für zurück`);
   }
 
   renderSuggestion(match, el) {
     const item = match.item;
     el.addClass("fred-typ-picker-suggestion");
-    if (item.none) el.addClass("fred-typ-picker-unregistered");
-    el.createSpan({ cls: "fred-typ-picker-name", text: item.type });
+    if (item.none) {
+      el.addClass("fred-typ-picker-unregistered");
+      el.createSpan({ cls: "fred-typ-picker-name", text: item.type });
+    } else {
+      this.renderColoredName(el, item.type, this.type, item.type);
+    }
     el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
   }
 
@@ -148,7 +161,7 @@ class TypSubtypPickerModal extends TypPickerModal {
       return;
     }
     el.addClass("fred-typ-picker-suggestion", "fred-typ-picker-subtype");
-    this.renderColoredName(el, item.subtype, item.type);
+    this.renderColoredName(el, item.subtype, item.type, item.subtype);
     el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
   }
 

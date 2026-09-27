@@ -3,7 +3,7 @@ const { TYP_PROPERTY, SUBTYP_PROPERTY, sortAllFrontmatter } = require("./frontma
 
 // Anzeigetext der vier nicht entfernbaren Platzhalter-Zeilen - "typValue" ist
 // die TYP-Property selbst, "subtypValue" analog die SUBTYP-Property, "typ"
-// die Standard-Frontmatter-Liste des TYPs (siehe
+// die TYP-Frontmatter-Liste des TYPs (siehe
 // type-frontmatter-editor.js), "other" alle Properties, die weder dort noch
 // in dieser Liste namentlich geführt werden. Siehe computeSortedKeys in
 // frontmatter-sort.js für die tatsächliche Auflösung dieser Blöcke.

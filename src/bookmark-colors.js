@@ -30,7 +30,7 @@ function applyBookmarksColors(plugin) {
       if (!titleEl) return;
 
       const file = plugin.app.vault.getAbstractFileByPath(item.path);
-      const color = plugin.settings.colorViews.bookmarks ? colorForFile(plugin, file) : null;
+      const color = plugin.settings.colorViews.bookmarks ? colorForFile(plugin, file, "bookmarks") : null;
       if (color) titleEl.style.color = color;
       else titleEl.style.removeProperty("color");
     });

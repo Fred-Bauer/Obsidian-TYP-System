@@ -847,9 +847,6 @@ class TypView extends ItemView {
       (newColor) => {
         if (!this.plugin.settings.colorViews.typList) return;
         titleEl.style.color = newColor;
-        // Überschrift des TYP-Frontmatter-Blocks (siehe renderSectionHeader)
-        // - wird bei jedem synchronize() neu erzeugt, daher hier gesucht.
-        for (const el of this.contentEl.querySelectorAll(".fred-typ-standard-title")) el.style.color = newColor;
       },
       { showReset: true }
     );
@@ -919,18 +916,10 @@ class TypView extends ItemView {
   // in genau diesem Block anlegen.
   renderSectionHeader(el, type, section, bucket, blocks) {
     const titleGroup = el.createDiv({ cls: "fred-typ-frontmatter-title-group" });
+    // Bewusst nie eingefärbt (weder in der TYP- noch in der Subtyp-Farbe),
+    // anders als der Titel der Detailansicht darüber: die Farbe eines Blocks
+    // steht im Farbpunkt seines Abschlusses (siehe renderSectionFooter).
     const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? `${type}-Frontmatter` });
-    if (section === null) {
-      // In der TYP-Farbe, wie der Titel der Detailansicht (nur mit "TYP View").
-      titleEl.addClass("fred-typ-standard-title");
-      const titleColor = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
-      if (titleColor) titleEl.style.color = titleColor;
-    } else {
-      titleEl.fredSubtype = section;
-      titleEl.addClass("fred-typ-subtype-title");
-      const titleColor = this.subtypeTitleColor(type, section);
-      if (titleColor) titleEl.style.color = titleColor;
-    }
     const count = section === null ? bucket.noSubtype : bucket.counts.get(section) ?? 0;
     titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
     // Subtyp-Blöcke reagieren auf ihrer ganzen Fläche (siehe
@@ -1030,18 +1019,11 @@ class TypView extends ItemView {
     deleteBtn.addEventListener("click", () => this.deleteSubtypeWithConfirm(type, subtype));
   }
 
-  // Titelfarbe eines Subtyp-Blocks: nur mit "TYP View" samt Unter-Schalter
-  // "Subtyp" (wie die TYP-Namen selbst nur mit "TYP View").
-  subtypeTitleColor(type, subtype) {
-    const { colorViews } = this.plugin.settings;
-    return colorViews.typList && colorViews.typListSubtyp ? subtypeColor(this.plugin.settings, type, subtype) : null;
-  }
-
   // Popover unter dem Farbpunkt eines Subtyp-Blocks: je ein Regler für
   // Farbton, Sättigung und Helligkeit, begrenzt auf die in den Einstellungen
   // festgelegte Abweichung (siehe type-colors.js). Die Leiste jedes Reglers
-  // zeigt als Verlauf die Farben, die er erreichen kann. Beim Ziehen ändern
-  // sich nur Punkt und Titel hier; gespeichert und in die übrigen Ansichten
+  // zeigt als Verlauf die Farben, die er erreichen kann. Beim Ziehen ändert
+  // sich nur der Farbpunkt hier; gespeichert und in die übrigen Ansichten
   // übernommen wird beim Schließen (Klick daneben oder Escape) - ein
   // refreshTypColors() rendert u. a. diese Ansicht neu.
   openSubtypeColorPopover(anchorEl, type, subtype) {
@@ -1059,11 +1041,6 @@ class TypView extends ItemView {
       const color = applyColorOffset(typeColor, offset);
       for (const el of this.contentEl.querySelectorAll(".fred-typ-subtype-color-dot")) {
         if (el.fredSubtype === subtype) paintColorDot(el, color, !hasColorOffset(offset) || !settings.typeColors[type]);
-      }
-      if (this.subtypeTitleColor(type, subtype) !== null) {
-        for (const el of this.contentEl.querySelectorAll(".fred-typ-subtype-title")) {
-          if (el.fredSubtype === subtype) el.style.color = color;
-        }
       }
       for (const row of rows) row();
     };

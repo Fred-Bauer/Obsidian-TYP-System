@@ -16,9 +16,9 @@
     "ORGA": "#7878dc",
     "NOTIZ": "#e8d368",
     "TEXT": "#d29f46",
-    "MEDIA": "#42943d",
+    "MEDIA": "#77ee68",
     "VORTRAG": "#a0701c",
-    "PROJEKT": "#9adf81",
+    "PROJEKT": "#50e1aa",
     "EXTERN": "#ffffff",
     "KONTAKT": "#c64e4e"
   },
@@ -69,8 +69,8 @@
       "Urheber": null,
       "Herausgeber": null,
       "Erscheinung": null,
-      "Bewertung": null,
       "Medienstatus": null,
+      "Bewertung": null,
       "Priorität": null,
       "Besitz": false
     }
@@ -81,14 +81,14 @@
       "Mandatory"
     ],
     "KONTAKT": [
-      "Familie",
       "Freunde",
       "Nation",
       "Plz",
       "Strasse",
       "E-Mail",
       "Handynummer",
-      "Geburtstag"
+      "Geburtstag",
+      "Familie"
     ],
     "MEDIA": [
       "Herausgeber",

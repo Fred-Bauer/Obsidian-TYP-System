@@ -3,7 +3,8 @@ const { DEFAULT_SETTINGS, TypSystemSettingTab } = require("./settings");
 const { registerCommands } = require("./commands");
 const { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require("./typ-view");
 const { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
-const { getSubtype, getSubtypeNames, migrateAboveStandard } = require("./subtypes");
+const { getSubtype, getSubtypeNames, migrateAboveStandard, migrateSubtypeColorScale } = require("./subtypes");
+const { DEFAULT_SUBTYPE_COLOR_RANGES } = require("./type-colors");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
 const { registerSearchColors } = require("./search-colors");
@@ -238,6 +239,9 @@ module.exports = class TypSystemPlugin extends Plugin {
     // Subtyp-Blöcke lagen früher wahlweise über dem TYP-Frontmatter; das steht
     // jetzt fest ganz oben (siehe getSectionOrder in subtypes.js).
     migrateAboveStandard(this.settings);
+    // Anders als die übrigen Migrationen gleich schreiben: sie rechnet
+    // gespeicherte Zahlen um und darf das beim nächsten Start nicht erneut tun.
+    if (migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES)) await this.saveSettings();
   }
 
   async saveSettings() {

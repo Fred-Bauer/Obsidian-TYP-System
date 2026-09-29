@@ -58,9 +58,9 @@ const DEFAULT_SETTINGS = {
   graphAttachmentColorEnabled: false,
   graphAttachmentColor: "",
   // Wie weit die Farbe eines Subtyps höchstens von der seines TYPs abweichen
-  // darf (±), siehe type-colors.js: Farbton in Grad, Sättigung in % relativ,
-  // Helligkeit in Prozentpunkten.
-  subtypeColorRanges: { h: 25, s: 30, l: 20 },
+  // darf (±), siehe type-colors.js: Farbton in Grad, Helligkeit in % des Wegs
+  // zu Weiß bzw. Schwarz.
+  subtypeColorRanges: { ...DEFAULT_SUBTYPE_COLOR_RANGES },
   colorViews: {
     fileExplorer: true,
     graph: true,
@@ -373,19 +373,19 @@ class TypSystemSettingTab extends PluginSettingTab {
     // siehe type-colors.js). Eine schon eingestellte, größere Abweichung wird
     // auf die neue Grenze gekappt.
     const subtypeColorGroup = new SettingGroup(containerEl).setHeading("Subtyp-Farben");
-    const rangeMax = { h: 180, s: 100, l: 100 };
+    const rangeMax = { h: 180, /* s: 100, */ l: 100 };
     const rangeDesc = {
       h: "Wie weit der Farbton eines Subtyps höchstens von dem seines TYPs abweichen darf (± Grad).",
-      s: "Wie weit die Sättigung eines Subtyps höchstens von der seines TYPs abweichen darf (± Prozent).",
-      l: "Wie weit die Helligkeit eines Subtyps höchstens von der seines TYPs abweichen darf (± Prozentpunkte).",
+      // s: "Wie blass ein Subtyp gegenüber seinem TYP höchstens werden darf (Prozent der TYP-Sättigung). Der Regler geht nur nach unten - kräftiger als die Hauptfarbe soll ein Subtyp nicht werden.",
+      l: "Wie weit die Helligkeit eines Subtyps höchstens von der seines TYPs abweichen darf (± Prozent des Wegs zu Weiß bzw. Schwarz - 100 % wäre reines Weiß bzw. Schwarz).",
     };
     // Der Regler meldet jede Zwischenstellung - die übrigen Ansichten erst
     // nachziehen, wenn er kurz ruht.
     const refreshColorsSoon = debounce(() => this.plugin.refreshTypColors?.(), 300, true);
-    for (const { key, label, unit } of SUBTYPE_COLOR_CHANNELS) {
+    for (const { key, label, unit, downOnly } of SUBTYPE_COLOR_CHANNELS) {
       subtypeColorGroup.addSetting((setting) =>
         setting
-          .setName(`${label} (± ${unit})`)
+          .setName(`${label} (${downOnly ? "−" : "±"} ${unit})`)
           .setDesc(rangeDesc[key])
           .addSlider((slider) =>
             slider

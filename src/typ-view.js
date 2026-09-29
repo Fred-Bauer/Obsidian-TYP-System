@@ -23,7 +23,7 @@ const {
   hasColorOffset,
   subtypeHasOwnColor,
   paintColorDot,
-  colorRange,
+  channelBounds,
   clampedOffset,
   SUBTYPE_COLOR_CHANNELS,
 } = require("./type-colors");
@@ -1032,7 +1032,9 @@ class TypView extends ItemView {
     const data = getSubtype(settings, type, subtype);
     if (!data) return;
     const typeColor = settings.typeColors[type] ?? DEFAULT_TYPE_COLOR;
-    const offset = clampedOffset(settings, data.color) ?? { h: 0, s: 0, l: 0 };
+    // Ohne eigene Abweichung steht jeder Regler auf 0 - welche es gibt, sagt
+    // allein SUBTYPE_COLOR_CHANNELS (siehe type-colors.js).
+    const offset = clampedOffset(settings, data.color) ?? Object.fromEntries(SUBTYPE_COLOR_CHANNELS.map(({ key }) => [key, 0]));
     const doc = anchorEl.doc;
     const popover = doc.body.createDiv({ cls: "menu fred-typ-subtype-color-popover" });
 
@@ -1046,15 +1048,15 @@ class TypView extends ItemView {
     };
 
     for (const { key, label, unit } of SUBTYPE_COLOR_CHANNELS) {
-      const range = colorRange(settings, key);
+      const [min, max] = channelBounds(settings, key);
       const row = popover.createDiv({ cls: "fred-typ-subtype-color-row" });
       row.createSpan({ cls: "fred-typ-subtype-color-label", text: label });
       const input = row.createEl("input", { type: "range", cls: "slider fred-typ-subtype-color-slider" });
-      input.min = String(-range);
-      input.max = String(range);
+      input.min = String(min);
+      input.max = String(max);
       input.step = "1";
       input.value = String(offset[key]);
-      input.disabled = range === 0;
+      input.disabled = min === max;
       const valueEl = row.createSpan({ cls: "fred-typ-subtype-color-value" });
       input.addEventListener("input", () => {
         offset[key] = Number(input.value);
@@ -1064,8 +1066,7 @@ class TypView extends ItemView {
         const steps = 8;
         const stops = [];
         for (let i = 0; i <= steps; i++) {
-          const value = -range + (2 * range * i) / steps;
-          stops.push(applyColorOffset(typeColor, { ...offset, [key]: value }));
+          stops.push(applyColorOffset(typeColor, { ...offset, [key]: min + ((max - min) * i) / steps }));
         }
         input.style.setProperty("--fred-track", `linear-gradient(to right, ${stops.join(", ")})`);
         valueEl.setText(`${offset[key] > 0 ? "+" : ""}${offset[key]}${unit}`);

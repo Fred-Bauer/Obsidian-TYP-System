@@ -77,6 +77,56 @@ function migrateAboveStandard(settings) {
   return changed;
 }
 
+// Die Regler der Subtyp-Farben haben zweimal ihre Bedeutung geändert, ohne
+// dass sich die gespeicherten Zahlen von selbst mitbewegt hätten (siehe
+// applyColorOffset und channelBounds in type-colors.js). settings.
+// subtypeColorScale hält fest, welchen Stand die gespeicherten Werte haben;
+// jeder Schritt läuft genau einmal. Liefert true bei einer Änderung - die
+// gehört sofort gespeichert, sonst liefe die Umrechnung beim nächsten Start
+// erneut. Waren die Grenzen noch die Standardwerte des jeweiligen Stands,
+// gelten danach die neuen.
+//   1 -> 2: Helligkeit zählte absolute OKLCH-Punkte, jetzt den Anteil des Wegs
+//           zu Weiß bzw. Schwarz. Die alte Zahl lässt sich nicht umrechnen
+//           (sie hing von der TYP-Farbe ab), wohl aber die Absicht dahinter:
+//           was den Regler halb ausreizte, reizt ihn auch danach halb aus.
+//   2 -> 3: die Sättigung geht nur noch nach unten; gespeicherte positive
+//           Werte sind sonst stumm gekappt und wären beim nächsten Öffnen des
+//           Popovers unangekündigt verschwunden.
+const SUBTYPE_COLOR_SCALE = 3;
+const PREVIOUS_SUBTYPE_COLOR_RANGES = {
+  2: { h: 25, s: 30, l: 20 },
+  3: { h: 35, s: 20, l: 40 },
+};
+
+function migrateSubtypeColorScale(settings, defaultRanges) {
+  const from = Number(settings.subtypeColorScale) || 1;
+  if (from >= SUBTYPE_COLOR_SCALE) return false;
+  const allColors = function* () {
+    for (const byName of Object.values(settings.typeSubtypes ?? {})) {
+      for (const data of Object.values(byName)) if (data.color) yield data.color;
+    }
+  };
+  const adoptDefaults = (step) => {
+    const previous = PREVIOUS_SUBTYPE_COLOR_RANGES[step];
+    if (Object.entries(previous).every(([key, value]) => Number(settings.subtypeColorRanges?.[key]) === value)) {
+      settings.subtypeColorRanges = { ...defaultRanges };
+    }
+  };
+  if (from < 2) {
+    const oldRange = Number(settings.subtypeColorRanges?.l);
+    adoptDefaults(2);
+    const newRange = Number(settings.subtypeColorRanges?.l);
+    const factor = oldRange > 0 && Number.isFinite(newRange) ? newRange / oldRange : 1;
+    for (const color of allColors()) if (color.l) color.l = Math.round(color.l * factor);
+  }
+  if (from < 3) {
+    adoptDefaults(3);
+    for (const color of allColors()) if (color.s > 0) color.s = 0;
+  }
+  settings.subtypeColorScale = SUBTYPE_COLOR_SCALE;
+  return true;
+}
+
 // Zusammenlegen zweier TYPen: Subtypen, die es nur bei source gibt, werden
 // übernommen. Gleichnamige Blöcke werden vereinigt - bei gleichem Key
 // gewinnen Wert und Floating-Markierung des Ziels, Keys nur aus source
@@ -191,6 +241,7 @@ module.exports = {
   getSubtype,
   ensureSubtype,
   migrateAboveStandard,
+  migrateSubtypeColorScale,
   moveTypeSubtypes,
   deleteTypeSubtypes,
   mergeTypeSubtypes,

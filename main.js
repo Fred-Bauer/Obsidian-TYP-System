@@ -283,6 +283,39 @@ var require_subtypes = __commonJS({
       }
       return changed;
     }
+    var SUBTYPE_COLOR_SCALE = 3;
+    var PREVIOUS_SUBTYPE_COLOR_RANGES = {
+      2: { h: 25, s: 30, l: 20 },
+      3: { h: 35, s: 20, l: 40 }
+    };
+    function migrateSubtypeColorScale2(settings, defaultRanges) {
+      const from = Number(settings.subtypeColorScale) || 1;
+      if (from >= SUBTYPE_COLOR_SCALE) return false;
+      const allColors = function* () {
+        for (const byName of Object.values(settings.typeSubtypes ?? {})) {
+          for (const data of Object.values(byName)) if (data.color) yield data.color;
+        }
+      };
+      const adoptDefaults = (step) => {
+        const previous = PREVIOUS_SUBTYPE_COLOR_RANGES[step];
+        if (Object.entries(previous).every(([key, value]) => Number(settings.subtypeColorRanges?.[key]) === value)) {
+          settings.subtypeColorRanges = { ...defaultRanges };
+        }
+      };
+      if (from < 2) {
+        const oldRange = Number(settings.subtypeColorRanges?.l);
+        adoptDefaults(2);
+        const newRange = Number(settings.subtypeColorRanges?.l);
+        const factor = oldRange > 0 && Number.isFinite(newRange) ? newRange / oldRange : 1;
+        for (const color of allColors()) if (color.l) color.l = Math.round(color.l * factor);
+      }
+      if (from < 3) {
+        adoptDefaults(3);
+        for (const color of allColors()) if (color.s > 0) color.s = 0;
+      }
+      settings.subtypeColorScale = SUBTYPE_COLOR_SCALE;
+      return true;
+    }
     function mergeTypeSubtypes(settings, source, target) {
       const sourceSubtypes = settings.typeSubtypes?.[source];
       if (!sourceSubtypes) return;
@@ -363,6 +396,7 @@ var require_subtypes = __commonJS({
       getSubtype: getSubtype2,
       ensureSubtype,
       migrateAboveStandard: migrateAboveStandard2,
+      migrateSubtypeColorScale: migrateSubtypeColorScale2,
       moveTypeSubtypes,
       deleteTypeSubtypes,
       mergeTypeSubtypes,
@@ -680,20 +714,28 @@ var require_type_colors = __commonJS({
     var { getSubtype: getSubtype2 } = require_subtypes();
     var SUBTYPE_COLOR_CHANNELS = [
       { key: "h", label: "Farbton", unit: "\xB0" },
-      { key: "s", label: "S\xE4ttigung", unit: "%" },
+      // { key: "s", label: "Sättigung", unit: "%", downOnly: true },
       { key: "l", label: "Helligkeit", unit: "%" }
     ];
-    var DEFAULT_SUBTYPE_COLOR_RANGES = { h: 25, s: 30, l: 20 };
+    var DEFAULT_SUBTYPE_COLOR_RANGES2 = {
+      h: 35,
+      /* s: 40, */
+      l: 40
+    };
     function colorRange(settings, key) {
       const value = Number(settings.subtypeColorRanges?.[key]);
-      return Number.isFinite(value) && value >= 0 ? value : DEFAULT_SUBTYPE_COLOR_RANGES[key];
+      return Number.isFinite(value) && value >= 0 ? value : DEFAULT_SUBTYPE_COLOR_RANGES2[key];
+    }
+    function channelBounds(settings, key) {
+      const range = colorRange(settings, key);
+      return SUBTYPE_COLOR_CHANNELS.find((channel) => channel.key === key)?.downOnly ? [-range, 0] : [-range, range];
     }
     function clampedOffset(settings, offset) {
       if (!offset) return null;
       const result = {};
       for (const { key } of SUBTYPE_COLOR_CHANNELS) {
-        const range = colorRange(settings, key);
-        result[key] = Math.min(range, Math.max(-range, Number(offset[key]) || 0));
+        const [min, max] = channelBounds(settings, key);
+        result[key] = Math.min(max, Math.max(min, Number(offset[key]) || 0));
       }
       return result;
     }
@@ -724,33 +766,71 @@ var require_type_colors = __commonJS({
         -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s
       ];
     }
-    function oklchToHex(color) {
-      const inGamut = (rgb2) => rgb2.every((c) => c >= -1e-4 && c <= 1.0001);
-      let rgb = oklchToLinear(color);
-      if (!inGamut(rgb)) {
-        let low = 0;
-        let high = color.C;
-        for (let i = 0; i < 20; i++) {
-          const mid = (low + high) / 2;
-          if (inGamut(oklchToLinear({ ...color, C: mid }))) low = mid;
-          else high = mid;
-        }
-        rgb = oklchToLinear({ ...color, C: low });
+    var inGamut = (rgb) => rgb.every((c) => c >= -1e-4 && c <= 1.0001);
+    function maxChroma(L, H) {
+      let low = 0;
+      let high = 0.4;
+      for (let i = 0; i < 20; i++) {
+        const mid = (low + high) / 2;
+        if (inGamut(oklchToLinear({ L, C: mid, H }))) low = mid;
+        else high = mid;
       }
+      return low;
+    }
+    function oklchToHex(color) {
+      let rgb = oklchToLinear(color);
+      if (!inGamut(rgb)) rgb = oklchToLinear({ ...color, C: maxChroma(color.L, color.H) });
       return "#" + rgb.map((c) => Math.round(Math.min(1, Math.max(0, toGamma(Math.min(1, Math.max(0, c))))) * 255)).map((c) => c.toString(16).padStart(2, "0")).join("");
     }
+    var cuspCache = /* @__PURE__ */ new Map();
+    var NEUTRAL_CHROMA = 1e-4;
+    function cuspLightness(H) {
+      const key = Math.round(H) % 360;
+      const cached = cuspCache.get(key);
+      if (cached !== void 0) return cached;
+      let low = 0;
+      let high = 1;
+      for (let i = 0; i < 24; i++) {
+        const third = (high - low) / 3;
+        if (maxChroma(low + third, key) < maxChroma(high - third, key)) low += third;
+        else high -= third;
+      }
+      const result = (low + high) / 2;
+      cuspCache.set(key, result);
+      return result;
+    }
+    function remapToCusp(L, fromH, toH) {
+      const from = cuspLightness(fromH);
+      const to = cuspLightness(toH);
+      if (L <= from) return from > 0 ? L / from * to : to;
+      return from < 1 ? to + (L - from) / (1 - from) * (1 - to) : to;
+    }
+    var offsetCache = /* @__PURE__ */ new Map();
     function applyColorOffset(hex, offset) {
       if (!offset) return hex;
+      const cacheKey = hex + "|" + (offset.h ?? 0) + "|" + (offset.l ?? 0);
+      const cached = offsetCache.get(cacheKey);
+      if (cached !== void 0) return cached;
+      const result = computeColorOffset(hex, offset);
+      if (offsetCache.size > 500) offsetCache.clear();
+      offsetCache.set(cacheKey, result);
+      return result;
+    }
+    function computeColorOffset(hex, offset) {
       const base = hexToOklch(hex);
       if (!base) return hex;
-      return oklchToHex({
-        L: Math.min(1, Math.max(0, base.L + (offset.l ?? 0) / 100)),
-        C: Math.max(0, base.C * (1 + (offset.s ?? 0) / 100)),
-        H: (base.H + (offset.h ?? 0) + 360) % 360
-      });
+      const H = (base.H + (offset.h ?? 0) + 360) % 360;
+      const baseCeiling = maxChroma(base.L, base.H);
+      const neutral = base.C < NEUTRAL_CHROMA || baseCeiling <= 0;
+      const relative = neutral ? 0 : base.C / baseCeiling;
+      const shifted = neutral ? base.L : remapToCusp(base.L, base.H, H);
+      const share = (offset.l ?? 0) / 100;
+      const L = Math.min(1, Math.max(0, shifted + share * (share >= 0 ? 1 - shifted : shifted)));
+      const C = relative * maxChroma(L, H);
+      return oklchToHex({ L, C: Math.max(0, C), H });
     }
     function hasColorOffset(offset) {
-      return !!offset && ["h", "s", "l"].some((key) => (offset[key] ?? 0) !== 0);
+      return !!offset && SUBTYPE_COLOR_CHANNELS.some(({ key }) => (offset[key] ?? 0) !== 0);
     }
     function subtypeColor(settings, type, subtype) {
       const typeColor = settings.typeColors[type] ?? null;
@@ -780,9 +860,10 @@ var require_type_colors = __commonJS({
       subtypeHasOwnColor,
       paintColorDot,
       colorRange,
+      channelBounds,
       clampedOffset,
       SUBTYPE_COLOR_CHANNELS,
-      DEFAULT_SUBTYPE_COLOR_RANGES
+      DEFAULT_SUBTYPE_COLOR_RANGES: DEFAULT_SUBTYPE_COLOR_RANGES2
     };
   }
 });
@@ -793,7 +874,7 @@ var require_settings = __commonJS({
     var { PluginSettingTab, SettingGroup, ToggleComponent, DropdownComponent, debounce } = require("obsidian");
     var { mountGlobalOrderEditor } = require_frontmatter_order_editor();
     var { DEFAULT_GLOBAL_ORDER } = require_frontmatter_sort();
-    var { SUBTYPE_COLOR_CHANNELS, DEFAULT_SUBTYPE_COLOR_RANGES, colorRange } = require_type_colors();
+    var { SUBTYPE_COLOR_CHANNELS, DEFAULT_SUBTYPE_COLOR_RANGES: DEFAULT_SUBTYPE_COLOR_RANGES2, colorRange } = require_type_colors();
     var DEFAULT_SETTINGS2 = {
       types: [],
       typeColors: {},
@@ -849,9 +930,9 @@ var require_settings = __commonJS({
       graphAttachmentColorEnabled: false,
       graphAttachmentColor: "",
       // Wie weit die Farbe eines Subtyps höchstens von der seines TYPs abweichen
-      // darf (±), siehe type-colors.js: Farbton in Grad, Sättigung in % relativ,
-      // Helligkeit in Prozentpunkten.
-      subtypeColorRanges: { h: 25, s: 30, l: 20 },
+      // darf (±), siehe type-colors.js: Farbton in Grad, Helligkeit in % des Wegs
+      // zu Weiß bzw. Schwarz.
+      subtypeColorRanges: { ...DEFAULT_SUBTYPE_COLOR_RANGES2 },
       colorViews: {
         fileExplorer: true,
         graph: true,
@@ -1068,24 +1149,28 @@ var require_settings = __commonJS({
           { typTooltip: "TYP-Frontmatter der TYPen", subtypTooltip: "Frontmatter-Bl\xF6cke der Subtypen mit einbeziehen, in Subtyp-Farbe" }
         );
         const subtypeColorGroup = new SettingGroup(containerEl).setHeading("Subtyp-Farben");
-        const rangeMax = { h: 180, s: 100, l: 100 };
+        const rangeMax = {
+          h: 180,
+          /* s: 100, */
+          l: 100
+        };
         const rangeDesc = {
           h: "Wie weit der Farbton eines Subtyps h\xF6chstens von dem seines TYPs abweichen darf (\xB1 Grad).",
-          s: "Wie weit die S\xE4ttigung eines Subtyps h\xF6chstens von der seines TYPs abweichen darf (\xB1 Prozent).",
-          l: "Wie weit die Helligkeit eines Subtyps h\xF6chstens von der seines TYPs abweichen darf (\xB1 Prozentpunkte)."
+          // s: "Wie blass ein Subtyp gegenüber seinem TYP höchstens werden darf (Prozent der TYP-Sättigung). Der Regler geht nur nach unten - kräftiger als die Hauptfarbe soll ein Subtyp nicht werden.",
+          l: "Wie weit die Helligkeit eines Subtyps h\xF6chstens von der seines TYPs abweichen darf (\xB1 Prozent des Wegs zu Wei\xDF bzw. Schwarz - 100 % w\xE4re reines Wei\xDF bzw. Schwarz)."
         };
         const refreshColorsSoon = debounce(() => this.plugin.refreshTypColors?.(), 300, true);
-        for (const { key, label, unit } of SUBTYPE_COLOR_CHANNELS) {
+        for (const { key, label, unit, downOnly } of SUBTYPE_COLOR_CHANNELS) {
           subtypeColorGroup.addSetting(
-            (setting) => setting.setName(`${label} (\xB1 ${unit})`).setDesc(rangeDesc[key]).addSlider(
+            (setting) => setting.setName(`${label} (${downOnly ? "\u2212" : "\xB1"} ${unit})`).setDesc(rangeDesc[key]).addSlider(
               (slider) => slider.setLimits(0, rangeMax[key], 1).setValue(colorRange(this.plugin.settings, key)).setDynamicTooltip().onChange(async (value) => {
-                this.plugin.settings.subtypeColorRanges = { ...DEFAULT_SUBTYPE_COLOR_RANGES, ...this.plugin.settings.subtypeColorRanges, [key]: value };
+                this.plugin.settings.subtypeColorRanges = { ...DEFAULT_SUBTYPE_COLOR_RANGES2, ...this.plugin.settings.subtypeColorRanges, [key]: value };
                 await this.plugin.saveSettings();
                 refreshColorsSoon();
               })
             ).addExtraButton(
-              (button) => button.setIcon("rotate-ccw").setTooltip(`Zur\xFCcksetzen auf ${DEFAULT_SUBTYPE_COLOR_RANGES[key]}`).onClick(async () => {
-                this.plugin.settings.subtypeColorRanges = { ...DEFAULT_SUBTYPE_COLOR_RANGES, ...this.plugin.settings.subtypeColorRanges, [key]: DEFAULT_SUBTYPE_COLOR_RANGES[key] };
+              (button) => button.setIcon("rotate-ccw").setTooltip(`Zur\xFCcksetzen auf ${DEFAULT_SUBTYPE_COLOR_RANGES2[key]}`).onClick(async () => {
+                this.plugin.settings.subtypeColorRanges = { ...DEFAULT_SUBTYPE_COLOR_RANGES2, ...this.plugin.settings.subtypeColorRanges, [key]: DEFAULT_SUBTYPE_COLOR_RANGES2[key] };
                 await this.plugin.saveSettings();
                 this.plugin.refreshTypColors?.();
                 this.display();
@@ -1893,7 +1978,7 @@ var require_typ_view = __commonJS({
       hasColorOffset,
       subtypeHasOwnColor,
       paintColorDot,
-      colorRange,
+      channelBounds,
       clampedOffset,
       SUBTYPE_COLOR_CHANNELS
     } = require_type_colors();
@@ -2648,7 +2733,7 @@ var require_typ_view = __commonJS({
         const data = getSubtype2(settings, type, subtype);
         if (!data) return;
         const typeColor = settings.typeColors[type] ?? DEFAULT_TYPE_COLOR;
-        const offset = clampedOffset(settings, data.color) ?? { h: 0, s: 0, l: 0 };
+        const offset = clampedOffset(settings, data.color) ?? Object.fromEntries(SUBTYPE_COLOR_CHANNELS.map(({ key }) => [key, 0]));
         const doc = anchorEl.doc;
         const popover = doc.body.createDiv({ cls: "menu fred-typ-subtype-color-popover" });
         const rows = [];
@@ -2660,15 +2745,15 @@ var require_typ_view = __commonJS({
           for (const row of rows) row();
         };
         for (const { key, label, unit } of SUBTYPE_COLOR_CHANNELS) {
-          const range = colorRange(settings, key);
+          const [min, max] = channelBounds(settings, key);
           const row = popover.createDiv({ cls: "fred-typ-subtype-color-row" });
           row.createSpan({ cls: "fred-typ-subtype-color-label", text: label });
           const input = row.createEl("input", { type: "range", cls: "slider fred-typ-subtype-color-slider" });
-          input.min = String(-range);
-          input.max = String(range);
+          input.min = String(min);
+          input.max = String(max);
           input.step = "1";
           input.value = String(offset[key]);
-          input.disabled = range === 0;
+          input.disabled = min === max;
           const valueEl = row.createSpan({ cls: "fred-typ-subtype-color-value" });
           input.addEventListener("input", () => {
             offset[key] = Number(input.value);
@@ -2678,8 +2763,7 @@ var require_typ_view = __commonJS({
             const steps = 8;
             const stops = [];
             for (let i = 0; i <= steps; i++) {
-              const value = -range + 2 * range * i / steps;
-              stops.push(applyColorOffset(typeColor, { ...offset, [key]: value }));
+              stops.push(applyColorOffset(typeColor, { ...offset, [key]: min + (max - min) * i / steps }));
             }
             input.style.setProperty("--fred-track", `linear-gradient(to right, ${stops.join(", ")})`);
             valueEl.setText(`${offset[key] > 0 ? "+" : ""}${offset[key]}${unit}`);
@@ -4191,7 +4275,8 @@ var { DEFAULT_SETTINGS, TypSystemSettingTab } = require_settings();
 var { registerCommands } = require_commands();
 var { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require_typ_view();
 var { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require_typ_index();
-var { getSubtype, getSubtypeNames, migrateAboveStandard } = require_subtypes();
+var { getSubtype, getSubtypeNames, migrateAboveStandard, migrateSubtypeColorScale } = require_subtypes();
+var { DEFAULT_SUBTYPE_COLOR_RANGES } = require_type_colors();
 var { registerFileExplorerColors } = require_file_explorer_colors();
 var { registerGraphColors } = require_graph_colors();
 var { registerSearchColors } = require_search_colors();
@@ -4383,6 +4468,7 @@ module.exports = class TypSystemPlugin extends Plugin {
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
     migrateFloatingFrontmatter(this.settings);
     migrateAboveStandard(this.settings);
+    if (migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES)) await this.saveSettings();
   }
   async saveSettings() {
     await this.saveData(this.settings);

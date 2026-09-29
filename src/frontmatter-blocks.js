@@ -1,5 +1,5 @@
 const { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore } = require("./type-frontmatter-editor");
-const { getSectionOrder } = require("./subtypes");
+const { getSectionOrder, isEmptyValue } = require("./subtypes");
 
 /* ============================================================
  * Die Frontmatter-Blöcke eines TYPs in der TYP-Detailansicht (siehe
@@ -12,10 +12,11 @@ const { getSectionOrder } = require("./subtypes");
  * er durch das Frontmatter-Objekt selbst zwangsläufig eindeutig, darüber
  * hinaus nicht (siehe Kommentar an typeSubtypes in subtypes.js).
  *
- * Der Preis dafür: Obsidians eigenes Drag & Drop reicht nur innerhalb einer
- * Instanz, eine Property lässt sich also nicht mehr von Block zu Block
- * ziehen. Was blockübergreifend weiterläuft, ist die Tastatur-Navigation -
- * siehe onShiftFocus unten.
+ * Obsidians eigenes Zeilen-Drag reicht nur innerhalb einer Instanz. Damit
+ * eine Property trotzdem von Block zu Block wandern kann, setzt
+ * registerPropertyDrag() unten auf genau diesem Drag auf, statt ein eigenes
+ * zu bauen. Die Tastatur-Navigation über alle Blöcke steckt in
+ * registerFocusChain() (type-frontmatter-editor.js).
  *
  * Section: null = TYP-Frontmatter, sonst der Subtyp-Name.
  * ============================================================ */
@@ -38,6 +39,7 @@ function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderF
   const sections = getSectionOrder(view.plugin.settings, type);
   const editors = new Map();
   const blockEls = new Map();
+  const stores = new Map();
 
   const api = {
     // Alle Editor-Instanzen in Block-Reihenfolge - typ-view.js hängt sie als
@@ -72,11 +74,13 @@ function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderF
       cls: "fred-typ-block" + (isSub ? " fred-typ-frontmatter-block fred-typ-subtype-block" : ""),
     });
     blockEls.set(section, blockEl);
+    blockEl.fredSection = section;
 
     const header = blockEl.createDiv({ cls: "fred-typ-frontmatter-header fred-typ-section-header" });
     header.toggleClass("fred-typ-section-sub", isSub);
 
     const store = section === null ? typeStore(view.plugin, type) : subtypeStore(view.plugin, type, section);
+    stores.set(section, store);
     const editor = mountFrontmatterEditor(view, blockEl, store, {
       onShiftFocus: (step) => focusNeighbor(section, step),
     });
@@ -178,7 +182,179 @@ function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderF
     win.addEventListener("keydown", onKey, true);
   }
 
+  registerPropertyDrag();
   return api;
+
+  /* --- Eine Property in einen anderen Block ziehen ------------------------
+   * Aufgesetzt auf Obsidians eigenes Zeilen-Drag (Gv im gebauten app.js),
+   * statt ein zweites danebenzustellen: das hängt am Typ-Icon der Zeile
+   * (.metadata-property-icon), legt einen .drag-reorder-ghost an den Body -
+   * der folgt dem Cursor also ohnehin über Blockgrenzen hinweg - und
+   * markiert die Ursprungszeile mit .drag-ghost-hidden, Obsidians eigenem
+   * Akzent-Rechteck, das die Einfügestelle zeigt. Innerhalb eines Blocks
+   * macht Obsidian damit unverändert alles selbst. Dazu kommt hier nur:
+   *
+   *  - ein leeres Zusatzkind in der Liste, solange gezogen wird: Obsidian
+   *    startet den Drag sonst gar nicht, wenn ein Block nur eine einzige
+   *    Zeile hat (Prüfung n.firstChild !== n.lastChild beim mousedown);
+   *  - ein Platzhalter mit derselben Klasse .drag-ghost-hidden im Zielblock,
+   *    sobald der Cursor einen fremden Block erreicht - die Ursprungszeile
+   *    wird solange ausgeblendet, damit nicht zwei Rechtecke stehen;
+   *  - reorderKey je Instanz, das beim Loslassen über einem fremden Block
+   *    die Property dorthin umhängt, statt innerhalb des eigenen zu sortieren.
+   *
+   * Die eigenen Handler laufen in der Capture-Phase am Fenster und damit vor
+   * Obsidians eigenen (die es in seinem mousedown-Handler auf window legt).
+   * -------------------------------------------------------------------- */
+  function registerPropertyDrag() {
+    // Ohne einen zweiten Block gibt es kein Ziel - dann bleibt Obsidians
+    // eigenes Drag völlig unangetastet.
+    const anchor = api.editors[0];
+    if (!anchor || sections.length < 2) return;
+
+    // Läuft ein Drag, hält dies dessen Zustand; drop merkt sich beim
+    // Loslassen das Ziel für das anschließende reorderKey.
+    let drag = null;
+    let drop = null;
+
+    const sectionAt = (clientY) =>
+      sections.find((section) => {
+        const rect = blockEls.get(section).getBoundingClientRect();
+        return clientY >= rect.top && clientY <= rect.bottom;
+      });
+
+    const clearPlaceholder = () => {
+      drag.placeholder?.remove();
+      drag.placeholder = null;
+      drag.rowEl.style.removeProperty("display");
+      drag.target = null;
+    };
+
+    wrapper.addEventListener(
+      "mousedown",
+      (event) => {
+        if (event.button !== 0) return;
+        const rowEl = event.target.closest(".metadata-property-icon")?.closest(".metadata-property");
+        const section = rowEl?.closest(".fred-typ-block")?.fredSection;
+        const editor = section === undefined ? null : editors.get(section);
+        const key = editor?.rendered.find((row) => row.containerEl === rowEl)?.entry.key;
+        // Eine noch unbenannte Zeile hat in einem anderen Block nichts zu
+        // suchen - sie bleibt Obsidians eigener Sortierung überlassen.
+        if (!key) return;
+        drag = {
+          section,
+          key,
+          rowEl,
+          // Jetzt schon gemessen: sobald die Zeile für den Platzhalter
+          // ausgeblendet ist, liefert offsetHeight 0.
+          height: rowEl.offsetHeight,
+          spacer: editor.propertyListEl.createDiv({ cls: "fred-typ-drag-spacer" }),
+          placeholder: null,
+          target: null,
+        };
+        drop = null;
+      },
+      true
+    );
+
+    // Am Fenster registriert, damit ein Drag auch außerhalb der Blöcke
+    // weiterverfolgt wird - abgeräumt mit dem ersten Editor, der beim
+    // nächsten Neuaufbau der Detailansicht entladen wird (siehe
+    // destroyFrontmatterEditor in typ-view.js).
+    const onWinMove = (event) => {
+      if (!drag) return;
+      const target = sectionAt(event.clientY);
+      if (target === undefined || target === drag.section) {
+        if (drag.placeholder) clearPlaceholder();
+        return;
+      }
+
+      const list = editors.get(target).propertyListEl;
+      if (!drag.placeholder) {
+        drag.rowEl.style.display = "none";
+        drag.placeholder = createDiv({ cls: "metadata-property drag-ghost-hidden fred-typ-drag-placeholder" });
+        drag.placeholder.style.height = `${drag.height}px`;
+      }
+      // Einfügestelle wie bei Obsidian selbst: vor der ersten Zeile, deren
+      // Mitte unterhalb des Cursors liegt.
+      const rows = [...list.children].filter((el) => el !== drag.placeholder && el !== drag.spacer);
+      const before = rows.find((el) => {
+        const rect = el.getBoundingClientRect();
+        return event.clientY < rect.top + rect.height / 2;
+      });
+      drag.target = { section: target, index: before ? rows.indexOf(before) : rows.length };
+      list.insertBefore(drag.placeholder, before ?? null);
+    };
+
+    const onWinUp = () => {
+      if (!drag) return;
+      const { spacer, placeholder, rowEl, target } = drag;
+      drag = null;
+      drop = target;
+      placeholder?.remove();
+      rowEl.style.removeProperty("display");
+      // Erst nach Obsidians eigenem Drag-Abschluss: der bestimmt die
+      // Einfügestelle innerhalb des Ausgangsblocks noch über die Kinderliste,
+      // in der das Zusatzkind die letzte Position markiert.
+      wrapper.win.setTimeout(() => spacer.remove(), 0);
+    };
+
+    wrapper.win.addEventListener("mousemove", onWinMove, true);
+    wrapper.win.addEventListener("mouseup", onWinUp, true);
+    anchor.register(() => {
+      wrapper.win.removeEventListener("mousemove", onWinMove, true);
+      wrapper.win.removeEventListener("mouseup", onWinUp, true);
+    });
+
+    for (const [section, editor] of editors) {
+      const originalReorderKey = editor.reorderKey;
+      editor.reorderKey = function (entry, index) {
+        const target = drop;
+        drop = null;
+        if (!target) return originalReorderKey.call(this, entry, index);
+        moveProperty(section, target.section, entry.key, target.index);
+      };
+    }
+  }
+
+  // Hängt key aus dem Block from in den Block to um, dort an Position index.
+  // Führt das Ziel den Namen bereits (innerhalb eines Blocks muss er eindeutig
+  // bleiben), werden beide zusammengelegt: der bestehende Eintrag behält
+  // Position, Wert und Floating-Markierung, nur ein leerer Wert wird aus der
+  // gezogenen Property gefüllt - dieselbe Regel wie bei mergeSubtypes
+  // (subtypes.js) und renameInStore (property-rename-sync.js).
+  async function moveProperty(from, to, key, index) {
+    const source = stores.get(from);
+    const target = stores.get(to);
+    if (!source || !target || from === to) return;
+
+    const sourceFrontmatter = { ...source.getFrontmatter() };
+    const value = sourceFrontmatter[key];
+    const wasFloating = source.getFloating().includes(key);
+    delete sourceFrontmatter[key];
+    source.setFrontmatter(sourceFrontmatter);
+    source.setFloating(source.getFloating().filter((k) => k !== key));
+
+    const targetFrontmatter = target.getFrontmatter();
+    const existing = Object.keys(targetFrontmatter).find((k) => k.toLowerCase() === key.toLowerCase());
+    if (existing !== undefined) {
+      if (isEmptyValue(targetFrontmatter[existing])) target.setFrontmatter({ ...targetFrontmatter, [existing]: value });
+    } else {
+      const keys = Object.keys(targetFrontmatter);
+      const at = Math.max(0, Math.min(index, keys.length));
+      const next = {};
+      for (const k of keys.slice(0, at)) next[k] = targetFrontmatter[k];
+      next[key] = value;
+      for (const k of keys.slice(at)) next[k] = targetFrontmatter[k];
+      target.setFrontmatter(next);
+      if (wasFloating) target.setFloating([...target.getFloating(), key]);
+    }
+
+    await view.plugin.saveSettings();
+    // Rendert u. a. diese Detailansicht neu (siehe registerTypView) - die
+    // Blöcke entstehen dabei samt Editoren frisch aus den Einstellungen.
+    view.plugin.refreshTypColors?.();
+  }
 }
 
 module.exports = { mountFrontmatterBlocks };

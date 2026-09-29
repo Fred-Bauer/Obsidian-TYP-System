@@ -642,6 +642,20 @@ body.fred-typ-block-dragging * {
   margin-bottom: 0;
 }
 
+/* Beide nur während eines Zeilen-Drags (siehe registerPropertyDrag in
+   frontmatter-blocks.js). Der Abstandhalter ist ein leeres Zusatzkind der
+   Zeilenliste: Obsidian startet seinen Drag sonst gar nicht, wenn ein Block
+   nur eine einzige Zeile hat. Der Platzhalter zeigt im Zielblock die
+   Einfügestelle - die Darstellung selbst kommt aus Obsidians eigener Klasse
+   .drag-ghost-hidden, hier fehlt nur die Höhe, da er keinen Inhalt hat. */
+.fred-typ-drag-spacer {
+  height: 0;
+}
+
+.fred-typ-drag-placeholder {
+  box-sizing: border-box;
+}
+
 .fred-typ-block .metadata-properties {
   padding: 0;
 }

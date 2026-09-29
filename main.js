@@ -1568,7 +1568,7 @@ var require_type_frontmatter_editor = __commonJS({
 var require_frontmatter_blocks = __commonJS({
   "src/frontmatter-blocks.js"(exports2, module2) {
     var { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore } = require_type_frontmatter_editor();
-    var { getSectionOrder } = require_subtypes();
+    var { getSectionOrder, isEmptyValue } = require_subtypes();
     function isGrabTarget(target) {
       if (target.closest(".clickable-icon, .fred-typ-subtype-color-dot, [contenteditable='true'], input, textarea")) return false;
       return !target.closest(".metadata-property");
@@ -1578,6 +1578,7 @@ var require_frontmatter_blocks = __commonJS({
       const sections = getSectionOrder(view.plugin.settings, type);
       const editors = /* @__PURE__ */ new Map();
       const blockEls = /* @__PURE__ */ new Map();
+      const stores = /* @__PURE__ */ new Map();
       const api = {
         // Alle Editor-Instanzen in Block-Reihenfolge - typ-view.js hängt sie als
         // Component-Children ein und baut sie vor jedem Neuaufbau wieder ab.
@@ -1607,9 +1608,11 @@ var require_frontmatter_blocks = __commonJS({
           cls: "fred-typ-block" + (isSub ? " fred-typ-frontmatter-block fred-typ-subtype-block" : "")
         });
         blockEls.set(section, blockEl);
+        blockEl.fredSection = section;
         const header = blockEl.createDiv({ cls: "fred-typ-frontmatter-header fred-typ-section-header" });
         header.toggleClass("fred-typ-section-sub", isSub);
         const store = section === null ? typeStore(view.plugin, type) : subtypeStore(view.plugin, type, section);
+        stores.set(section, store);
         const editor = mountFrontmatterEditor(view, blockEl, store, {
           onShiftFocus: (step) => focusNeighbor(section, step)
         });
@@ -1689,7 +1692,120 @@ var require_frontmatter_blocks = __commonJS({
         win.addEventListener("mouseup", onUp);
         win.addEventListener("keydown", onKey, true);
       }
+      registerPropertyDrag();
       return api;
+      function registerPropertyDrag() {
+        const anchor = api.editors[0];
+        if (!anchor || sections.length < 2) return;
+        let drag = null;
+        let drop = null;
+        const sectionAt = (clientY) => sections.find((section) => {
+          const rect = blockEls.get(section).getBoundingClientRect();
+          return clientY >= rect.top && clientY <= rect.bottom;
+        });
+        const clearPlaceholder = () => {
+          drag.placeholder?.remove();
+          drag.placeholder = null;
+          drag.rowEl.style.removeProperty("display");
+          drag.target = null;
+        };
+        wrapper.addEventListener(
+          "mousedown",
+          (event) => {
+            if (event.button !== 0) return;
+            const rowEl = event.target.closest(".metadata-property-icon")?.closest(".metadata-property");
+            const section = rowEl?.closest(".fred-typ-block")?.fredSection;
+            const editor = section === void 0 ? null : editors.get(section);
+            const key = editor?.rendered.find((row) => row.containerEl === rowEl)?.entry.key;
+            if (!key) return;
+            drag = {
+              section,
+              key,
+              rowEl,
+              // Jetzt schon gemessen: sobald die Zeile für den Platzhalter
+              // ausgeblendet ist, liefert offsetHeight 0.
+              height: rowEl.offsetHeight,
+              spacer: editor.propertyListEl.createDiv({ cls: "fred-typ-drag-spacer" }),
+              placeholder: null,
+              target: null
+            };
+            drop = null;
+          },
+          true
+        );
+        const onWinMove = (event) => {
+          if (!drag) return;
+          const target = sectionAt(event.clientY);
+          if (target === void 0 || target === drag.section) {
+            if (drag.placeholder) clearPlaceholder();
+            return;
+          }
+          const list = editors.get(target).propertyListEl;
+          if (!drag.placeholder) {
+            drag.rowEl.style.display = "none";
+            drag.placeholder = createDiv({ cls: "metadata-property drag-ghost-hidden fred-typ-drag-placeholder" });
+            drag.placeholder.style.height = `${drag.height}px`;
+          }
+          const rows = [...list.children].filter((el) => el !== drag.placeholder && el !== drag.spacer);
+          const before = rows.find((el) => {
+            const rect = el.getBoundingClientRect();
+            return event.clientY < rect.top + rect.height / 2;
+          });
+          drag.target = { section: target, index: before ? rows.indexOf(before) : rows.length };
+          list.insertBefore(drag.placeholder, before ?? null);
+        };
+        const onWinUp = () => {
+          if (!drag) return;
+          const { spacer, placeholder, rowEl, target } = drag;
+          drag = null;
+          drop = target;
+          placeholder?.remove();
+          rowEl.style.removeProperty("display");
+          wrapper.win.setTimeout(() => spacer.remove(), 0);
+        };
+        wrapper.win.addEventListener("mousemove", onWinMove, true);
+        wrapper.win.addEventListener("mouseup", onWinUp, true);
+        anchor.register(() => {
+          wrapper.win.removeEventListener("mousemove", onWinMove, true);
+          wrapper.win.removeEventListener("mouseup", onWinUp, true);
+        });
+        for (const [section, editor] of editors) {
+          const originalReorderKey = editor.reorderKey;
+          editor.reorderKey = function(entry, index) {
+            const target = drop;
+            drop = null;
+            if (!target) return originalReorderKey.call(this, entry, index);
+            moveProperty(section, target.section, entry.key, target.index);
+          };
+        }
+      }
+      async function moveProperty(from, to, key, index) {
+        const source = stores.get(from);
+        const target = stores.get(to);
+        if (!source || !target || from === to) return;
+        const sourceFrontmatter = { ...source.getFrontmatter() };
+        const value = sourceFrontmatter[key];
+        const wasFloating = source.getFloating().includes(key);
+        delete sourceFrontmatter[key];
+        source.setFrontmatter(sourceFrontmatter);
+        source.setFloating(source.getFloating().filter((k) => k !== key));
+        const targetFrontmatter = target.getFrontmatter();
+        const existing = Object.keys(targetFrontmatter).find((k) => k.toLowerCase() === key.toLowerCase());
+        if (existing !== void 0) {
+          if (isEmptyValue(targetFrontmatter[existing])) target.setFrontmatter({ ...targetFrontmatter, [existing]: value });
+        } else {
+          const keys = Object.keys(targetFrontmatter);
+          const at = Math.max(0, Math.min(index, keys.length));
+          const next = {};
+          for (const k of keys.slice(0, at)) next[k] = targetFrontmatter[k];
+          next[key] = value;
+          for (const k of keys.slice(at)) next[k] = targetFrontmatter[k];
+          target.setFrontmatter(next);
+          if (wasFloating) target.setFloating([...target.getFloating(), key]);
+        }
+        await view.plugin.saveSettings();
+        view.plugin.refreshTypColors?.();
+      }
     }
     module2.exports = { mountFrontmatterBlocks };
   }

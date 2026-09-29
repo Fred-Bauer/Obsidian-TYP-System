@@ -8,13 +8,16 @@ function normalizeSubtypeName(raw) {
 }
 
 // Registrierte SUBTYPen je TYP (settings.typeSubtypes):
-//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...] } } }
+//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...], shortcuts: {...} } } }
 // Ein Subtyp gehört immer zu genau einem TYP; derselbe Name darf aber (als
 // eigenständiger Subtyp) auch unter einem anderen TYP vorkommen. Die
 // Reihenfolge der Schlüssel ist die Anzeigereihenfolge der Blöcke in der
 // TYP-Detailansicht, stets unterhalb des TYP-Frontmatters. frontmatter
 // ergänzt bzw. überschreibt das TYP-Frontmatter des TYPs, floatingKeys wie
-// typeFloatingKeys.
+// typeFloatingKeys, shortcuts wie typeShortcuts (siehe shortcuts.js) - je Key
+// des Blocks ein Shortcut-Record, der Wert des Keys bleibt dabei als
+// Rückfallwert stehen. Bestandsdaten führen shortcuts noch nicht, Leser müssen
+// es daher als optional behandeln.
 //
 // Derselbe Key darf in mehreren Blöcken eines TYPs stehen (nur innerhalb
 // EINES Blocks ist er zwangsläufig eindeutig):
@@ -47,7 +50,7 @@ function ensureSubtype(settings, type, subtype) {
   if (!settings.typeSubtypes) settings.typeSubtypes = {};
   if (!settings.typeSubtypes[type]) settings.typeSubtypes[type] = {};
   const byName = settings.typeSubtypes[type];
-  if (!byName[subtype]) byName[subtype] = { frontmatter: {}, floatingKeys: [] };
+  if (!byName[subtype]) byName[subtype] = { frontmatter: {}, floatingKeys: [], shortcuts: {} };
   return byName[subtype];
 }
 
@@ -148,6 +151,9 @@ function mergeTypeSubtypes(settings, source, target) {
       if (key === "" || targetLower.has(key.toLowerCase())) continue;
       targetData.frontmatter[key] = value;
       if (sourceData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
+      // Der Shortcut hängt am Key und wandert deshalb mit ihm mit.
+      const shortcut = sourceData.shortcuts?.[key];
+      if (shortcut) (targetData.shortcuts ??= {})[key] = shortcut;
     }
   }
   delete settings.typeSubtypes[source];
@@ -210,6 +216,9 @@ function mergeSubtypes(settings, type, source, target) {
       targetData.frontmatter[key] = value;
       targetKeys.set(key.toLowerCase(), key);
       if (sourceData.floatingKeys.includes(key) && !targetData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
+      // Der Shortcut hängt am Key und wandert deshalb mit ihm mit.
+      const shortcut = sourceData.shortcuts?.[key];
+      if (shortcut) (targetData.shortcuts ??= {})[key] = shortcut;
     } else if (isEmptyValue(targetData.frontmatter[existing])) {
       targetData.frontmatter[existing] = value;
     }

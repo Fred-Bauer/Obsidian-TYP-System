@@ -48,6 +48,16 @@ function renameInStore(store, oldKey, newKey) {
         : floating.map((key) => (key === sourceKey ? newKey : key))
     );
   }
+
+  // Der Shortcut hängt am Key (siehe shortcuts.js) und wandert deshalb mit der
+  // Umbenennung mit - beim Zusammenlegen bleibt, wie bei Floating, der des
+  // Ziels maßgeblich.
+  const shortcuts = { ...store.getShortcuts() };
+  if (shortcuts[sourceKey]) {
+    if (targetKey === undefined) shortcuts[newKey] = shortcuts[sourceKey];
+    delete shortcuts[sourceKey];
+    store.setShortcuts(shortcuts);
+  }
   return true;
 }
 

@@ -1,7 +1,12 @@
-const { MarkdownView, Menu } = require("obsidian");
-const { isPlaceholderToken } = require("./frontmatter-placeholders");
-const { EDITOR_CLASS: PLACEHOLDER_SUGGEST_EDITOR_CLASS } = require("./placeholder-suggest");
+const { MarkdownView, Menu, setIcon } = require("obsidian");
+const { shortcutLabel } = require("./shortcuts");
+const { pickShortcut } = require("./shortcut-picker");
 const { getSubtype, ensureSubtype } = require("./subtypes");
+
+// Marker-Klasse am Container des TYP-Frontmatter-Editors - grenzt die
+// Shortcut-Regeln in styles.css auf diesen Editor ein, echte Notizen bleiben
+// unberührt.
+const EDITOR_CLASS = "fred-typ-frontmatter-editor";
 
 const TYP_PROPERTY = "TYP";
 const SUBTYP_PROPERTY = "SUBTYP";
@@ -23,10 +28,17 @@ function stripTypProperty(frontmatter) {
 }
 
 // Speicherort eines Frontmatter-Blocks in den Plugin-Settings - entweder das
-// TYP-Frontmatter eines TYPs (typeDefaultFrontmatter/typeFloatingKeys)
-// oder der Block eines seiner Subtypen (typeSubtypes, siehe subtypes.js).
-// Editor, Floating-Menü und Property-Umbenennung arbeiten ausschließlich über
-// diese Schnittstelle und müssen den Unterschied nicht kennen.
+// TYP-Frontmatter eines TYPs (typeDefaultFrontmatter/typeFloatingKeys/
+// typeShortcuts) oder der Block eines seiner Subtypen (typeSubtypes, siehe
+// subtypes.js). Editor, Floating-Menü, Shortcut-Knopf und Property-Umbenennung
+// arbeiten ausschließlich über diese Schnittstelle und müssen den Unterschied
+// nicht kennen.
+//
+// getShortcuts/setShortcuts halten die Shortcut-Records je Key ({ name },
+// siehe shortcuts.js) - bewusst neben dem Frontmatter statt darin, damit der
+// Wert der Property typrein bleibt und Obsidians natives Widget unangetastet
+// weiterläuft. Der Wert im Frontmatter bleibt bei gesetztem Shortcut als
+// Rückfallwert stehen.
 function typeStore(plugin, type) {
   return {
     type,
@@ -39,6 +51,11 @@ function typeStore(plugin, type) {
     setFloating: (keys) => {
       if (keys.length > 0) plugin.settings.typeFloatingKeys[type] = keys;
       else delete plugin.settings.typeFloatingKeys[type];
+    },
+    getShortcuts: () => plugin.settings.typeShortcuts[type] ?? {},
+    setShortcuts: (shortcuts) => {
+      if (Object.keys(shortcuts).length > 0) plugin.settings.typeShortcuts[type] = shortcuts;
+      else delete plugin.settings.typeShortcuts[type];
     },
   };
 }
@@ -54,6 +71,10 @@ function subtypeStore(plugin, type, subtype) {
     getFloating: () => getSubtype(plugin.settings, type, subtype)?.floatingKeys ?? [],
     setFloating: (keys) => {
       ensureSubtype(plugin.settings, type, subtype).floatingKeys = keys;
+    },
+    getShortcuts: () => getSubtype(plugin.settings, type, subtype)?.shortcuts ?? {},
+    setShortcuts: (shortcuts) => {
+      ensureSubtype(plugin.settings, type, subtype).shortcuts = shortcuts;
     },
   };
 }
@@ -302,9 +323,26 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
           editor.fredPendingFloatingAdd = false;
         }
       }
+      // Shortcuts hängen am Key, nicht am Wert (siehe shortcuts.js) und müssen
+      // deshalb genau wie die Floating-Markierung nachgeführt werden: bei einer
+      // Umbenennung mitwandern, bei einem Löschen mit verschwinden.
+      const shortcuts = { ...store.getShortcuts() };
+      if (removedKeys.length === 1 && addedKeys.length === 1) {
+        if (shortcuts[removedKeys[0]]) {
+          shortcuts[addedKeys[0]] = shortcuts[removedKeys[0]];
+          delete shortcuts[removedKeys[0]];
+        }
+      } else {
+        for (const key of removedKeys) delete shortcuts[key];
+      }
+
       store.setFrontmatter(frontmatter);
       store.setFloating(floating);
+      store.setShortcuts(shortcuts);
       view.plugin.saveSettings();
+      // Knopf/Chip an die neue Zeilen- und Key-Lage anpassen - eine gerade
+      // benannte Zeile bekommt so ihren Knopf, eine gelöschte nimmt ihren mit.
+      renderShortcutControls(view, editor, store);
       // Damit die Fett-/Kursiv-Markierung in bereits offenen Notizen dieses
       // Typs sofort mitzieht, wenn sich hier die Property-Liste ändert.
       view.plugin.refreshTypColors?.();
@@ -314,8 +352,8 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
   const editor = new EditorClass(app, owner);
   editor.fredPendingFloatingAdd = false;
   if (onShiftFocus) registerFocusChain(editor, onShiftFocus);
-  // Grenzt die Platzhalter-Vorschläge (placeholder-suggest.js) auf diesen Editor ein.
-  editor.containerEl.addClass(PLACEHOLDER_SUGGEST_EDITOR_CLASS);
+  // Grenzt die Shortcut-Regeln in styles.css auf diesen Editor ein.
+  editor.containerEl.addClass(EDITOR_CLASS);
   containerEl.appendChild(editor.containerEl);
   view.addChild(editor);
 
@@ -326,7 +364,7 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
   // dauerhaft entfernen, statt es nur für diese Session zu verstecken.
   if (hadTyp) view.plugin.saveSettings();
   editor.synchronize(defaults);
-  markPlaceholderRows(editor.containerEl, defaults);
+  renderShortcutControls(view, editor, store);
   // Erst nach dem ersten synchronize() versucht (siehe getPropertyRowClass) -
   // bei einem noch ganz leeren Typ hier ein No-Op, holt sich aber spätestens
   // beim nächsten Mounten eines nicht-leeren Typs (oder aus einer offenen
@@ -335,24 +373,114 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
   return editor;
 }
 
-// Obsidians eigenes "Type mismatch, expected ..."-Warnsymbol (oranges Dreieck,
-// Klasse "metadata-property-warning-icon", direktes Kind von ".metadata-property
-// [data-property-key]") vergleicht den erwarteten mit dem aus dem Wert erkannten
-// Typ - bei einem Platzhalter wie "{{today}}" in einer als "date" deklarierten
-// Property (siehe .obsidian/types.json) schlägt das zwangsläufig an, obwohl der
-// Wert erst über getTypeDefaults() aufgelöst wird. Obsidian blendet das Icon
-// über Inline-style.display ein (kein hidden-Attribut) - eine !important-Regel
-// in styles.css gewinnt trotzdem dagegen, die betroffene Zeile braucht dafür nur
-// diese Marker-Klasse.
-function markPlaceholderRows(containerEl, frontmatter) {
-  for (const row of containerEl.querySelectorAll(".metadata-property")) {
-    // data-property-key liegt bei Obsidian kleingeschrieben vor (z. B. "datum"),
-    // unsere frontmatter-Keys aber wie eingetragen (z. B. "Datum") - daher hier
-    // case-insensitiv gegen die echten Keys abgleichen statt direkt zu indizieren.
-    const rowKey = row.getAttribute("data-property-key");
-    const actualKey = Object.keys(frontmatter).find((k) => k.toLowerCase() === rowKey?.toLowerCase());
-    row.toggleClass("fred-typ-placeholder-value", isPlaceholderToken(frontmatter[actualKey]));
+const CHIP_CLASS = "fred-typ-shortcut-chip";
+const CHIP_TEXT_CLASS = "fred-typ-shortcut-chip-text";
+const BUTTON_CLASS = "fred-typ-shortcut-button";
+const ROW_CLASS = "fred-typ-has-shortcut";
+const WARNING_CLASS = "fred-typ-shortcut-blocked";
+
+// Knopf und Chip je Property-Zeile. Beide hängen am containerEl der Zeile, NICHT
+// an deren valueEl: Obsidians renderProperty() leert bei jedem Neu-Rendern nur
+// das valueEl, das containerEl dagegen nie - was hier einmal angehängt wurde,
+// überlebt also jeden Typ-/Wertwechsel von selbst, ohne Eingriff in Obsidians
+// Render-Pipeline.
+//
+// Der Knopf ist ein Umschalter: bei einer Zeile ohne Shortcut öffnet er die
+// Auswahl, bei einer Zeile mit Shortcut entfernt er ihn wieder. Zum WECHSELN
+// dient der Chip selbst. Sichtbar wird der Knopf per CSS nur bei Hover/Fokus
+// der Zeile (und dauerhaft, solange ein Shortcut gesetzt ist) - sonst stünde in
+// jeder Zeile dauerhaft ein Bedienelement, das die meisten nie brauchen.
+//
+// Das Ausblenden des Wertfelds bei gesetztem Shortcut macht allein CSS (siehe
+// ROW_CLASS in styles.css). Das native Widget rendert darunter unverändert
+// weiter - Setzen und Entfernen sind deshalb ein reiner Klassen-Umschalter und
+// brauchen kein renderProperty()/synchronize(), was hier ohnehin heikel wäre
+// (siehe Kommentar an stripTypProperty).
+function renderShortcutControls(view, editor, store) {
+  const shortcuts = store.getShortcuts();
+  for (const row of editor.rendered ?? []) {
+    const containerEl = row.containerEl;
+    const key = row.entry?.key ?? "";
+    // Eine noch namenlose Zeile kann keinen Shortcut tragen - es gäbe keinen
+    // Schlüssel, unter dem er stünde. Der Knopf erscheint, sobald ein Name
+    // eingetragen ist (jede Änderung läuft durch saveFrontmatter und damit
+    // erneut hier durch).
+    const record = key === "" ? null : shortcuts[key] ?? null;
+    containerEl.toggleClass(ROW_CLASS, !!record);
+
+    // Obsidians Warndreieck sitzt nicht im Flex-Fluss der Zeile, sondern ist
+    // absolut an deren rechtem Rand verankert (position: absolute,
+    // inset-inline-end/top/bottom: var(--size-2-1)) - also genau dort, wo auch
+    // der Shortcut-Knopf sitzt. Beide gleichzeitig hieße: übereinander. Zeigt
+    // die Zeile eine Typ-Warnung und ist KEIN Shortcut gesetzt, weicht der
+    // Knopf. Bei gesetztem Shortcut bleibt er dagegen stehen - er ist der
+    // einzige Weg, den Shortcut wieder loszuwerden -, und stattdessen weicht
+    // das Warndreieck (siehe styles.css): es bezieht sich dann auf den
+    // ausgeblendeten Rückfallwert, ist dort also gar nicht zu beheben.
+    const mismatch = !!row.typeInfo && row.typeInfo.expected !== row.typeInfo.inferred;
+    containerEl.toggleClass(WARNING_CLASS, mismatch && !record);
+
+    let buttonEl = containerEl.querySelector(`:scope > .${BUTTON_CLASS}`);
+    if (key === "") {
+      buttonEl?.remove();
+      containerEl.querySelector(`:scope > .${CHIP_CLASS}`)?.remove();
+      continue;
+    }
+    if (!buttonEl) {
+      buttonEl = containerEl.createDiv({ cls: `clickable-icon ${BUTTON_CLASS}` });
+      setIcon(buttonEl, "square-function");
+      // Den Key erst beim Klick aus der Zeile lesen, nicht hier einfangen -
+      // eine Umbenennung ändert row.entry.key, ohne die Zeile neu anzulegen.
+      buttonEl.addEventListener("click", () => {
+        if (store.getShortcuts()[row.entry?.key ?? ""]) removeShortcut(view, editor, store, row);
+        else openShortcutPicker(view, editor, store, row);
+      });
+    }
+    buttonEl.setAttr("aria-label", record ? "Shortcut entfernen" : "Shortcut setzen");
+
+    let chipEl = containerEl.querySelector(`:scope > .${CHIP_CLASS}`);
+    if (!record) {
+      chipEl?.remove();
+      continue;
+    }
+    if (!chipEl) {
+      chipEl = createEl("code", { cls: CHIP_CLASS });
+      // Der Text steckt in einem eigenen Span, weil der Chip selbst ein
+      // Flex-Container ist (vertikale Zentrierung wie beim echten Wertfeld) -
+      // text-overflow: ellipsis greift aber nur auf einem Block-Element, nicht
+      // auf dem Flex-Container darüber.
+      chipEl.createSpan({ cls: CHIP_TEXT_CLASS });
+      chipEl.setAttr("aria-label", "Shortcut ändern");
+      chipEl.addEventListener("click", () => openShortcutPicker(view, editor, store, row));
+      // Vor dem Knopf einhängen, damit die Zeile unabhängig von der
+      // Entstehungsreihenfolge immer "Name | Chip | Knopf" liest.
+      containerEl.insertBefore(chipEl, buttonEl);
+    }
+    chipEl.firstElementChild.setText(shortcutLabel(record));
   }
+}
+
+async function openShortcutPicker(view, editor, store, row) {
+  const key = row.entry?.key ?? "";
+  if (key === "") return;
+  const record = await pickShortcut(view.app, key, view.plugin.getShortcutScripts);
+  if (!record) return;
+  store.setShortcuts({ ...store.getShortcuts(), [key]: record });
+  saveShortcuts(view, editor, store);
+}
+
+function removeShortcut(view, editor, store, row) {
+  const key = row.entry?.key ?? "";
+  const shortcuts = { ...store.getShortcuts() };
+  if (!(key in shortcuts)) return;
+  delete shortcuts[key];
+  store.setShortcuts(shortcuts);
+  saveShortcuts(view, editor, store);
+}
+
+function saveShortcuts(view, editor, store) {
+  view.plugin.saveSettings();
+  renderShortcutControls(view, editor, store);
 }
 
 // Eigene, einfache "Property hinzufügen"-Funktion statt des internen
@@ -366,6 +494,10 @@ function addBlankProperty(editor) {
   if (!current.hasOwnProperty("")) {
     current[""] = null;
     editor.synchronize(current);
+    // synchronize() legt die neue Zeile an - die bestehenden Zeilen behalten
+    // dabei zwar ihren Knopf (er hängt am containerEl, siehe
+    // renderShortcutControls), die neue hat aber noch keinen.
+    renderShortcutControls(editor.owner.fredView, editor, editor.owner.fredStore);
   }
   editor.focusKey("");
   // Deckt den Fall ab, dass mountFrontmatterEditor() bei einem zu diesem

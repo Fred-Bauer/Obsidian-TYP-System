@@ -16,13 +16,13 @@ const { registerLinkColors } = require("./link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { registerPropertyRenameSync } = require("./property-rename-sync");
 const { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require("./frontmatter-sort");
-const { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require("./frontmatter-placeholders");
+const { resolveShortcuts, scriptNameOf } = require("./shortcuts");
 const {
   pickType: pickTypeModal,
   pickSubtype: pickSubtypeModal,
   pickTypeAndSubtype: pickTypeAndSubtypeModal,
 } = require("./type-picker");
-const { registerPlaceholderSuggest } = require("./placeholder-suggest");
+const { registerShortcutScripts } = require("./shortcut-scripts");
 
 // Migriert Bestandsinstallationen von der alten, separaten
 // typeFloatingFrontmatter-Liste (eigenes Dict je Typ, immer hinter der
@@ -55,7 +55,9 @@ module.exports = class TypSystemPlugin extends Plugin {
     // Umbenennungen über "All properties"/Bases auch ins TYP-Frontmatter
     // der Typen übernehmen (siehe property-rename-sync.js).
     registerPropertyRenameSync(this);
-    registerPlaceholderSuggest(this);
+    // Accessor auf die als "@typ-shortcut" markierten Templater-Skripte, für
+    // das Auswahl-Modal der Property-Zeilen (siehe shortcut-picker.js).
+    this.getShortcutScripts = registerShortcutScripts(this);
 
     // Separat gehalten (nicht nur Teil von refreshFns): die TYP-Detailansicht
     // braucht nach dem Mounten ihres TYP-Frontmatter-Editors gezielt nur
@@ -85,11 +87,16 @@ module.exports = class TypSystemPlugin extends Plugin {
   // Für _obsidian/templater-scripts/TYP.js: liefert die im TYP-View unter
   // "TYP-Frontmatter" hinterlegten Properties für den gegebenen TYP, damit
   // Templater sie beim Anlegen einer neuen Notiz übernehmen kann, statt sie dort
-  // ein zweites Mal zu pflegen. Werte wie "{{today}}" werden dabei erst hier
-  // aufgelöst (siehe frontmatter-placeholders.js), nicht schon beim Speichern -
-  // liefert also bei jedem Aufruf frisch berechnete Werte. Kopie statt direkter
-  // Referenz, damit ein Aufrufer die zurückgegebenen Werte gefahrlos mutieren
-  // kann, ohne die Plugin-Settings zu verändern.
+  // ein zweites Mal zu pflegen. Kopie statt direkter Referenz, damit ein
+  // Aufrufer die zurückgegebenen Werte gefahrlos mutieren kann, ohne die
+  // Plugin-Settings zu verändern.
+  //
+  // Properties mit einem festen Shortcut (today/now/created, siehe
+  // shortcuts.js) tragen dessen erst hier aufgelösten Wert - nicht den beim
+  // Setzen gültigen, es kommt also bei jedem Aufruf frisch Berechnetes heraus.
+  // Properties mit einem Skript-Shortcut tragen null: die kann nur Templater
+  // auflösen, TYP.js holt sie sich über getTypeShortcuts() (unten) und setzt
+  // sie selbst ein. Key und Position bleiben in beiden Fällen erhalten.
   //
   // includeFloating (Standard: false) lässt die als "Floating Property"
   // markierten Keys (typeFloatingKeys) in der Liste - anders als die übrigen
@@ -98,39 +105,95 @@ module.exports = class TypSystemPlugin extends Plugin {
   // orderedDefaultKeys in frontmatter-sort.js, sollen aber nur bei Bedarf
   // explizit von einem Templater-Skript abgegriffen werden).
   //
-  // file (optional) wird an resolveFrontmatterPlaceholders() durchgereicht -
-  // nur für den "{{created}}"-Platzhalter relevant, der das Erstellungsdatum
-  // der Ziel-Datei statt des Aufrufzeitpunkts liefert.
+  // file (optional) wird an resolveShortcuts() durchgereicht - nur für den
+  // "created"-Shortcut relevant, der das Erstellungsdatum der Ziel-Datei statt
+  // des Aufrufzeitpunkts liefert.
   //
   // subtype (optional): ergänzt das TYP-Frontmatter um den Block dieses
   // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter (wichtig für die
-  // Reihenfolge der tp.-Platzhalter). Steht ein Key in BEIDEN Blöcken, behält
-  // er die Position des TYP-Frontmatters, Wert und Floating-Markierung kommen
-  // aber vom Subtyp - eine Zuweisung auf einen bereits vorhandenen
+  // Reihenfolge der Skript-Shortcuts). Steht ein Key in BEIDEN Blöcken, behält
+  // er die Position des TYP-Frontmatters, Wert, Floating-Markierung und
+  // Shortcut kommen aber vom Subtyp - eine Zuweisung auf einen bereits vorhandenen
   // Objektschlüssel überschreibt ihn, ohne ihn zu verschieben. Die
   // Frontmatter-Sortierung muss dieselbe Regel verwenden, sonst würde sie
   // eine gerade angelegte Notiz sofort wieder umsortieren (siehe
   // orderedDefaultKeys in frontmatter-sort.js).
   getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+    return resolveShortcuts(defaults, shortcuts, { file, app: this.app });
+  }
+
+  // Gemeinsame Grundlage von getTypeDefaults() und getTypeShortcuts(): das
+  // TYP-Frontmatter des Typs, ergänzt um den Block des Subtyps. Ein Key, der in
+  // BEIDEN Blöcken steht, behält die Position des TYP-Frontmatters; Wert,
+  // Floating-Markierung UND Shortcut kommen dann vom Subtyp - auch "kein
+  // Shortcut" gilt dabei als Angabe des Subtyps und hebt den des TYPs auf.
+  collectBlocks(type, subtype, includeFloating) {
     const defaults = {};
+    const shortcuts = {};
     const isFloating = new Map();
-    const addBlock = (frontmatter, floatingKeys) => {
+    const addBlock = (frontmatter, floatingKeys, blockShortcuts) => {
       const actualKeys = new Map(Object.keys(defaults).map((key) => [key.toLowerCase(), key]));
       for (const [key, value] of Object.entries(frontmatter ?? {})) {
         if (key === "") continue;
         const target = actualKeys.get(key.toLowerCase()) ?? key;
         defaults[target] = value;
         isFloating.set(target, (floatingKeys ?? []).includes(key));
+        const record = (blockShortcuts ?? {})[key];
+        if (record) shortcuts[target] = record;
+        else delete shortcuts[target];
       }
     };
     const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
-    addBlock(this.settings.typeDefaultFrontmatter[type], this.settings.typeFloatingKeys[type]);
-    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
+    addBlock(
+      this.settings.typeDefaultFrontmatter[type],
+      this.settings.typeFloatingKeys[type],
+      this.settings.typeShortcuts[type]
+    );
+    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys, subtypeData.shortcuts);
 
     if (!includeFloating) {
-      for (const [key, floating] of isFloating) if (floating) delete defaults[key];
+      for (const [key, floating] of isFloating) {
+        if (!floating) continue;
+        delete defaults[key];
+        delete shortcuts[key];
+      }
     }
-    return resolveFrontmatterPlaceholders(defaults, file);
+    return { defaults, shortcuts };
+  }
+
+  // Für _obsidian/templater-scripts/TYP.js: die Properties dieses TYPs, deren
+  // Wert beim Anlegen einer Notiz von einem Templater-Skript kommt -
+  // { [Property]: { name, args, fallback } }, in der Reihenfolge des
+  // TYP-Frontmatters (die Skripte laufen nacheinander und sehen die Ergebnisse
+  // der jeweils früheren).
+  //
+  //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
+  //   args     Argumente für den Aufruf; derzeit immer leer, aber schon Teil
+  //            des Vertrags, damit Parameter später kein zweites Mal beide
+  //            Seiten ändern
+  //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
+  //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
+  //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
+  //            Skript, das bewusst null/"" liefert (z. B. ESC im Picker), ist
+  //            kein Fehlschlag - dort bleibt die Property leer.
+  //
+  // Die festen Shortcuts (today/now/created) tauchen hier NICHT auf: die löst
+  // das Plugin selbst auf und liefert sie fertig über getTypeDefaults(). Dessen
+  // Rückgabe führt die Skript-Keys mit dem Wert null - Key und Position bleiben
+  // also erhalten, nur der Wert kommt von hier.
+  //
+  // Optionen wie bei getTypeDefaults(); includeFloating standardmäßig false,
+  // damit für eine Floating Property nicht ungefragt ein Skript läuft.
+  getTypeShortcuts(type, { includeFloating = false, subtype = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+    const result = {};
+    for (const [key, record] of Object.entries(shortcuts)) {
+      const name = scriptNameOf(record.name);
+      if (name === null) continue;
+      result[key] = { name, args: record.args ?? [], fallback: defaults[key] ?? null };
+    }
+    return result;
   }
 
   // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
@@ -173,18 +236,6 @@ module.exports = class TypSystemPlugin extends Plugin {
   // damit eine neu angelegte Property nicht am Ende landet.
   placeProperty(frontmatter, key) {
     return placePropertyFor(this, frontmatter, key);
-  }
-
-  // Für _obsidian/templater-scripts/TYP.js: erkennt einen dynamischen
-  // "{{tp.<Skriptname>}}"-Platzhalter (siehe frontmatter-placeholders.js) in
-  // einem TYP-Frontmatter-Wert und liefert den referenzierten Skriptnamen,
-  // sonst null. Die eigentliche Auflösung (Aufruf von tp.user.<Skriptname>)
-  // kann nur Templater selbst übernehmen - das Plugin hat keinen tp-Zugriff,
-  // daher hier bewusst nur Erkennung statt Auflösung wie bei getTypeDefaults().
-  matchDynamicPlaceholder(value) {
-    if (typeof value !== "string") return null;
-    const match = value.match(DYNAMIC_PLACEHOLDER_PATTERN);
-    return match ? match[1].trim() : null;
   }
 
   // Für _obsidian/templater-scripts/TYP.js: die im TYP-View registrierten TYPen

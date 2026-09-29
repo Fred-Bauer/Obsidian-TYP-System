@@ -16,6 +16,13 @@ const DEFAULT_SETTINGS = {
   // gelieferten Frontmatters - Templater legt sie beim Anlegen einer Notiz also
   // nicht automatisch an (nur über den expliziten includeFloating-Parameter).
   typeFloatingKeys: {},
+  // Shortcuts je Key aus typeDefaultFrontmatter[type]:
+  //   { [TYP]: { [Property]: { name: "today" | "tp.<Skriptname>" } } }
+  // Bewusst NEBEN dem Frontmatter statt als dessen Wert - siehe die Begründung
+  // in shortcuts.js. Der Wert der Property bleibt dadurch typrein (Obsidians
+  // natives Widget bleibt unangetastet) und dient bei gesetztem Shortcut als
+  // Rückfallwert, falls dessen Templater-Skript fehlschlägt.
+  typeShortcuts: {},
   typeManual: {},
   // Registrierte Subtypen je TYP samt eigenem Frontmatter-Block, siehe subtypes.js.
   typeSubtypes: {},

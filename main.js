@@ -261,7 +261,7 @@ var require_subtypes = __commonJS({
       if (!settings.typeSubtypes) settings.typeSubtypes = {};
       if (!settings.typeSubtypes[type]) settings.typeSubtypes[type] = {};
       const byName = settings.typeSubtypes[type];
-      if (!byName[subtype]) byName[subtype] = { frontmatter: {}, floatingKeys: [] };
+      if (!byName[subtype]) byName[subtype] = { frontmatter: {}, floatingKeys: [], shortcuts: {} };
       return byName[subtype];
     }
     function moveTypeSubtypes(settings, oldType, newType) {
@@ -331,6 +331,8 @@ var require_subtypes = __commonJS({
           if (key === "" || targetLower.has(key.toLowerCase())) continue;
           targetData.frontmatter[key] = value;
           if (sourceData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
+          const shortcut = sourceData.shortcuts?.[key];
+          if (shortcut) (targetData.shortcuts ?? (targetData.shortcuts = {}))[key] = shortcut;
         }
       }
       delete settings.typeSubtypes[source];
@@ -370,6 +372,8 @@ var require_subtypes = __commonJS({
           targetData.frontmatter[key] = value;
           targetKeys.set(key.toLowerCase(), key);
           if (sourceData.floatingKeys.includes(key) && !targetData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
+          const shortcut = sourceData.shortcuts?.[key];
+          if (shortcut) (targetData.shortcuts ?? (targetData.shortcuts = {}))[key] = shortcut;
         } else if (isEmptyValue(targetData.frontmatter[existing])) {
           targetData.frontmatter[existing] = value;
         }
@@ -888,6 +892,13 @@ var require_settings = __commonJS({
       // gelieferten Frontmatters - Templater legt sie beim Anlegen einer Notiz also
       // nicht automatisch an (nur über den expliziten includeFloating-Parameter).
       typeFloatingKeys: {},
+      // Shortcuts je Key aus typeDefaultFrontmatter[type]:
+      //   { [TYP]: { [Property]: { name: "today" | "tp.<Skriptname>" } } }
+      // Bewusst NEBEN dem Frontmatter statt als dessen Wert - siehe die Begründung
+      // in shortcuts.js. Der Wert der Property bleibt dadurch typrein (Obsidians
+      // natives Widget bleibt unangetastet) und dient bei gesetztem Shortcut als
+      // Rückfallwert, falls dessen Templater-Skript fehlschlägt.
+      typeShortcuts: {},
       typeManual: {},
       // Registrierte Subtypen je TYP samt eigenem Frontmatter-Block, siehe subtypes.js.
       typeSubtypes: {},
@@ -1296,140 +1307,142 @@ var require_commands = __commonJS({
   }
 });
 
-// src/frontmatter-placeholders.js
-var require_frontmatter_placeholders = __commonJS({
-  "src/frontmatter-placeholders.js"(exports2, module2) {
+// src/shortcuts.js
+var require_shortcuts = __commonJS({
+  "src/shortcuts.js"(exports2, module2) {
     var { moment } = require("obsidian");
-    var FRONTMATTER_PLACEHOLDERS = [
+    var FIXED_SHORTCUTS = [
       {
-        token: "{{today}}",
+        name: "today",
         description: "Heutiges Datum (JJJJ-MM-TT)",
         resolve: () => moment().format("YYYY-MM-DD")
       },
       {
-        token: "{{now}}",
+        name: "now",
         description: "Aktuelles Datum mit Uhrzeit (JJJJ-MM-TT HH:mm)",
         resolve: () => moment().format("YYYY-MM-DD HH:mm")
       },
       {
-        // Anders als {{today}}/{{now}} nicht der Aufrufzeitpunkt, sondern das
+        // Anders als today/now nicht der Aufrufzeitpunkt, sondern das
         // Erstellungsdatum der jeweiligen Datei (file.stat.ctime) - braucht daher
-        // die Ziel-Datei als Kontext, siehe file-Parameter bei resolve() und
-        // resolveFrontmatterPlaceholders() unten. Ohne Datei (z. B. Aufruf ohne
-        // file-Option) Fallback auf den aktuellen Zeitpunkt.
-        token: "{{created}}",
+        // die Ziel-Datei als Kontext (file-Parameter, von getTypeDefaults
+        // durchgereicht). Ohne Datei Fallback auf den aktuellen Zeitpunkt.
+        name: "created",
         description: "Erstellungsdatum der Datei (JJJJ-MM-TT)",
         resolve: (file) => moment(file?.stat?.ctime ?? Date.now()).format("YYYY-MM-DD")
       }
     ];
-    var DYNAMIC_PLACEHOLDER_PATTERN2 = /^\{\{tp\.([^{}]*[^{}\s][^{}]*)\}\}$/;
-    var DYNAMIC_PLACEHOLDER_INFO = {
-      token: "{{tp.<Skriptname>}}",
-      description: "Ruft beim Anlegen tp.user.<Skriptname>(tp, newFile, ctx) auf \u2013 R\xFCckgabe: Wert dieser Property, oder ein Objekt mit Werten f\xFCr mehrere Properties des TYPs"
-    };
-    function resolveFrontmatterPlaceholders2(frontmatter, file) {
+    var SCRIPT_PREFIX = "tp.";
+    function findFixedShortcut(name) {
+      return FIXED_SHORTCUTS.find((shortcut) => shortcut.name === name) ?? null;
+    }
+    function scriptNameOf2(name) {
+      return typeof name === "string" && name.startsWith(SCRIPT_PREFIX) ? name.slice(SCRIPT_PREFIX.length) : null;
+    }
+    function isScriptShortcut(record) {
+      return scriptNameOf2(record?.name) !== null;
+    }
+    function shortcutLabel(record) {
+      if (!record?.name) return "";
+      const args = record.args ?? [];
+      return args.length > 0 ? `${record.name}: ${args.join(", ")}` : record.name;
+    }
+    function isListProperty(app, key) {
+      return app?.metadataTypeManager?.getTypeInfo?.(key)?.expected?.type === "multitext";
+    }
+    function resolveShortcuts2(frontmatter, shortcuts, { file, app } = {}) {
       const resolved = {};
       for (const [key, value] of Object.entries(frontmatter)) {
-        const placeholder = FRONTMATTER_PLACEHOLDERS.find((p) => p.token === value);
-        resolved[key] = placeholder ? placeholder.resolve(file) : value;
+        const record = shortcuts?.[key];
+        const fixed = record ? findFixedShortcut(record.name) : null;
+        if (fixed) {
+          const result = fixed.resolve(file);
+          resolved[key] = isListProperty(app, key) ? [result] : result;
+        } else if (isScriptShortcut(record)) {
+          resolved[key] = null;
+        } else {
+          resolved[key] = value;
+        }
       }
       return resolved;
     }
-    function isPlaceholderToken(value) {
-      if (typeof value !== "string") return false;
-      if (FRONTMATTER_PLACEHOLDERS.some((p) => p.token === value)) return true;
-      return DYNAMIC_PLACEHOLDER_PATTERN2.test(value);
-    }
     module2.exports = {
-      FRONTMATTER_PLACEHOLDERS,
-      DYNAMIC_PLACEHOLDER_PATTERN: DYNAMIC_PLACEHOLDER_PATTERN2,
-      DYNAMIC_PLACEHOLDER_INFO,
-      resolveFrontmatterPlaceholders: resolveFrontmatterPlaceholders2,
-      isPlaceholderToken
+      FIXED_SHORTCUTS,
+      SCRIPT_PREFIX,
+      findFixedShortcut,
+      scriptNameOf: scriptNameOf2,
+      isScriptShortcut,
+      shortcutLabel,
+      resolveShortcuts: resolveShortcuts2
     };
   }
 });
 
-// src/placeholder-suggest.js
-var require_placeholder_suggest = __commonJS({
-  "src/placeholder-suggest.js"(exports2, module2) {
-    var { TFile, Vault, debounce, normalizePath } = require("obsidian");
-    var { FRONTMATTER_PLACEHOLDERS } = require_frontmatter_placeholders();
-    var EDITOR_CLASS = "fred-typ-frontmatter-editor";
-    var SHORTCUT_MARKER = /^\s*(?:\/\/|\/\*|\*).*@typ-shortcut\b/m;
-    function registerPlaceholderSuggest2(plugin) {
-      const { app } = plugin;
-      const metadataCache = app.metadataCache;
-      let scriptFolder = null;
-      let shortcutScripts = [];
-      const currentScriptFolder = () => {
-        const folder = app.plugins.plugins["templater-obsidian"]?.settings?.user_scripts_folder;
-        return folder ? normalizePath(folder) : null;
-      };
-      const isInScriptFolder = (path) => !!scriptFolder && !!path && path.startsWith(scriptFolder + "/");
-      async function refreshScripts() {
-        const folderPath = currentScriptFolder();
-        scriptFolder = folderPath;
-        const folder = folderPath ? app.vault.getFolderByPath(folderPath) : null;
-        const files = [];
-        if (folder) {
-          Vault.recurseChildren(folder, (child) => {
-            if (child instanceof TFile && child.extension === "js") files.push(child);
-          });
-        }
-        const names = [];
-        for (const file of files) {
-          try {
-            if (SHORTCUT_MARKER.test(await app.vault.cachedRead(file))) names.push(file.basename);
-          } catch (e) {
-            console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
-          }
-        }
-        if (folderPath !== scriptFolder) return;
-        shortcutScripts = names.sort((a, b) => a.localeCompare(b));
+// src/shortcut-picker.js
+var require_shortcut_picker = __commonJS({
+  "src/shortcut-picker.js"(exports2, module2) {
+    var { FuzzySuggestModal } = require("obsidian");
+    var { FIXED_SHORTCUTS, SCRIPT_PREFIX, shortcutLabel } = require_shortcuts();
+    var ShortcutPickerModal = class extends FuzzySuggestModal {
+      constructor(app, key, items, resolve) {
+        super(app);
+        this.items = items;
+        this.resolve = resolve;
+        this.chosen = false;
+        this.setPlaceholder(`Shortcut f\xFCr \u201E${key}\u201C \u2013 ESC f\xFCr Abbruch`);
       }
-      const scheduleRefresh = debounce(refreshScripts, 300, true);
-      const onFileChange = (file, oldPath) => {
-        if (isInScriptFolder(file?.path) || isInScriptFolder(oldPath)) scheduleRefresh();
-      };
-      plugin.registerEvent(app.vault.on("create", onFileChange));
-      plugin.registerEvent(app.vault.on("modify", onFileChange));
-      plugin.registerEvent(app.vault.on("delete", onFileChange));
-      plugin.registerEvent(app.vault.on("rename", onFileChange));
-      app.workspace.onLayoutReady(refreshScripts);
-      const placeholderTokens = () => [
-        ...FRONTMATTER_PLACEHOLDERS.map((p) => p.token),
-        ...shortcutScripts.map((name) => `{{tp.${name}}}`)
-      ];
-      const original = metadataCache.getFrontmatterPropertyValuesForKey;
-      const wrapped = function(...args) {
-        const values = original.apply(this, args);
-        const inputEl = activeDocument.activeElement;
-        if (!inputEl?.closest?.(`.${EDITOR_CLASS}`)) return values;
-        const text = typeof inputEl.value === "string" ? inputEl.value : inputEl.textContent ?? "";
-        if (!text.trimStart().startsWith("{")) return values;
-        if (currentScriptFolder() !== scriptFolder) scheduleRefresh();
-        const tokens = placeholderTokens();
-        return [...tokens, ...values.filter((v) => !tokens.includes(v))];
-      };
-      metadataCache.getFrontmatterPropertyValuesForKey = wrapped;
-      plugin.register(() => {
-        if (metadataCache.getFrontmatterPropertyValuesForKey === wrapped) {
-          metadataCache.getFrontmatterPropertyValuesForKey = original;
-        }
+      getItems() {
+        return this.items;
+      }
+      // Fuzzy-Suche greift auch auf die Beschreibung, nicht nur auf den Namen -
+      // "Erstellungsdatum" findet so auch "created".
+      getItemText(item) {
+        const label = shortcutLabel(item);
+        return item.description ? `${label} ${item.description}` : label;
+      }
+      renderSuggestion(match, el) {
+        const item = match.item;
+        el.addClass("fred-typ-shortcut-suggestion");
+        el.createEl("code", { cls: "fred-typ-shortcut-suggestion-name", text: shortcutLabel(item) });
+        if (item.description) el.createSpan({ cls: "fred-typ-shortcut-suggestion-desc", text: item.description });
+      }
+      // Siehe TypPickerModal in type-picker.js: Obsidians selectSuggestion() ruft
+      // erst close() und danach erst onChooseItem() - "chosen" muss deshalb schon
+      // hier gesetzt werden, sonst löst das von close() ausgelöste onClose() das
+      // Promise vorzeitig mit null auf und die eigentliche Auswahl geht verloren.
+      selectSuggestion(item, evt) {
+        this.chosen = true;
+        super.selectSuggestion(item, evt);
+      }
+      onChooseItem(item) {
+        this.resolve({ name: item.name });
+      }
+      onClose() {
+        super.onClose();
+        if (!this.chosen) this.resolve(null);
+      }
+    };
+    function pickShortcut(app, key, getScripts) {
+      return new Promise((resolve) => {
+        const items = [
+          ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description })),
+          ...getScripts().map(({ name, description }) => ({ name: SCRIPT_PREFIX + name, description }))
+        ];
+        new ShortcutPickerModal(app, key, items, resolve).open();
       });
     }
-    module2.exports = { registerPlaceholderSuggest: registerPlaceholderSuggest2, EDITOR_CLASS };
+    module2.exports = { pickShortcut };
   }
 });
 
 // src/type-frontmatter-editor.js
 var require_type_frontmatter_editor = __commonJS({
   "src/type-frontmatter-editor.js"(exports2, module2) {
-    var { MarkdownView, Menu } = require("obsidian");
-    var { isPlaceholderToken } = require_frontmatter_placeholders();
-    var { EDITOR_CLASS: PLACEHOLDER_SUGGEST_EDITOR_CLASS } = require_placeholder_suggest();
+    var { MarkdownView, Menu, setIcon } = require("obsidian");
+    var { shortcutLabel } = require_shortcuts();
+    var { pickShortcut } = require_shortcut_picker();
     var { getSubtype: getSubtype2, ensureSubtype } = require_subtypes();
+    var EDITOR_CLASS = "fred-typ-frontmatter-editor";
     var TYP_PROPERTY2 = "TYP";
     var SUBTYP_PROPERTY2 = "SUBTYP";
     var SYSTEM_PROPERTIES = [TYP_PROPERTY2.toLowerCase(), SUBTYP_PROPERTY2.toLowerCase()];
@@ -1451,6 +1464,11 @@ var require_type_frontmatter_editor = __commonJS({
         setFloating: (keys) => {
           if (keys.length > 0) plugin.settings.typeFloatingKeys[type] = keys;
           else delete plugin.settings.typeFloatingKeys[type];
+        },
+        getShortcuts: () => plugin.settings.typeShortcuts[type] ?? {},
+        setShortcuts: (shortcuts) => {
+          if (Object.keys(shortcuts).length > 0) plugin.settings.typeShortcuts[type] = shortcuts;
+          else delete plugin.settings.typeShortcuts[type];
         }
       };
     }
@@ -1465,6 +1483,10 @@ var require_type_frontmatter_editor = __commonJS({
         getFloating: () => getSubtype2(plugin.settings, type, subtype)?.floatingKeys ?? [],
         setFloating: (keys) => {
           ensureSubtype(plugin.settings, type, subtype).floatingKeys = keys;
+        },
+        getShortcuts: () => getSubtype2(plugin.settings, type, subtype)?.shortcuts ?? {},
+        setShortcuts: (shortcuts) => {
+          ensureSubtype(plugin.settings, type, subtype).shortcuts = shortcuts;
         }
       };
     }
@@ -1607,16 +1629,27 @@ var require_type_frontmatter_editor = __commonJS({
               editor.fredPendingFloatingAdd = false;
             }
           }
+          const shortcuts = { ...store.getShortcuts() };
+          if (removedKeys.length === 1 && addedKeys.length === 1) {
+            if (shortcuts[removedKeys[0]]) {
+              shortcuts[addedKeys[0]] = shortcuts[removedKeys[0]];
+              delete shortcuts[removedKeys[0]];
+            }
+          } else {
+            for (const key of removedKeys) delete shortcuts[key];
+          }
           store.setFrontmatter(frontmatter);
           store.setFloating(floating);
+          store.setShortcuts(shortcuts);
           view.plugin.saveSettings();
+          renderShortcutControls(view, editor, store);
           view.plugin.refreshTypColors?.();
         }
       };
       const editor = new EditorClass(app, owner);
       editor.fredPendingFloatingAdd = false;
       if (onShiftFocus) registerFocusChain(editor, onShiftFocus);
-      editor.containerEl.addClass(PLACEHOLDER_SUGGEST_EDITOR_CLASS);
+      editor.containerEl.addClass(EDITOR_CLASS);
       containerEl.appendChild(editor.containerEl);
       view.addChild(editor);
       const defaults = store.getFrontmatter();
@@ -1624,16 +1657,73 @@ var require_type_frontmatter_editor = __commonJS({
       stripTypProperty(defaults);
       if (hadTyp) view.plugin.saveSettings();
       editor.synchronize(defaults);
-      markPlaceholderRows(editor.containerEl, defaults);
+      renderShortcutControls(view, editor, store);
       ensurePropertyMenuPatch(app, editor);
       return editor;
     }
-    function markPlaceholderRows(containerEl, frontmatter) {
-      for (const row of containerEl.querySelectorAll(".metadata-property")) {
-        const rowKey = row.getAttribute("data-property-key");
-        const actualKey = Object.keys(frontmatter).find((k) => k.toLowerCase() === rowKey?.toLowerCase());
-        row.toggleClass("fred-typ-placeholder-value", isPlaceholderToken(frontmatter[actualKey]));
+    var CHIP_CLASS = "fred-typ-shortcut-chip";
+    var CHIP_TEXT_CLASS = "fred-typ-shortcut-chip-text";
+    var BUTTON_CLASS = "fred-typ-shortcut-button";
+    var ROW_CLASS = "fred-typ-has-shortcut";
+    var WARNING_CLASS = "fred-typ-shortcut-blocked";
+    function renderShortcutControls(view, editor, store) {
+      const shortcuts = store.getShortcuts();
+      for (const row of editor.rendered ?? []) {
+        const containerEl = row.containerEl;
+        const key = row.entry?.key ?? "";
+        const record = key === "" ? null : shortcuts[key] ?? null;
+        containerEl.toggleClass(ROW_CLASS, !!record);
+        const mismatch = !!row.typeInfo && row.typeInfo.expected !== row.typeInfo.inferred;
+        containerEl.toggleClass(WARNING_CLASS, mismatch && !record);
+        let buttonEl = containerEl.querySelector(`:scope > .${BUTTON_CLASS}`);
+        if (key === "") {
+          buttonEl?.remove();
+          containerEl.querySelector(`:scope > .${CHIP_CLASS}`)?.remove();
+          continue;
+        }
+        if (!buttonEl) {
+          buttonEl = containerEl.createDiv({ cls: `clickable-icon ${BUTTON_CLASS}` });
+          setIcon(buttonEl, "square-function");
+          buttonEl.addEventListener("click", () => {
+            if (store.getShortcuts()[row.entry?.key ?? ""]) removeShortcut(view, editor, store, row);
+            else openShortcutPicker(view, editor, store, row);
+          });
+        }
+        buttonEl.setAttr("aria-label", record ? "Shortcut entfernen" : "Shortcut setzen");
+        let chipEl = containerEl.querySelector(`:scope > .${CHIP_CLASS}`);
+        if (!record) {
+          chipEl?.remove();
+          continue;
+        }
+        if (!chipEl) {
+          chipEl = createEl("code", { cls: CHIP_CLASS });
+          chipEl.createSpan({ cls: CHIP_TEXT_CLASS });
+          chipEl.setAttr("aria-label", "Shortcut \xE4ndern");
+          chipEl.addEventListener("click", () => openShortcutPicker(view, editor, store, row));
+          containerEl.insertBefore(chipEl, buttonEl);
+        }
+        chipEl.firstElementChild.setText(shortcutLabel(record));
       }
+    }
+    async function openShortcutPicker(view, editor, store, row) {
+      const key = row.entry?.key ?? "";
+      if (key === "") return;
+      const record = await pickShortcut(view.app, key, view.plugin.getShortcutScripts);
+      if (!record) return;
+      store.setShortcuts({ ...store.getShortcuts(), [key]: record });
+      saveShortcuts(view, editor, store);
+    }
+    function removeShortcut(view, editor, store, row) {
+      const key = row.entry?.key ?? "";
+      const shortcuts = { ...store.getShortcuts() };
+      if (!(key in shortcuts)) return;
+      delete shortcuts[key];
+      store.setShortcuts(shortcuts);
+      saveShortcuts(view, editor, store);
+    }
+    function saveShortcuts(view, editor, store) {
+      view.plugin.saveSettings();
+      renderShortcutControls(view, editor, store);
     }
     function addBlankProperty(editor) {
       if (!editor) return;
@@ -1641,6 +1731,7 @@ var require_type_frontmatter_editor = __commonJS({
       if (!current.hasOwnProperty("")) {
         current[""] = null;
         editor.synchronize(current);
+        renderShortcutControls(editor.owner.fredView, editor, editor.owner.fredStore);
       }
       editor.focusKey("");
       ensurePropertyMenuPatch(editor.owner.app, editor);
@@ -1871,9 +1962,13 @@ var require_frontmatter_blocks = __commonJS({
         const sourceFrontmatter = { ...source.getFrontmatter() };
         const value = sourceFrontmatter[key];
         const wasFloating = source.getFloating().includes(key);
+        const sourceShortcuts = { ...source.getShortcuts() };
+        const shortcut = sourceShortcuts[key] ?? null;
+        delete sourceShortcuts[key];
         delete sourceFrontmatter[key];
         source.setFrontmatter(sourceFrontmatter);
         source.setFloating(source.getFloating().filter((k) => k !== key));
+        source.setShortcuts(sourceShortcuts);
         const targetFrontmatter = target.getFrontmatter();
         const existing = Object.keys(targetFrontmatter).find((k) => k.toLowerCase() === key.toLowerCase());
         if (existing !== void 0) {
@@ -1887,6 +1982,7 @@ var require_frontmatter_blocks = __commonJS({
           for (const k of keys.slice(at)) next[k] = targetFrontmatter[k];
           target.setFrontmatter(next);
           if (wasFloating) target.setFloating([...target.getFloating(), key]);
+          if (shortcut) target.setShortcuts({ ...target.getShortcuts(), [key]: shortcut });
         }
         await view.plugin.saveSettings();
         view.plugin.refreshTypColors?.();
@@ -1969,7 +2065,6 @@ var require_typ_view = __commonJS({
       mergeSubtypes,
       renameSubtypeInNotes
     } = require_subtypes();
-    var { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require_frontmatter_placeholders();
     var { normalizeTypeName, compareTypes, sortTypesByMode: sortTypesByMode2 } = require_type_utils();
     var { typeKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
     var {
@@ -2263,6 +2358,10 @@ var require_typ_view = __commonJS({
                 if (this.plugin.settings.typeFloatingKeys[type] !== void 0) {
                   this.plugin.settings.typeFloatingKeys[value] = this.plugin.settings.typeFloatingKeys[type];
                   delete this.plugin.settings.typeFloatingKeys[type];
+                }
+                if (this.plugin.settings.typeShortcuts[type] !== void 0) {
+                  this.plugin.settings.typeShortcuts[value] = this.plugin.settings.typeShortcuts[type];
+                  delete this.plugin.settings.typeShortcuts[type];
                 }
                 if (this.ensureTypeManual()[type] !== void 0) {
                   this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
@@ -2636,7 +2735,7 @@ var require_typ_view = __commonJS({
         this.subtypeAddBtnEl.addEventListener("click", () => this.startAddSubtype(type));
         this.renderUnregisteredSubtypes(body, type, bucket);
         body.createDiv({ cls: "fred-typ-detail-separator" });
-        this.renderPlaceholderList(body);
+        this.renderFloatingHint(body);
         this.plugin.refreshFrontmatterHighlight?.();
       }
       // Überschrift eines Blocks (siehe frontmatter-blocks.js): Titel mit
@@ -3027,6 +3126,7 @@ var require_typ_view = __commonJS({
           delete this.plugin.settings.typeDescriptions[type];
           delete this.plugin.settings.typeDefaultFrontmatter[type];
           delete this.plugin.settings.typeFloatingKeys[type];
+          delete this.plugin.settings.typeShortcuts[type];
           delete this.ensureTypeManual()[type];
           deleteTypeSubtypes(this.plugin.settings, type);
           this.closeTypeSettings();
@@ -3070,6 +3170,10 @@ var require_typ_view = __commonJS({
           if (this.plugin.settings.typeFloatingKeys[type] !== void 0) {
             this.plugin.settings.typeFloatingKeys[value] = this.plugin.settings.typeFloatingKeys[type];
             delete this.plugin.settings.typeFloatingKeys[type];
+          }
+          if (this.plugin.settings.typeShortcuts[type] !== void 0) {
+            this.plugin.settings.typeShortcuts[value] = this.plugin.settings.typeShortcuts[type];
+            delete this.plugin.settings.typeShortcuts[type];
           }
           if (this.ensureTypeManual()[type] !== void 0) {
             this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
@@ -3153,6 +3257,7 @@ var require_typ_view = __commonJS({
         delete settings.typeDescriptions[source];
         delete settings.typeDefaultFrontmatter[source];
         delete settings.typeFloatingKeys[source];
+        delete settings.typeShortcuts[source];
         delete this.ensureTypeManual()[source];
         mergeTypeSubtypes(settings, source, target);
         this.selectedType = target;
@@ -3165,24 +3270,20 @@ var require_typ_view = __commonJS({
         const flairOuter = self.createDiv({ cls: "tree-item-flair-outer" });
         flairOuter.createSpan({ cls: "tree-item-flair", text: String(count) });
       }
-      // Rein informativ, unter dem TYP-Frontmatter-Editor: der Hinweistext
-      // erklärt den Floating-Property-Toggle (Rechtsklick auf eine Property oben,
-      // siehe ensurePropertyMenuPatch in type-frontmatter-editor.js), die Liste
-      // darunter die Platzhalter, die als Wert einer Property eingetragen werden
-      // können (z. B. bei "Datum" der Text "{{today}}") - getTypeDefaults()
-      // (main.js) löst sie bei jedem Abruf frisch auf, siehe
-      // frontmatter-placeholders.js. Bewusst ohne eigene Überschrift, da direkt
-      // unter der Property-Liste ohnehin klar ist, worauf sich beides bezieht.
-      renderPlaceholderList(parent) {
-        const section = parent.createDiv({ cls: "fred-typ-placeholder-section" });
-        const list = section.createDiv({ cls: "fred-typ-placeholder-list" });
-        for (const { token, description } of [...FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO]) {
-          const row = list.createDiv({ cls: "fred-typ-placeholder-row" });
-          row.createEl("code", { cls: "fred-typ-placeholder-token", text: token });
-          row.createSpan({ cls: "fred-typ-placeholder-desc", text: description });
-        }
+      // Rein informativ, unter dem TYP-Frontmatter-Editor: erklärt den
+      // Floating-Property-Toggle (Rechtsklick auf eine Property oben, siehe
+      // ensurePropertyMenuPatch in type-frontmatter-editor.js). Bewusst ohne eigene
+      // Überschrift, da direkt unter der Property-Liste ohnehin klar ist, worauf
+      // sich der Hinweis bezieht.
+      //
+      // Hier stand früher zusätzlich eine feste Liste der Platzhalter-Token. Die
+      // ist mit dem Shortcut-Knopf je Property-Zeile entfallen: dessen Auswahl
+      // (shortcut-picker.js) führt dieselben Token, aber am Ort der Verwendung,
+      // durchsuchbar und bei Skripten samt deren eigener Beschreibung.
+      renderFloatingHint(parent) {
+        const section = parent.createDiv({ cls: "fred-typ-floating-hint-section" });
         section.createDiv({
-          cls: "fred-typ-placeholder-hint",
+          cls: "fred-typ-floating-hint",
           text: "You can change a property to floating in the right-click menu."
         });
       }
@@ -4016,6 +4117,12 @@ var require_property_rename_sync = __commonJS({
           targetKey !== void 0 ? floating.filter((key) => key !== sourceKey) : floating.map((key) => key === sourceKey ? newKey : key)
         );
       }
+      const shortcuts = { ...store.getShortcuts() };
+      if (shortcuts[sourceKey]) {
+        if (targetKey === void 0) shortcuts[newKey] = shortcuts[sourceKey];
+        delete shortcuts[sourceKey];
+        store.setShortcuts(shortcuts);
+      }
       return true;
     }
     function renameInGlobalOrder(settings, oldKey, newKey) {
@@ -4269,6 +4376,60 @@ var require_type_picker = __commonJS({
   }
 });
 
+// src/shortcut-scripts.js
+var require_shortcut_scripts = __commonJS({
+  "src/shortcut-scripts.js"(exports2, module2) {
+    var { TFile, Vault, debounce, normalizePath } = require("obsidian");
+    var SHORTCUT_MARKER = /^[ \t]*(?:\/\/|\/\*|\*).*?@typ-shortcut\b[ \t]*(.*?)[ \t]*(?:\*\/)?[ \t]*$/m;
+    function registerShortcutScripts2(plugin) {
+      const { app } = plugin;
+      let scriptFolder = null;
+      let scripts = [];
+      const currentScriptFolder = () => {
+        const folder = app.plugins.plugins["templater-obsidian"]?.settings?.user_scripts_folder;
+        return folder ? normalizePath(folder) : null;
+      };
+      const isInScriptFolder = (path) => !!scriptFolder && !!path && path.startsWith(scriptFolder + "/");
+      async function refreshScripts() {
+        const folderPath = currentScriptFolder();
+        scriptFolder = folderPath;
+        const folder = folderPath ? app.vault.getFolderByPath(folderPath) : null;
+        const files = [];
+        if (folder) {
+          Vault.recurseChildren(folder, (child) => {
+            if (child instanceof TFile && child.extension === "js") files.push(child);
+          });
+        }
+        const found = [];
+        for (const file of files) {
+          try {
+            const match = (await app.vault.cachedRead(file)).match(SHORTCUT_MARKER);
+            if (match) found.push({ name: file.basename, description: match[1] ?? "" });
+          } catch (e) {
+            console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
+          }
+        }
+        if (folderPath !== scriptFolder) return;
+        scripts = found.sort((a, b) => a.name.localeCompare(b.name));
+      }
+      const scheduleRefresh = debounce(refreshScripts, 300, true);
+      const onFileChange = (file, oldPath) => {
+        if (isInScriptFolder(file?.path) || isInScriptFolder(oldPath)) scheduleRefresh();
+      };
+      plugin.registerEvent(app.vault.on("create", onFileChange));
+      plugin.registerEvent(app.vault.on("modify", onFileChange));
+      plugin.registerEvent(app.vault.on("delete", onFileChange));
+      plugin.registerEvent(app.vault.on("rename", onFileChange));
+      app.workspace.onLayoutReady(refreshScripts);
+      return () => {
+        if (currentScriptFolder() !== scriptFolder) scheduleRefresh();
+        return scripts;
+      };
+    }
+    module2.exports = { registerShortcutScripts: registerShortcutScripts2, SHORTCUT_MARKER };
+  }
+});
+
 // src/main.js
 var { Plugin } = require("obsidian");
 var { DEFAULT_SETTINGS, TypSystemSettingTab } = require_settings();
@@ -4288,13 +4449,13 @@ var { registerLinkColors } = require_link_colors();
 var { registerFrontmatterDefaultHighlight } = require_frontmatter_default_highlight();
 var { registerPropertyRenameSync } = require_property_rename_sync();
 var { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require_frontmatter_sort();
-var { resolveFrontmatterPlaceholders, DYNAMIC_PLACEHOLDER_PATTERN } = require_frontmatter_placeholders();
+var { resolveShortcuts, scriptNameOf } = require_shortcuts();
 var {
   pickType: pickTypeModal,
   pickSubtype: pickSubtypeModal,
   pickTypeAndSubtype: pickTypeAndSubtypeModal
 } = require_type_picker();
-var { registerPlaceholderSuggest } = require_placeholder_suggest();
+var { registerShortcutScripts } = require_shortcut_scripts();
 function migrateFloatingFrontmatter(settings) {
   if (!settings.typeFloatingFrontmatter) return;
   for (const [type, floating] of Object.entries(settings.typeFloatingFrontmatter)) {
@@ -4313,7 +4474,7 @@ module.exports = class TypSystemPlugin extends Plugin {
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
     registerPropertyRenameSync(this);
-    registerPlaceholderSuggest(this);
+    this.getShortcutScripts = registerShortcutScripts(this);
     this.refreshFrontmatterHighlight = registerFrontmatterDefaultHighlight(this);
     const refreshFns = [
       registerTypView(this),
@@ -4334,11 +4495,16 @@ module.exports = class TypSystemPlugin extends Plugin {
   // Für _obsidian/templater-scripts/TYP.js: liefert die im TYP-View unter
   // "TYP-Frontmatter" hinterlegten Properties für den gegebenen TYP, damit
   // Templater sie beim Anlegen einer neuen Notiz übernehmen kann, statt sie dort
-  // ein zweites Mal zu pflegen. Werte wie "{{today}}" werden dabei erst hier
-  // aufgelöst (siehe frontmatter-placeholders.js), nicht schon beim Speichern -
-  // liefert also bei jedem Aufruf frisch berechnete Werte. Kopie statt direkter
-  // Referenz, damit ein Aufrufer die zurückgegebenen Werte gefahrlos mutieren
-  // kann, ohne die Plugin-Settings zu verändern.
+  // ein zweites Mal zu pflegen. Kopie statt direkter Referenz, damit ein
+  // Aufrufer die zurückgegebenen Werte gefahrlos mutieren kann, ohne die
+  // Plugin-Settings zu verändern.
+  //
+  // Properties mit einem festen Shortcut (today/now/created, siehe
+  // shortcuts.js) tragen dessen erst hier aufgelösten Wert - nicht den beim
+  // Setzen gültigen, es kommt also bei jedem Aufruf frisch Berechnetes heraus.
+  // Properties mit einem Skript-Shortcut tragen null: die kann nur Templater
+  // auflösen, TYP.js holt sie sich über getTypeShortcuts() (unten) und setzt
+  // sie selbst ein. Key und Position bleiben in beiden Fällen erhalten.
   //
   // includeFloating (Standard: false) lässt die als "Floating Property"
   // markierten Keys (typeFloatingKeys) in der Liste - anders als die übrigen
@@ -4347,38 +4513,92 @@ module.exports = class TypSystemPlugin extends Plugin {
   // orderedDefaultKeys in frontmatter-sort.js, sollen aber nur bei Bedarf
   // explizit von einem Templater-Skript abgegriffen werden).
   //
-  // file (optional) wird an resolveFrontmatterPlaceholders() durchgereicht -
-  // nur für den "{{created}}"-Platzhalter relevant, der das Erstellungsdatum
-  // der Ziel-Datei statt des Aufrufzeitpunkts liefert.
+  // file (optional) wird an resolveShortcuts() durchgereicht - nur für den
+  // "created"-Shortcut relevant, der das Erstellungsdatum der Ziel-Datei statt
+  // des Aufrufzeitpunkts liefert.
   //
   // subtype (optional): ergänzt das TYP-Frontmatter um den Block dieses
   // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter (wichtig für die
-  // Reihenfolge der tp.-Platzhalter). Steht ein Key in BEIDEN Blöcken, behält
-  // er die Position des TYP-Frontmatters, Wert und Floating-Markierung kommen
-  // aber vom Subtyp - eine Zuweisung auf einen bereits vorhandenen
+  // Reihenfolge der Skript-Shortcuts). Steht ein Key in BEIDEN Blöcken, behält
+  // er die Position des TYP-Frontmatters, Wert, Floating-Markierung und
+  // Shortcut kommen aber vom Subtyp - eine Zuweisung auf einen bereits vorhandenen
   // Objektschlüssel überschreibt ihn, ohne ihn zu verschieben. Die
   // Frontmatter-Sortierung muss dieselbe Regel verwenden, sonst würde sie
   // eine gerade angelegte Notiz sofort wieder umsortieren (siehe
   // orderedDefaultKeys in frontmatter-sort.js).
   getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+    return resolveShortcuts(defaults, shortcuts, { file, app: this.app });
+  }
+  // Gemeinsame Grundlage von getTypeDefaults() und getTypeShortcuts(): das
+  // TYP-Frontmatter des Typs, ergänzt um den Block des Subtyps. Ein Key, der in
+  // BEIDEN Blöcken steht, behält die Position des TYP-Frontmatters; Wert,
+  // Floating-Markierung UND Shortcut kommen dann vom Subtyp - auch "kein
+  // Shortcut" gilt dabei als Angabe des Subtyps und hebt den des TYPs auf.
+  collectBlocks(type, subtype, includeFloating) {
     const defaults = {};
+    const shortcuts = {};
     const isFloating = /* @__PURE__ */ new Map();
-    const addBlock = (frontmatter, floatingKeys) => {
+    const addBlock = (frontmatter, floatingKeys, blockShortcuts) => {
       const actualKeys = new Map(Object.keys(defaults).map((key) => [key.toLowerCase(), key]));
       for (const [key, value] of Object.entries(frontmatter ?? {})) {
         if (key === "") continue;
         const target = actualKeys.get(key.toLowerCase()) ?? key;
         defaults[target] = value;
         isFloating.set(target, (floatingKeys ?? []).includes(key));
+        const record = (blockShortcuts ?? {})[key];
+        if (record) shortcuts[target] = record;
+        else delete shortcuts[target];
       }
     };
     const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
-    addBlock(this.settings.typeDefaultFrontmatter[type], this.settings.typeFloatingKeys[type]);
-    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
+    addBlock(
+      this.settings.typeDefaultFrontmatter[type],
+      this.settings.typeFloatingKeys[type],
+      this.settings.typeShortcuts[type]
+    );
+    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys, subtypeData.shortcuts);
     if (!includeFloating) {
-      for (const [key, floating] of isFloating) if (floating) delete defaults[key];
+      for (const [key, floating] of isFloating) {
+        if (!floating) continue;
+        delete defaults[key];
+        delete shortcuts[key];
+      }
     }
-    return resolveFrontmatterPlaceholders(defaults, file);
+    return { defaults, shortcuts };
+  }
+  // Für _obsidian/templater-scripts/TYP.js: die Properties dieses TYPs, deren
+  // Wert beim Anlegen einer Notiz von einem Templater-Skript kommt -
+  // { [Property]: { name, args, fallback } }, in der Reihenfolge des
+  // TYP-Frontmatters (die Skripte laufen nacheinander und sehen die Ergebnisse
+  // der jeweils früheren).
+  //
+  //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
+  //   args     Argumente für den Aufruf; derzeit immer leer, aber schon Teil
+  //            des Vertrags, damit Parameter später kein zweites Mal beide
+  //            Seiten ändern
+  //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
+  //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
+  //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
+  //            Skript, das bewusst null/"" liefert (z. B. ESC im Picker), ist
+  //            kein Fehlschlag - dort bleibt die Property leer.
+  //
+  // Die festen Shortcuts (today/now/created) tauchen hier NICHT auf: die löst
+  // das Plugin selbst auf und liefert sie fertig über getTypeDefaults(). Dessen
+  // Rückgabe führt die Skript-Keys mit dem Wert null - Key und Position bleiben
+  // also erhalten, nur der Wert kommt von hier.
+  //
+  // Optionen wie bei getTypeDefaults(); includeFloating standardmäßig false,
+  // damit für eine Floating Property nicht ungefragt ein Skript läuft.
+  getTypeShortcuts(type, { includeFloating = false, subtype = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+    const result = {};
+    for (const [key, record] of Object.entries(shortcuts)) {
+      const name = scriptNameOf(record.name);
+      if (name === null) continue;
+      result[key] = { name, args: record.args ?? [], fallback: defaults[key] ?? null };
+    }
+    return result;
   }
   // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
   // der Reihenfolge ihrer Blöcke, samt Notiz-Anzahl.
@@ -4416,17 +4636,6 @@ module.exports = class TypSystemPlugin extends Plugin {
   // damit eine neu angelegte Property nicht am Ende landet.
   placeProperty(frontmatter, key) {
     return placePropertyFor(this, frontmatter, key);
-  }
-  // Für _obsidian/templater-scripts/TYP.js: erkennt einen dynamischen
-  // "{{tp.<Skriptname>}}"-Platzhalter (siehe frontmatter-placeholders.js) in
-  // einem TYP-Frontmatter-Wert und liefert den referenzierten Skriptnamen,
-  // sonst null. Die eigentliche Auflösung (Aufruf von tp.user.<Skriptname>)
-  // kann nur Templater selbst übernehmen - das Plugin hat keinen tp-Zugriff,
-  // daher hier bewusst nur Erkennung statt Auflösung wie bei getTypeDefaults().
-  matchDynamicPlaceholder(value) {
-    if (typeof value !== "string") return null;
-    const match = value.match(DYNAMIC_PLACEHOLDER_PATTERN);
-    return match ? match[1].trim() : null;
   }
   // Für _obsidian/templater-scripts/TYP.js: die im TYP-View registrierten TYPen
   // samt ihrer dort gepflegten Beschreibung, statt sie aus _obsidian/Typen.md zu parsen -

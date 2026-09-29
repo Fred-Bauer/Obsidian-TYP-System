@@ -786,78 +786,134 @@ input[type="range"].fred-typ-subtype-color-slider {
   font-size: var(--font-ui-small);
 }
 
-.fred-typ-placeholder-section {
+.fred-typ-floating-hint-section {
   margin-top: var(--size-4-3);
 }
 
-/* margin-top statt/zusätzlich zu margin-bottom - der Hinweis steht im DOM
-   NACH der Platzhalter-Liste (siehe renderPlaceholderList), braucht also vor
-   sich selbst etwas Luft, um erkennbar von der Liste getrennt zu sein. */
-.fred-typ-placeholder-hint {
+.fred-typ-floating-hint {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
-  margin-top: var(--size-4-2);
   margin-bottom: var(--size-4-2);
 }
 
-/* Grid statt Flex-Column: alle Beschreibungen beginnen in derselben Spalte,
-   unabhängig von der Länge des jeweiligen Tokens in ihrer Zeile - macht die
-   Liste auf einen Blick als Tabelle lesbar. ".fred-typ-placeholder-row" bleibt
-   im Markup als Zeilen-Wrapper bestehen (siehe renderPlaceholderList), wird
-   hier aber via display: contents aufgelöst, damit Token und Beschreibung als
-   direkte Grid-Items in die zwei Spalten einsortiert werden. */
-.fred-typ-placeholder-list {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  column-gap: 8px;
-  row-gap: 2px;
+/* Zeilen des Shortcut-Auswahl-Modals (shortcut-picker.js): Token vorn in der
+   Akzentfarbe wie der Chip in der Property-Zeile, Beschreibung gedämpft
+   dahinter. */
+.fred-typ-shortcut-suggestion {
+  display: flex;
   align-items: baseline;
+  gap: 8px;
 }
 
-.fred-typ-placeholder-row {
-  display: contents;
-}
-
-.fred-typ-placeholder-token {
+.fred-typ-shortcut-suggestion-name {
   color: var(--text-accent);
-  font-size: var(--font-ui-smaller);
 }
 
-.fred-typ-placeholder-desc {
+.fred-typ-shortcut-suggestion-desc {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
 
-/* Unterdrückt Obsidians "Type mismatch"-Warnsymbol (siehe markPlaceholderRows()
-   in type-frontmatter-editor.js) bei Properties, deren Wert ein erkannter
-   Platzhalter ist (z. B. "{{today}}" bei einer als "date" deklarierten
-   Property) - der Typ-Vergleich schlägt dort zwangsläufig an, ist hier aber
-   nicht aussagekräftig, da der Wert erst über getTypeDefaults() aufgelöst wird.
+/* Shortcut-Knopf und -Chip je Property-Zeile des TYP-Frontmatter-Editors
+   (siehe renderShortcutControls in type-frontmatter-editor.js). Beide sind
+   direkte Kinder von ".metadata-property" und stehen damit im selben
+   Flex-Kontext wie Obsidians eigene Zeilenteile (Name, Wert, Warnsymbol).
+
+   Früher stand der Platzhalter als Text IM Wert der Property. Das kollidierte
+   mit Obsidians typisierten Eingabefeldern (Datum/Zahl/Checkbox) und brauchte
+   hier eine !important-Regel, um dessen "Type mismatch"-Warnsymbol zu
+   unterdrücken. Seit der Shortcut neben dem Wert liegt (siehe shortcuts.js),
+   entsteht gar kein Mismatch mehr - beide Regeln sind damit entfallen. */
+/* Exakt der Platz von Obsidians eigenem Warndreieck: das ist kein Flex-Item,
+   sondern absolut am rechten Rand der Zeile verankert (".metadata-property"
+   ist position: relative). Ein Knopf IM Fluss landet optisch an derselben
+   Stelle und schiebt sich unter das Dreieck - daher hier dieselbe Verankerung
+   und dieselbe Icon-Größe, kopiert aus Obsidians
+   ".metadata-property-warning-icon". Beide tragen ohnehin ".clickable-icon",
+   sind damit also Pixel für Pixel gleich groß. */
+.fred-typ-frontmatter-editor .fred-typ-shortcut-button {
+  --icon-size: var(--icon-s);
+  position: absolute;
+  inset-inline-end: var(--size-2-1);
+  top: var(--size-2-1);
+  bottom: var(--size-2-1);
+  display: flex;
+  align-items: center;
+  opacity: 0;
+}
+
+/* Zeile mit Typ-Warnung und ohne Shortcut: das Warndreieck hat Vorrang, der
+   Knopf verschwindet ganz (siehe WARNING_CLASS in type-frontmatter-editor.js). */
+.fred-typ-frontmatter-editor .fred-typ-shortcut-blocked .fred-typ-shortcut-button {
+  display: none;
+}
+
+/* Umgekehrt bei gesetztem Shortcut: dort bleibt der Knopf (nur über ihn lässt
+   sich der Shortcut entfernen), und das Warndreieck weicht - es bezöge sich
+   auf den ausgeblendeten Rückfallwert, wäre dort also gar nicht zu beheben.
    !important nötig, da Obsidian das Icon per Inline-style.display einblendet. */
-.fred-typ-placeholder-value .metadata-property-warning-icon {
+.fred-typ-frontmatter-editor .fred-typ-has-shortcut .metadata-property-warning-icon {
   display: none !important;
 }
 
-/* Wert selbst in derselben Farbe wie das Token in der Platzhalter-Legende
-   (siehe .fred-typ-placeholder-token) - macht auf einen Blick erkennbar, dass
-   z. B. "{{today}}" beabsichtigt und kein Tippfehler ist. Bei einem Typ-
-   Mismatch rendert Obsidian den Wert als contenteditable
-   ".metadata-input-longtext"-Div (per DevTools verifiziert) mit eigener
-   (nicht wichtiger) Farbregel - geerbte Farbe vom Container greift dagegen
-   nicht, da eine direkt am Element gesetzte Farbe immer vor geerbter Farbe
-   gewinnt, daher hier explizit mitadressiert. Bei einer als Liste deklarierten
-   Property (z. B. "Autor": "multitext" in types.json) validiert Obsidians
-   eigenes multitext-Widget einen einzelnen String-Wert anstandslos (kein Typ-
-   Mismatch, keine Warnung) und rendert ihn stattdessen als einzelnes
-   ".multi-select-pill" mit eigenem "multi-select-pill-content"-Div - andere
-   DOM-Struktur als bei Text/Datum, daher hier separat mitadressiert, sonst
-   bleibt der Wert dort ungefärbt. !important nötig, da Obsidians eigene
-   Regeln sonst gewinnen. */
-.fred-typ-placeholder-value .metadata-property-value,
-.fred-typ-placeholder-value .metadata-property-value .metadata-input-longtext,
-.fred-typ-placeholder-value .metadata-property-value input,
-.fred-typ-placeholder-value .metadata-property-value .multi-select-pill-content {
-  color: var(--text-accent) !important;
+/* Nur bei Hover/Fokus der Zeile sichtbar - sonst stünde in jeder Property
+   dauerhaft ein Bedienelement, das die meisten nie brauchen. Bei gesetztem
+   Shortcut bleibt er dagegen immer sichtbar: dort ist er der einzige Weg,
+   ihn wieder zu entfernen. :focus-within deckt die Tastaturbedienung mit ab. */
+.fred-typ-frontmatter-editor .metadata-property:hover .fred-typ-shortcut-button,
+.fred-typ-frontmatter-editor .metadata-property:focus-within .fred-typ-shortcut-button,
+.fred-typ-frontmatter-editor .fred-typ-has-shortcut .fred-typ-shortcut-button {
+  opacity: 1;
+}
+
+/* Der Chip tritt an die Stelle des Wertfelds und übernimmt dessen Platz in der
+   Zeile. Das native Widget rendert darunter unverändert weiter und wird nur
+   ausgeblendet - der dort eingetragene feste Wert bleibt damit als
+   Rückfallwert erhalten (siehe getTypeShortcuts in main.js). */
+.fred-typ-frontmatter-editor .fred-typ-has-shortcut .metadata-property-value {
+  display: none;
+}
+
+/* Der Chip tritt an die Stelle des Wertfelds und übernimmt deshalb dessen
+   Darstellung vollständig - über dieselben Variablen, die Obsidian bei
+   ".metadata-property-value" bzw. dessen Inputs selbst benutzt:
+
+     - border-bottom: Die Trennlinie einer Property-Zeile wird zur Hälfte vom
+       Key-Element und zur Hälfte vom WERT-Element gezeichnet. Da der Chip das
+       Wertfeld ausblendet, verschwände sonst genau dessen Hälfte. Über die
+       Variablen gezeichnet folgt sie auch den Hover-/Fokus-Varianten, die
+       Obsidian auf --metadata-divider-color legt.
+     - min-height/align-self/padding: sonst stünde die Zeile mit Chip niedriger
+       als die übrigen und der Text säße nicht auf einer Linie mit dem Namen.
+     - font-family/-size: der Chip ist ein <code> und läge sonst bei Monospace
+       und --code-size. Obsidian setzt beides INNERHALB des Wertfelds
+       (".metadata-property-value input"), was den Chip als dessen Geschwister
+       nie erreicht.
+
+   padding-inline-end hält den Text vom absolut verankerten Knopf frei (siehe
+   oben); der Platz wird dauerhaft reserviert, damit die Zeile beim Ein- und
+   Ausblenden des Knopfs nicht umbricht. */
+.fred-typ-frontmatter-editor .fred-typ-shortcut-chip {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--input-height);
+  padding: var(--metadata-input-padding);
+  padding-inline-end: calc(var(--icon-s) + var(--size-4-2));
+  font-family: var(--metadata-input-font);
+  font-size: var(--metadata-input-font-size);
+  color: var(--text-accent);
+  background-color: var(--metadata-input-background);
+  border-bottom: var(--metadata-divider-width) solid var(--metadata-divider-color);
+  cursor: pointer;
+}
+
+.fred-typ-frontmatter-editor .fred-typ-shortcut-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Property-Label (nicht der Wert) fett, wenn die Property Teil des

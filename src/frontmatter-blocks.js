@@ -320,8 +320,8 @@ function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderF
   // Hängt key aus dem Block from in den Block to um, dort an Position index.
   // Führt das Ziel den Namen bereits (innerhalb eines Blocks muss er eindeutig
   // bleiben), werden beide zusammengelegt: der bestehende Eintrag behält
-  // Position, Wert und Floating-Markierung, nur ein leerer Wert wird aus der
-  // gezogenen Property gefüllt - dieselbe Regel wie bei mergeSubtypes
+  // Position, Wert, Floating-Markierung und Shortcut, nur ein leerer Wert wird
+  // aus der gezogenen Property gefüllt - dieselbe Regel wie bei mergeSubtypes
   // (subtypes.js) und renameInStore (property-rename-sync.js).
   async function moveProperty(from, to, key, index) {
     const source = stores.get(from);
@@ -331,9 +331,15 @@ function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderF
     const sourceFrontmatter = { ...source.getFrontmatter() };
     const value = sourceFrontmatter[key];
     const wasFloating = source.getFloating().includes(key);
+    // Der Shortcut hängt am Key (siehe shortcuts.js) und zieht deshalb mit der
+    // Property in den anderen Block um.
+    const sourceShortcuts = { ...source.getShortcuts() };
+    const shortcut = sourceShortcuts[key] ?? null;
+    delete sourceShortcuts[key];
     delete sourceFrontmatter[key];
     source.setFrontmatter(sourceFrontmatter);
     source.setFloating(source.getFloating().filter((k) => k !== key));
+    source.setShortcuts(sourceShortcuts);
 
     const targetFrontmatter = target.getFrontmatter();
     const existing = Object.keys(targetFrontmatter).find((k) => k.toLowerCase() === key.toLowerCase());
@@ -348,6 +354,7 @@ function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderF
       for (const k of keys.slice(at)) next[k] = targetFrontmatter[k];
       target.setFrontmatter(next);
       if (wasFloating) target.setFloating([...target.getFloating(), key]);
+      if (shortcut) target.setShortcuts({ ...target.getShortcuts(), [key]: shortcut });
     }
 
     await view.plugin.saveSettings();

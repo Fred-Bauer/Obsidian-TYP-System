@@ -14,7 +14,6 @@ const {
   mergeSubtypes,
   renameSubtypeInNotes,
 } = require("./subtypes");
-const { FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO } = require("./frontmatter-placeholders");
 const { normalizeTypeName, compareTypes, sortTypesByMode } = require("./type-utils");
 const { typeKeyOf, propertyValue, setCanonicalProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 const {
@@ -410,6 +409,10 @@ class TypView extends ItemView {
             if (this.plugin.settings.typeFloatingKeys[type] !== undefined) {
               this.plugin.settings.typeFloatingKeys[value] = this.plugin.settings.typeFloatingKeys[type];
               delete this.plugin.settings.typeFloatingKeys[type];
+            }
+            if (this.plugin.settings.typeShortcuts[type] !== undefined) {
+              this.plugin.settings.typeShortcuts[value] = this.plugin.settings.typeShortcuts[type];
+              delete this.plugin.settings.typeShortcuts[type];
             }
             if (this.ensureTypeManual()[type] !== undefined) {
               this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
@@ -899,7 +902,7 @@ class TypView extends ItemView {
     this.renderUnregisteredSubtypes(body, type, bucket);
 
     body.createDiv({ cls: "fred-typ-detail-separator" });
-    this.renderPlaceholderList(body);
+    this.renderFloatingHint(body);
     // Fett-Markierung (siehe frontmatter-default-highlight.js) reagiert nur auf
     // Metadaten-/Layout-Events - das Öffnen dieser Detailansicht selbst löst
     // keins davon aus, daher hier direkt nach dem Mounten anstoßen. Bewusst
@@ -1368,6 +1371,7 @@ class TypView extends ItemView {
       delete this.plugin.settings.typeDescriptions[type];
       delete this.plugin.settings.typeDefaultFrontmatter[type];
       delete this.plugin.settings.typeFloatingKeys[type];
+      delete this.plugin.settings.typeShortcuts[type];
       delete this.ensureTypeManual()[type];
       deleteTypeSubtypes(this.plugin.settings, type);
       // Vor refreshTypColors() zurück zur Liste, aus demselben Grund wie beim
@@ -1422,6 +1426,10 @@ class TypView extends ItemView {
       if (this.plugin.settings.typeFloatingKeys[type] !== undefined) {
         this.plugin.settings.typeFloatingKeys[value] = this.plugin.settings.typeFloatingKeys[type];
         delete this.plugin.settings.typeFloatingKeys[type];
+      }
+      if (this.plugin.settings.typeShortcuts[type] !== undefined) {
+        this.plugin.settings.typeShortcuts[value] = this.plugin.settings.typeShortcuts[type];
+        delete this.plugin.settings.typeShortcuts[type];
       }
       if (this.ensureTypeManual()[type] !== undefined) {
         this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
@@ -1524,6 +1532,7 @@ class TypView extends ItemView {
     delete settings.typeDescriptions[source];
     delete settings.typeDefaultFrontmatter[source];
     delete settings.typeFloatingKeys[source];
+    delete settings.typeShortcuts[source];
     delete this.ensureTypeManual()[source];
     mergeTypeSubtypes(settings, source, target);
 
@@ -1540,24 +1549,20 @@ class TypView extends ItemView {
     flairOuter.createSpan({ cls: "tree-item-flair", text: String(count) });
   }
 
-  // Rein informativ, unter dem TYP-Frontmatter-Editor: der Hinweistext
-  // erklärt den Floating-Property-Toggle (Rechtsklick auf eine Property oben,
-  // siehe ensurePropertyMenuPatch in type-frontmatter-editor.js), die Liste
-  // darunter die Platzhalter, die als Wert einer Property eingetragen werden
-  // können (z. B. bei "Datum" der Text "{{today}}") - getTypeDefaults()
-  // (main.js) löst sie bei jedem Abruf frisch auf, siehe
-  // frontmatter-placeholders.js. Bewusst ohne eigene Überschrift, da direkt
-  // unter der Property-Liste ohnehin klar ist, worauf sich beides bezieht.
-  renderPlaceholderList(parent) {
-    const section = parent.createDiv({ cls: "fred-typ-placeholder-section" });
-    const list = section.createDiv({ cls: "fred-typ-placeholder-list" });
-    for (const { token, description } of [...FRONTMATTER_PLACEHOLDERS, DYNAMIC_PLACEHOLDER_INFO]) {
-      const row = list.createDiv({ cls: "fred-typ-placeholder-row" });
-      row.createEl("code", { cls: "fred-typ-placeholder-token", text: token });
-      row.createSpan({ cls: "fred-typ-placeholder-desc", text: description });
-    }
+  // Rein informativ, unter dem TYP-Frontmatter-Editor: erklärt den
+  // Floating-Property-Toggle (Rechtsklick auf eine Property oben, siehe
+  // ensurePropertyMenuPatch in type-frontmatter-editor.js). Bewusst ohne eigene
+  // Überschrift, da direkt unter der Property-Liste ohnehin klar ist, worauf
+  // sich der Hinweis bezieht.
+  //
+  // Hier stand früher zusätzlich eine feste Liste der Platzhalter-Token. Die
+  // ist mit dem Shortcut-Knopf je Property-Zeile entfallen: dessen Auswahl
+  // (shortcut-picker.js) führt dieselben Token, aber am Ort der Verwendung,
+  // durchsuchbar und bei Skripten samt deren eigener Beschreibung.
+  renderFloatingHint(parent) {
+    const section = parent.createDiv({ cls: "fred-typ-floating-hint-section" });
     section.createDiv({
-      cls: "fred-typ-placeholder-hint",
+      cls: "fred-typ-floating-hint",
       text: "You can change a property to floating in the right-click menu.",
     });
   }

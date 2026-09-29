@@ -1,0 +1,295 @@
+{
+  "types": [
+    "WIKI",
+    "NOTIZ",
+    "TEXT",
+    "VORTRAG",
+    "PROJEKT",
+    "ORGA",
+    "KONTAKT",
+    "MEDIA",
+    "TERMIN",
+    "EXTERN"
+  ],
+  "typeColors": {
+    "WIKI": "#ece879",
+    "ORGA": "#7878dc",
+    "NOTIZ": "#e6b464",
+    "TEXT": "#d29f46",
+    "MEDIA": "#64f064",
+    "VORTRAG": "#a0701c",
+    "PROJEKT": "#50e1aa",
+    "EXTERN": "#ffffff",
+    "KONTAKT": "#c85050"
+  },
+  "typeDescriptions": {
+    "WIKI": "Begriffsnotiz",
+    "ORGA": "Verwaltungsnotiz",
+    "NOTIZ": "Rohe Notiz, Überlegung, Rezept, ...",
+    "TEXT": "Auseinandersetzung mit den Thesen einer Quelle",
+    "VORTRAG": "Vortragsbezogene Notizen",
+    "PROJEKT": "..planung",
+    "EXTERN": "Webclippings oder AI-Generated Content",
+    "KONTAKT": "Importierte Kontakte"
+  },
+  "typeDefaultFrontmatter": {
+    "ORGA": {},
+    "TEXT": {
+      "Titel": null,
+      "Urheber": null,
+      "Erscheinung": null,
+      "Quelle": null
+    },
+    "NOTIZ": {},
+    "VORTRAG": {
+      "Urheber": null,
+      "Datum": null
+    },
+    "PROJEKT": {
+      "Beschreibung": null,
+      "Status": "Plan",
+      "Mandatory": null,
+      "Datum": null
+    },
+    "KONTAKT": {
+      "Vorname": null,
+      "Nachname": null,
+      "Geburtstag": null,
+      "Handynummer": null,
+      "E-Mail": null,
+      "Strasse": null,
+      "Stadt": null,
+      "Plz": null,
+      "Nation": null,
+      "Familie": null,
+      "Freunde": null
+    },
+    "MEDIA": {
+      "Titel": null,
+      "Urheber": null,
+      "Herausgeber": null,
+      "Erscheinung": null,
+      "ISBN": null,
+      "Staffel": null,
+      "Episode": null,
+      "Bewertung": null,
+      "Besitz": null
+    }
+  },
+  "typeFloatingKeys": {
+    "PROJEKT": [
+      "Datum",
+      "Mandatory"
+    ],
+    "KONTAKT": [
+      "Freunde",
+      "Nation",
+      "Plz",
+      "Strasse",
+      "E-Mail",
+      "Handynummer",
+      "Geburtstag",
+      "Familie"
+    ],
+    "MEDIA": [
+      "Herausgeber",
+      "ISBN",
+      "Besitz",
+      "Staffel",
+      "Episode"
+    ]
+  },
+  "typeShortcuts": {
+    "TEXT": {
+      "Quelle": {
+        "name": "tp.quelle"
+      }
+    },
+    "VORTRAG": {
+      "Datum": {
+        "name": "created"
+      },
+      "Urheber": {
+        "name": "tp.waehleAutorVortrag"
+      }
+    }
+  },
+  "typeManual": {
+    "EXTERN": false,
+    "KONTAKT": false
+  },
+  "typeSubtypes": {
+    "ORGA": {
+      "Lehrveranstaltung": {
+        "frontmatter": {
+          "Dozent": null,
+          "Studiengang": "[[JLU - Sozialwissenschaften]]",
+          "Semester": null,
+          "Modul": null,
+          "Prüfungsform": null,
+          "Zeit": null,
+          "Datum": null,
+          "Ort": null,
+          "Note": null,
+          "Bestanden": null
+        },
+        "floatingKeys": [
+          "Datum",
+          "Prüfungsform",
+          "Zeit"
+        ]
+      }
+    },
+    "MEDIA": {
+      "Buch": {
+        "frontmatter": {
+          "Besitz": false,
+          "Priorität": 5,
+          "Done": null
+        },
+        "floatingKeys": []
+      },
+      "Film": {
+        "frontmatter": {},
+        "floatingKeys": []
+      },
+      "Game": {
+        "frontmatter": {
+          "Besitz": false,
+          "Priorität": 5,
+          "Medienstatus": null
+        },
+        "floatingKeys": []
+      },
+      "Serie": {
+        "frontmatter": {
+          "Staffel": null,
+          "Episode": null,
+          "Priorität": 5
+        },
+        "floatingKeys": [
+          "Staffel",
+          "Episode"
+        ]
+      }
+    },
+    "NOTIZ": {
+      "Wiki": {
+        "frontmatter": {},
+        "floatingKeys": [],
+        "color": {
+          "h": 20,
+          "l": 20
+        }
+      },
+      "Text": {
+        "frontmatter": {
+          "Titel": null,
+          "Urheber": null,
+          "Erscheinung": null,
+          "Quelle": null
+        },
+        "floatingKeys": [],
+        "color": {
+          "h": -15,
+          "l": 0
+        },
+        "shortcuts": {
+          "Quelle": {
+            "name": "tp.quelle"
+          }
+        }
+      },
+      "Vortrag": {
+        "frontmatter": {
+          "Urheber": null,
+          "Datum": null
+        },
+        "floatingKeys": [],
+        "color": {
+          "h": -20,
+          "l": -20
+        },
+        "shortcuts": {
+          "Datum": {
+            "name": "created"
+          },
+          "Urheber": {
+            "name": "tp.waehleAutorVortrag"
+          }
+        }
+      }
+    }
+  },
+  "globalPropertyOrder": [
+    {
+      "kind": "property",
+      "name": "cssclasses"
+    },
+    {
+      "kind": "typValue"
+    },
+    {
+      "kind": "subtypValue"
+    },
+    {
+      "kind": "property",
+      "name": "aliases"
+    },
+    {
+      "kind": "typ"
+    },
+    {
+      "kind": "other"
+    },
+    {
+      "kind": "property",
+      "name": "tags"
+    }
+  ],
+  "noteTitleStyle": "badge",
+  "noteTitleBadgeColored": false,
+  "noteTitleBadgeLabel": "subtype",
+  "noteTitleBadgePosition": "block",
+  "noteTitleVerticalAlign": "bottom",
+  "typSortOrder": "manual",
+  "typListDescriptionEnabled": true,
+  "separateSubtypePicker": false,
+  "includeIgnoredFiles": false,
+  "graphTagColorEnabled": true,
+  "graphTagColor": "#1c1c1c",
+  "graphAttachmentColorEnabled": false,
+  "graphAttachmentColor": "#9f8632",
+  "subtypeColorRanges": {
+    "h": 35,
+    "s": 40,
+    "l": 40
+  },
+  "colorViews": {
+    "fileExplorer": true,
+    "graph": true,
+    "search": true,
+    "recentFiles": true,
+    "backlinks": true,
+    "bookmarks": true,
+    "fileExplorerSubtyp": true,
+    "graphSubtyp": true,
+    "searchSubtyp": true,
+    "recentFilesSubtyp": true,
+    "backlinksSubtyp": true,
+    "bookmarksSubtyp": true,
+    "linksSubtyp": true,
+    "typListSubtyp": true,
+    "noteTitleColorSubtyp": true,
+    "noteTitleMarkerSubtyp": false,
+    "frontmatterDefaults": true,
+    "frontmatterDefaultsSubtyp": true,
+    "typList": true,
+    "allProperties": true,
+    "allPropertiesSubtyp": true,
+    "noteTitleColor": true,
+    "links": true,
+    "noteTitle": false
+  },
+  "subtypeColorScale": 3
+}

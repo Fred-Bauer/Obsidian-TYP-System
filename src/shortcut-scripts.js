@@ -7,9 +7,36 @@ const { TFile, Vault, debounce, normalizePath } = require("obsidian");
 // fehlt er, steht dort nur der Skriptname. Ein abschließendes "*/" eines
 // Blockkommentars gehört nicht zur Beschreibung.
 //
-// Vor dem Marker ist beliebiger Kommentartext erlaubt (".*?"), damit bereits
-// markierte Skripte markiert bleiben, egal wie die Zeile sonst aufgebaut ist.
-const SHORTCUT_MARKER = /^[ \t]*(?:\/\/|\/\*|\*).*?@typ-shortcut\b[ \t]*(.*?)[ \t]*(?:\*\/)?[ \t]*$/m;
+// Optional folgt direkt auf den Marker eine Parameterliste in Klammern:
+//   // @typ-shortcut(ordner, jahr) Wählt eine PDF als Quelle
+// Das Skript deklariert damit selbst, welche Argumente es erwartet; das Modal
+// fragt genau diese Felder ab und übergibt sie als benanntes Objekt in
+// ctx.args (siehe TYP.js). Ein Skript OHNE Klammern verhält sich unverändert:
+// keine Abfrage, ein Klick - deshalb bleiben bestehende markierte Skripte von
+// der Erweiterung unberührt.
+//
+// Der Marker muss unmittelbar auf den Kommentarbeginn folgen. Eine frühere
+// Fassung erlaubte beliebigen Text davor - damit genügte aber schon eine
+// Erwähnung in Fließtext ("... in seinem @typ-shortcut-Marker deklariert"),
+// um ein Skript ungewollt als Shortcut anzubieten. Genau das ist TYP.js
+// passiert, dessen Kopfkommentar die Konvention beschreibt. Alle tatsächlich
+// markierten Skripte schreiben den Marker ohnehin an den Zeilenanfang.
+//
+// "\b" hinter dem Markernamen verhindert, dass "@typ-shortcutXYZ" anschlägt,
+// und stört die direkt folgende Klammer nicht (t -> ( ist eine Wortgrenze).
+const SHORTCUT_MARKER = /^[ \t]*(?:\/\/+|\/\*+|\*)[ \t]*@typ-shortcut\b(?:\(([^)]*)\))?[ \t]*(.*?)[ \t]*(?:\*\/)?[ \t]*$/m;
+
+// Parameternamen aus der Klammer des Markers, in Deklarationsreihenfolge.
+// Leere Einträge (z. B. bei "()" oder einem überzähligen Komma) fallen weg;
+// ein versehentlich doppelt genannter Name ergäbe zwei Eingabefelder, die
+// beide denselben Eintrag schreiben, und bleibt deshalb nur einmal stehen.
+function parseParams(raw) {
+  const namen = (raw ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name !== "");
+  return [...new Set(namen)];
+}
 
 // Hält die Liste der als Shortcut markierten Templater-Skripte aktuell.
 //
@@ -17,7 +44,7 @@ const SHORTCUT_MARKER = /^[ \t]*(?:\/\/|\/\*|\*).*?@typ-shortcut\b[ \t]*(.*?)[ \
 // Änderungen darin nachgeführt, statt sie erst beim Öffnen des Modals zu
 // ermitteln - so ist sie dort ohne Wartezeit da, und das Modal bleibt frei von
 // Dateizugriffen. Liefert einen Accessor auf die jeweils aktuelle Liste
-// ([{ name, description }], nach Namen sortiert).
+// ([{ name, params, description }], nach Namen sortiert).
 function registerShortcutScripts(plugin) {
   const { app } = plugin;
 
@@ -47,7 +74,7 @@ function registerShortcutScripts(plugin) {
     for (const file of files) {
       try {
         const match = (await app.vault.cachedRead(file)).match(SHORTCUT_MARKER);
-        if (match) found.push({ name: file.basename, description: match[1] ?? "" });
+        if (match) found.push({ name: file.basename, params: parseParams(match[1]), description: match[2] ?? "" });
       } catch (e) {
         console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
       }
@@ -76,4 +103,4 @@ function registerShortcutScripts(plugin) {
   };
 }
 
-module.exports = { registerShortcutScripts, SHORTCUT_MARKER };
+module.exports = { registerShortcutScripts, SHORTCUT_MARKER, parseParams };

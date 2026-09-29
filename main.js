@@ -1344,8 +1344,25 @@ var require_shortcuts = __commonJS({
     }
     function shortcutLabel(record) {
       if (!record?.name) return "";
-      const args = record.args ?? [];
-      return args.length > 0 ? `${record.name}: ${args.join(", ")}` : record.name;
+      const werte = Object.values(record.args ?? {}).filter((value) => value !== void 0);
+      return werte.length > 0 ? `${record.name}: ${werte.join(", ")}` : record.name;
+    }
+    function parseArgValue(raw) {
+      const text = String(raw ?? "").trim();
+      if (text === "") return void 0;
+      if (text === "true") return true;
+      if (text === "false") return false;
+      if (text === "null") return null;
+      if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
+      return text;
+    }
+    function buildArgs(params, eingaben) {
+      const args = {};
+      for (const name of params) {
+        const value = parseArgValue(eingaben[name]);
+        if (value !== void 0) args[name] = value;
+      }
+      return args;
     }
     function isListProperty(app, key) {
       return app?.metadataTypeManager?.getTypeInfo?.(key)?.expected?.type === "multitext";
@@ -1373,6 +1390,8 @@ var require_shortcuts = __commonJS({
       scriptNameOf: scriptNameOf2,
       isScriptShortcut,
       shortcutLabel,
+      parseArgValue,
+      buildArgs,
       resolveShortcuts: resolveShortcuts2
     };
   }
@@ -1381,8 +1400,11 @@ var require_shortcuts = __commonJS({
 // src/shortcut-picker.js
 var require_shortcut_picker = __commonJS({
   "src/shortcut-picker.js"(exports2, module2) {
-    var { FuzzySuggestModal } = require("obsidian");
-    var { FIXED_SHORTCUTS, SCRIPT_PREFIX, shortcutLabel } = require_shortcuts();
+    var { FuzzySuggestModal, Modal, Setting } = require("obsidian");
+    var { FIXED_SHORTCUTS, SCRIPT_PREFIX, buildArgs } = require_shortcuts();
+    function itemLabel(item) {
+      return item.params?.length > 0 ? `${item.name}(${item.params.join(", ")})` : item.name;
+    }
     var ShortcutPickerModal = class extends FuzzySuggestModal {
       constructor(app, key, items, resolve) {
         super(app);
@@ -1397,13 +1419,13 @@ var require_shortcut_picker = __commonJS({
       // Fuzzy-Suche greift auch auf die Beschreibung, nicht nur auf den Namen -
       // "Erstellungsdatum" findet so auch "created".
       getItemText(item) {
-        const label = shortcutLabel(item);
+        const label = itemLabel(item);
         return item.description ? `${label} ${item.description}` : label;
       }
       renderSuggestion(match, el) {
         const item = match.item;
         el.addClass("fred-typ-shortcut-suggestion");
-        el.createEl("code", { cls: "fred-typ-shortcut-suggestion-name", text: shortcutLabel(item) });
+        el.createEl("code", { cls: "fred-typ-shortcut-suggestion-name", text: itemLabel(item) });
         if (item.description) el.createSpan({ cls: "fred-typ-shortcut-suggestion-desc", text: item.description });
       }
       // Siehe TypPickerModal in type-picker.js: Obsidians selectSuggestion() ruft
@@ -1415,21 +1437,67 @@ var require_shortcut_picker = __commonJS({
         super.selectSuggestion(item, evt);
       }
       onChooseItem(item) {
-        this.resolve({ name: item.name });
+        this.resolve(item);
       }
       onClose() {
         super.onClose();
         if (!this.chosen) this.resolve(null);
       }
     };
-    function pickShortcut(app, key, getScripts) {
-      return new Promise((resolve) => {
-        const items = [
-          ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description })),
-          ...getScripts().map(({ name, description }) => ({ name: SCRIPT_PREFIX + name, description }))
-        ];
-        new ShortcutPickerModal(app, key, items, resolve).open();
-      });
+    var ShortcutArgsModal = class extends Modal {
+      constructor(app, item, vorhandene, resolve) {
+        super(app);
+        this.item = item;
+        this.resolve = resolve;
+        this.eingaben = {};
+        for (const name of item.params) {
+          const wert = vorhandene?.[name];
+          this.eingaben[name] = wert === void 0 || wert === null ? "" : String(wert);
+        }
+        this.bestaetigt = false;
+      }
+      onOpen() {
+        this.titleEl.setText(`Argumente f\xFCr ${this.item.name}`);
+        if (this.item.description) {
+          this.contentEl.createDiv({ cls: "fred-typ-shortcut-args-desc", text: this.item.description });
+        }
+        for (const name of this.item.params) {
+          new Setting(this.contentEl).setName(name).addText(
+            (text) => text.setValue(this.eingaben[name]).onChange((value) => {
+              this.eingaben[name] = value;
+            }).inputEl.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" && !event.isComposing) {
+                event.preventDefault();
+                this.uebernehmen();
+              }
+            })
+          );
+        }
+        new Setting(this.contentEl).addButton(
+          (button) => button.setButtonText("\xDCbernehmen").setCta().onClick(() => this.uebernehmen())
+        );
+      }
+      uebernehmen() {
+        this.bestaetigt = true;
+        this.close();
+      }
+      onClose() {
+        this.contentEl.empty();
+        this.resolve(this.bestaetigt ? buildArgs(this.item.params, this.eingaben) : null);
+      }
+    };
+    async function pickShortcut(app, key, getScripts, vorhanden = null) {
+      const items = [
+        ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description, params: [] })),
+        ...getScripts().map(({ name, params, description }) => ({ name: SCRIPT_PREFIX + name, params, description }))
+      ];
+      const item = await new Promise((resolve) => new ShortcutPickerModal(app, key, items, resolve).open());
+      if (!item) return null;
+      if (item.params.length === 0) return { name: item.name };
+      const vorbelegung = vorhanden?.name === item.name ? vorhanden.args : null;
+      const args = await new Promise((resolve) => new ShortcutArgsModal(app, item, vorbelegung, resolve).open());
+      if (args === null) return null;
+      return Object.keys(args).length > 0 ? { name: item.name, args } : { name: item.name };
     }
     module2.exports = { pickShortcut };
   }
@@ -1708,8 +1776,9 @@ var require_type_frontmatter_editor = __commonJS({
     async function openShortcutPicker(view, editor, store, row) {
       const key = row.entry?.key ?? "";
       if (key === "") return;
-      const record = await pickShortcut(view.app, key, view.plugin.getShortcutScripts);
+      const record = await pickShortcut(view.app, key, view.plugin.getShortcutScripts, store.getShortcuts()[key] ?? null);
       if (!record) return;
+      if (!Object.hasOwn(store.getFrontmatter(), key)) return;
       store.setShortcuts({ ...store.getShortcuts(), [key]: record });
       saveShortcuts(view, editor, store);
     }
@@ -4380,7 +4449,11 @@ var require_type_picker = __commonJS({
 var require_shortcut_scripts = __commonJS({
   "src/shortcut-scripts.js"(exports2, module2) {
     var { TFile, Vault, debounce, normalizePath } = require("obsidian");
-    var SHORTCUT_MARKER = /^[ \t]*(?:\/\/|\/\*|\*).*?@typ-shortcut\b[ \t]*(.*?)[ \t]*(?:\*\/)?[ \t]*$/m;
+    var SHORTCUT_MARKER = /^[ \t]*(?:\/\/+|\/\*+|\*)[ \t]*@typ-shortcut\b(?:\(([^)]*)\))?[ \t]*(.*?)[ \t]*(?:\*\/)?[ \t]*$/m;
+    function parseParams(raw) {
+      const namen = (raw ?? "").split(",").map((name) => name.trim()).filter((name) => name !== "");
+      return [...new Set(namen)];
+    }
     function registerShortcutScripts2(plugin) {
       const { app } = plugin;
       let scriptFolder = null;
@@ -4404,7 +4477,7 @@ var require_shortcut_scripts = __commonJS({
         for (const file of files) {
           try {
             const match = (await app.vault.cachedRead(file)).match(SHORTCUT_MARKER);
-            if (match) found.push({ name: file.basename, description: match[1] ?? "" });
+            if (match) found.push({ name: file.basename, params: parseParams(match[1]), description: match[2] ?? "" });
           } catch (e) {
             console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
           }
@@ -4426,7 +4499,7 @@ var require_shortcut_scripts = __commonJS({
         return scripts;
       };
     }
-    module2.exports = { registerShortcutScripts: registerShortcutScripts2, SHORTCUT_MARKER };
+    module2.exports = { registerShortcutScripts: registerShortcutScripts2, SHORTCUT_MARKER, parseParams };
   }
 });
 
@@ -4574,9 +4647,11 @@ module.exports = class TypSystemPlugin extends Plugin {
   // der jeweils früheren).
   //
   //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
-  //   args     Argumente für den Aufruf; derzeit immer leer, aber schon Teil
-  //            des Vertrags, damit Parameter später kein zweites Mal beide
-  //            Seiten ändern
+  //   args     Argumente für den Aufruf, benannt nach den Parametern, die das
+  //            Skript in seinem @typ-shortcut-Marker deklariert (siehe
+  //            shortcut-scripts.js). Leeres Objekt, wenn das Skript keine
+  //            deklariert oder keine gesetzt sind; ein leer gelassenes Feld
+  //            fehlt darin ganz, damit "args.x ?? fallback" im Skript trägt
   //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
   //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
   //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
@@ -4596,7 +4671,7 @@ module.exports = class TypSystemPlugin extends Plugin {
     for (const [key, record] of Object.entries(shortcuts)) {
       const name = scriptNameOf(record.name);
       if (name === null) continue;
-      result[key] = { name, args: record.args ?? [], fallback: defaults[key] ?? null };
+      result[key] = { name, args: { ...record.args ?? {} }, fallback: defaults[key] ?? null };
     }
     return result;
   }

@@ -814,6 +814,15 @@ input[type="range"].fred-typ-subtype-color-slider {
   font-size: var(--font-ui-smaller);
 }
 
+/* Beschreibung des Skripts über den Argument-Feldern (shortcut-picker.js) -
+   dieselbe Zeile, die in der Auswahl hinter dem Namen stand, damit man beim
+   Ausfüllen noch weiß, worum es geht. */
+.fred-typ-shortcut-args-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: var(--size-4-3);
+}
+
 /* Shortcut-Knopf und -Chip je Property-Zeile des TYP-Frontmatter-Editors
    (siehe renderShortcutControls in type-frontmatter-editor.js). Beide sind
    direkte Kinder von ".metadata-property" und stehen damit im selben
@@ -885,10 +894,14 @@ input[type="range"].fred-typ-subtype-color-slider {
        Obsidian auf --metadata-divider-color legt.
      - min-height/align-self/padding: sonst stünde die Zeile mit Chip niedriger
        als die übrigen und der Text säße nicht auf einer Linie mit dem Namen.
-     - font-family/-size: der Chip ist ein <code> und läge sonst bei Monospace
-       und --code-size. Obsidian setzt beides INNERHALB des Wertfelds
+     - font-size: Obsidian setzt sie INNERHALB des Wertfelds
        (".metadata-property-value input"), was den Chip als dessen Geschwister
-       nie erreicht.
+       nie erreicht; als <code> läge er sonst bei --code-size. Über die
+       Variable folgt er auch der kleineren Schrift, die Obsidian für
+       Metadaten in der Seitenleiste einstellt.
+     - font-family: bewusst Monospace statt --metadata-input-font, anders als
+       beim echten Wertfeld. Ein Shortcut ist ein Bezeichner ("tp.quelle"),
+       kein Fließtext - das hebt ihn zusätzlich zur Akzentfarbe ab.
 
    padding-inline-end hält den Text vom absolut verankerten Knopf frei (siehe
    oben); der Platz wird dauerhaft reserviert, damit die Zeile beim Ein- und
@@ -902,7 +915,7 @@ input[type="range"].fred-typ-subtype-color-slider {
   min-height: var(--input-height);
   padding: var(--metadata-input-padding);
   padding-inline-end: calc(var(--icon-s) + var(--size-4-2));
-  font-family: var(--metadata-input-font);
+  font-family: var(--font-monospace);
   font-size: var(--metadata-input-font-size);
   color: var(--text-accent);
   background-color: var(--metadata-input-background);

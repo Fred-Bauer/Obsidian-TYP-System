@@ -6,6 +6,10 @@ const { moment } = require("obsidian");
 // bzw. im shortcuts-Objekt des jeweiligen Subtyp-Blocks (siehe subtypes.js):
 //   { name: "today" }            - fester Token, hier im Plugin aufgelöst
 //   { name: "tp.<Skriptname>" }  - Templater-Skript, nur von TYP.js auflösbar
+//   { name: "tp.<Skriptname>", args: { ordner: "Literatur", jahr: 2024 } }
+//     - dasselbe mit Argumenten. Die Parameternamen deklariert das Skript
+//       selbst im @typ-shortcut-Marker (siehe shortcut-scripts.js); TYP.js
+//       reicht das Objekt als ctx.args durch. Feste Token haben nie Argumente.
 //
 // Warum daneben statt im Wert: Obsidians Property-Widget bestimmt das
 // Eingabefeld einer Zeile aus dem in types.json deklarierten Typ der Property
@@ -82,8 +86,38 @@ function isScriptShortcut(record) {
 // der Chip selbst samt Akzentfarbe. Die Klammern bildeten also nichts mehr ab.
 function shortcutLabel(record) {
   if (!record?.name) return "";
-  const args = record.args ?? [];
-  return args.length > 0 ? `${record.name}: ${args.join(", ")}` : record.name;
+  const werte = Object.values(record.args ?? {}).filter((value) => value !== undefined);
+  return werte.length > 0 ? `${record.name}: ${werte.join(", ")}` : record.name;
+}
+
+// Ein eingetipptes Argument in den Typ überführen, den es offensichtlich meint -
+// damit ein Skript "5" als Zahl und "true" als Boolean bekommt, statt jedes
+// Skript selbst casten zu lassen (wichtig z. B., wenn der Wert anschließend in
+// einer als Zahl deklarierten Property landet). Bewusst diese wenigen, klar
+// benannten Fälle statt JSON.parse: das würde bei "Literatur" ohnehin
+// scheitern und bei '"a"' etwas anderes liefern, als dort steht. Ein leeres
+// Feld heißt "nicht gesetzt" (undefined) und fällt aus dem Argument-Objekt
+// heraus, damit ein Skript sauber mit "args.jahr ?? fallback" arbeiten kann.
+function parseArgValue(raw) {
+  const text = String(raw ?? "").trim();
+  if (text === "") return undefined;
+  if (text === "true") return true;
+  if (text === "false") return false;
+  if (text === "null") return null;
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
+  return text;
+}
+
+// Eingaben (je Parametername ein Text) in das gespeicherte Argument-Objekt.
+// params gibt die Reihenfolge vor, damit shortcutLabel() sie in der vom Skript
+// deklarierten Folge anzeigt; leere Felder fehlen im Ergebnis ganz.
+function buildArgs(params, eingaben) {
+  const args = {};
+  for (const name of params) {
+    const value = parseArgValue(eingaben[name]);
+    if (value !== undefined) args[name] = value;
+  }
+  return args;
 }
 
 // Ob die Property laut types.json (bzw., falls dort nicht gesetzt, laut ihrer
@@ -128,5 +162,7 @@ module.exports = {
   scriptNameOf,
   isScriptShortcut,
   shortcutLabel,
+  parseArgValue,
+  buildArgs,
   resolveShortcuts,
 };

@@ -463,8 +463,18 @@ function renderShortcutControls(view, editor, store) {
 async function openShortcutPicker(view, editor, store, row) {
   const key = row.entry?.key ?? "";
   if (key === "") return;
-  const record = await pickShortcut(view.app, key, view.plugin.getShortcutScripts);
+  // Den bisherigen Record mitgeben: wird dasselbe Skript erneut gewählt, kommt
+  // der Argument-Dialog mit den aktuellen Werten vorbelegt - so ist der Klick
+  // auf den Chip auch der Weg, einzelne Argumente zu korrigieren.
+  const record = await pickShortcut(view.app, key, view.plugin.getShortcutScripts, store.getShortcuts()[key] ?? null);
   if (!record) return;
+  // Während der Dialog offen war, kann die Property verschwunden sein (etwa
+  // weil die Ansicht zwischenzeitlich neu aufgebaut wurde). Ohne diese Prüfung
+  // bliebe der Shortcut als Waise in den Einstellungen stehen: saveFrontmatter
+  // zieht nur Keys nach, die in derselben Bearbeitung entfernt wurden, und
+  // collectBlocks läuft ohnehin nur über vorhandene Frontmatter-Keys - der
+  // Eintrag wäre also unsichtbar und würde nie wieder aufgeräumt.
+  if (!Object.hasOwn(store.getFrontmatter(), key)) return;
   store.setShortcuts({ ...store.getShortcuts(), [key]: record });
   saveShortcuts(view, editor, store);
 }

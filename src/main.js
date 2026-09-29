@@ -169,9 +169,11 @@ module.exports = class TypSystemPlugin extends Plugin {
   // der jeweils früheren).
   //
   //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
-  //   args     Argumente für den Aufruf; derzeit immer leer, aber schon Teil
-  //            des Vertrags, damit Parameter später kein zweites Mal beide
-  //            Seiten ändern
+  //   args     Argumente für den Aufruf, benannt nach den Parametern, die das
+  //            Skript in seinem @typ-shortcut-Marker deklariert (siehe
+  //            shortcut-scripts.js). Leeres Objekt, wenn das Skript keine
+  //            deklariert oder keine gesetzt sind; ein leer gelassenes Feld
+  //            fehlt darin ganz, damit "args.x ?? fallback" im Skript trägt
   //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
   //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
   //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
@@ -191,7 +193,7 @@ module.exports = class TypSystemPlugin extends Plugin {
     for (const [key, record] of Object.entries(shortcuts)) {
       const name = scriptNameOf(record.name);
       if (name === null) continue;
-      result[key] = { name, args: record.args ?? [], fallback: defaults[key] ?? null };
+      result[key] = { name, args: { ...(record.args ?? {}) }, fallback: defaults[key] ?? null };
     }
     return result;
   }

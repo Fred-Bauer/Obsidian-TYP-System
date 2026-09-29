@@ -108,16 +108,80 @@ function parseArgValue(raw) {
   return text;
 }
 
+// Namen, die in der Parameterliste eines Markers für Werte stehen, die das
+// Plugin bzw. TYP.js selbst kennt - sie werden nicht abgefragt, sondern beim
+// Aufruf eingesetzt:
+//   newFile  die neu angelegte Notiz
+//   ctx      der Kontext { typ, subtyp, key, werte, danach, args }
+//   key      die Property, an der der Shortcut hängt. Erspart es, ihren Namen
+//            als Argument zu wiederholen - ein Skript wie relation.js, das
+//            sich seine Property sagen lässt, bekommt damit automatisch die
+//            richtige, auch wenn derselbe Shortcut an einer anderen Zeile
+//            sitzt.
+// "tp" steht immer als erstes Argument und muss nicht deklariert werden; wird
+// es trotzdem genannt, wird es übergangen, statt es ein zweites Mal zu
+// übergeben.
+const RESERVED_PARAMS = ["newFile", "ctx", "key"];
+
+// Die Parameter, für die das Modal ein Eingabefeld zeigt: alles, was nicht
+// reserviert ist. params === null (kein Klammerpaar am Marker) heißt
+// "herkömmlicher Aufruf", also ebenfalls keine Felder.
+function inputParams(params) {
+  return (params ?? []).filter((name) => name !== "tp" && !RESERVED_PARAMS.includes(name));
+}
+
 // Eingaben (je Parametername ein Text) in das gespeicherte Argument-Objekt.
 // params gibt die Reihenfolge vor, damit shortcutLabel() sie in der vom Skript
 // deklarierten Folge anzeigt; leere Felder fehlen im Ergebnis ganz.
 function buildArgs(params, eingaben) {
   const args = {};
-  for (const name of params) {
+  for (const name of inputParams(params)) {
     const value = parseArgValue(eingaben[name]);
     if (value !== undefined) args[name] = value;
   }
   return args;
+}
+
+// Aus der deklarierten Parameterliste die Argumente für den Aufruf
+// f(tp, ...hier) bauen - aufgerufen von TYP.js, das als einziges newFile und
+// ctx kennt.
+//
+// Ohne Klammern am Marker (params === null) bleibt es beim herkömmlichen
+// Aufruf f(tp, newFile, ctx). Sonst wird die Liste Eintrag für Eintrag
+// aufgelöst: reservierte Namen zu den übergebenen Werten, alle anderen zum
+// eingetippten Argument.
+//
+// Ein Punkt-Name ("options.typ") beschreibt kein eigenes Argument, sondern ein
+// FELD eines Objekt-Arguments: alle "options.*" sammeln sich zu einem einzigen
+// Objekt an der Position ihres ersten Vorkommens. Damit lassen sich auch
+// Skripte bedienen, deren Signatur ein Options-Objekt erwartet, ohne dass man
+// JSON in ein Eingabefeld tippen müsste. Nur eine Ebene tief - bei "a.b.c"
+// entstünde ein Feld, das wörtlich "b.c" heißt.
+function resolveCallArgs(params, args, reserved = {}) {
+  if (params === null || params === undefined) return [reserved.newFile, reserved.ctx];
+
+  const werte = [];
+  const objektPosition = new Map();
+  for (const name of params) {
+    if (name === "tp") continue;
+    if (RESERVED_PARAMS.includes(name)) {
+      werte.push(reserved[name]);
+      continue;
+    }
+    const punkt = name.indexOf(".");
+    if (punkt === -1) {
+      werte.push(args?.[name]);
+      continue;
+    }
+    const basis = name.slice(0, punkt);
+    if (!objektPosition.has(basis)) {
+      objektPosition.set(basis, werte.length);
+      werte.push({});
+    }
+    const wert = args?.[name];
+    if (wert !== undefined) werte[objektPosition.get(basis)][name.slice(punkt + 1)] = wert;
+  }
+  return werte;
 }
 
 // Ob die Property laut types.json (bzw., falls dort nicht gesetzt, laut ihrer
@@ -164,5 +228,8 @@ module.exports = {
   shortcutLabel,
   parseArgValue,
   buildArgs,
+  inputParams,
+  resolveCallArgs,
+  RESERVED_PARAMS,
   resolveShortcuts,
 };

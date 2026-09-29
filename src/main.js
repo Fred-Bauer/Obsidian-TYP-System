@@ -16,7 +16,7 @@ const { registerLinkColors } = require("./link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { registerPropertyRenameSync } = require("./property-rename-sync");
 const { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require("./frontmatter-sort");
-const { resolveShortcuts, scriptNameOf } = require("./shortcuts");
+const { resolveShortcuts, scriptNameOf, resolveCallArgs } = require("./shortcuts");
 const {
   pickType: pickTypeModal,
   pickSubtype: pickSubtypeModal,
@@ -169,11 +169,16 @@ module.exports = class TypSystemPlugin extends Plugin {
   // der jeweils früheren).
   //
   //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
-  //   args     Argumente für den Aufruf, benannt nach den Parametern, die das
-  //            Skript in seinem @typ-shortcut-Marker deklariert (siehe
-  //            shortcut-scripts.js). Leeres Objekt, wenn das Skript keine
-  //            deklariert oder keine gesetzt sind; ein leer gelassenes Feld
-  //            fehlt darin ganz, damit "args.x ?? fallback" im Skript trägt
+  //   params   die im @typ-shortcut-Marker deklarierte Parameterliste des
+  //            Skripts (siehe shortcut-scripts.js), oder null bei einem Marker
+  //            ohne Klammern. Sie stammt aus dem aktuellen Scan, nicht aus dem
+  //            gespeicherten Record - eine geänderte Deklaration wirkt also
+  //            sofort. TYP.js macht daraus mit resolveShortcutArgs() unten die
+  //            Argumentliste des Aufrufs
+  //   args     die eingetippten Argumente, benannt nach den nicht reservierten
+  //            Parametern. Leeres Objekt, wenn keine gesetzt sind; ein leer
+  //            gelassenes Feld fehlt darin ganz, damit "args.x ?? fallback"
+  //            im Skript trägt
   //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
   //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
   //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
@@ -189,13 +194,30 @@ module.exports = class TypSystemPlugin extends Plugin {
   // damit für eine Floating Property nicht ungefragt ein Skript läuft.
   getTypeShortcuts(type, { includeFloating = false, subtype = null } = {}) {
     const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+    const skripte = this.getShortcutScripts?.() ?? [];
     const result = {};
     for (const [key, record] of Object.entries(shortcuts)) {
       const name = scriptNameOf(record.name);
       if (name === null) continue;
-      result[key] = { name, args: { ...(record.args ?? {}) }, fallback: defaults[key] ?? null };
+      const skript = skripte.find((s) => s.name === name);
+      result[key] = {
+        name,
+        params: skript?.params ?? null,
+        args: { ...(record.args ?? {}) },
+        fallback: defaults[key] ?? null,
+      };
     }
     return result;
+  }
+
+  // Für _obsidian/templater-scripts/TYP.js: macht aus der Parameterliste eines
+  // Shortcuts die Argumente für den Aufruf tp.user.<name>(tp, ...) - siehe
+  // resolveCallArgs in shortcuts.js. Die Auflösung lebt hier statt in TYP.js,
+  // damit die Regeln (reservierte Namen, Punkt-Namen für Objekt-Argumente) nur
+  // an einer Stelle stehen; newFile und ctx kennt allerdings nur TYP.js und
+  // reicht sie deshalb herein.
+  resolveShortcutArgs(params, args, { newFile = null, ctx = null, key = null } = {}) {
+    return resolveCallArgs(params, args, { newFile, ctx, key });
   }
 
   // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in

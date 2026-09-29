@@ -1356,13 +1356,42 @@ var require_shortcuts = __commonJS({
       if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
       return text;
     }
+    var RESERVED_PARAMS = ["newFile", "ctx", "key"];
+    function inputParams(params) {
+      return (params ?? []).filter((name) => name !== "tp" && !RESERVED_PARAMS.includes(name));
+    }
     function buildArgs(params, eingaben) {
       const args = {};
-      for (const name of params) {
+      for (const name of inputParams(params)) {
         const value = parseArgValue(eingaben[name]);
         if (value !== void 0) args[name] = value;
       }
       return args;
+    }
+    function resolveCallArgs2(params, args, reserved = {}) {
+      if (params === null || params === void 0) return [reserved.newFile, reserved.ctx];
+      const werte = [];
+      const objektPosition = /* @__PURE__ */ new Map();
+      for (const name of params) {
+        if (name === "tp") continue;
+        if (RESERVED_PARAMS.includes(name)) {
+          werte.push(reserved[name]);
+          continue;
+        }
+        const punkt = name.indexOf(".");
+        if (punkt === -1) {
+          werte.push(args?.[name]);
+          continue;
+        }
+        const basis = name.slice(0, punkt);
+        if (!objektPosition.has(basis)) {
+          objektPosition.set(basis, werte.length);
+          werte.push({});
+        }
+        const wert = args?.[name];
+        if (wert !== void 0) werte[objektPosition.get(basis)][name.slice(punkt + 1)] = wert;
+      }
+      return werte;
     }
     function isListProperty(app, key) {
       return app?.metadataTypeManager?.getTypeInfo?.(key)?.expected?.type === "multitext";
@@ -1392,6 +1421,9 @@ var require_shortcuts = __commonJS({
       shortcutLabel,
       parseArgValue,
       buildArgs,
+      inputParams,
+      resolveCallArgs: resolveCallArgs2,
+      RESERVED_PARAMS,
       resolveShortcuts: resolveShortcuts2
     };
   }
@@ -1401,9 +1433,9 @@ var require_shortcuts = __commonJS({
 var require_shortcut_picker = __commonJS({
   "src/shortcut-picker.js"(exports2, module2) {
     var { FuzzySuggestModal, Modal, Setting } = require("obsidian");
-    var { FIXED_SHORTCUTS, SCRIPT_PREFIX, buildArgs } = require_shortcuts();
+    var { FIXED_SHORTCUTS, SCRIPT_PREFIX, buildArgs, inputParams } = require_shortcuts();
     function itemLabel(item) {
-      return item.params?.length > 0 ? `${item.name}(${item.params.join(", ")})` : item.name;
+      return item.params ? `${item.name}(${item.params.join(", ")})` : item.name;
     }
     var ShortcutPickerModal = class extends FuzzySuggestModal {
       constructor(app, key, items, resolve) {
@@ -1449,8 +1481,9 @@ var require_shortcut_picker = __commonJS({
         super(app);
         this.item = item;
         this.resolve = resolve;
+        this.felder = inputParams(item.params);
         this.eingaben = {};
-        for (const name of item.params) {
+        for (const name of this.felder) {
           const wert = vorhandene?.[name];
           this.eingaben[name] = wert === void 0 || wert === null ? "" : String(wert);
         }
@@ -1461,7 +1494,7 @@ var require_shortcut_picker = __commonJS({
         if (this.item.description) {
           this.contentEl.createDiv({ cls: "fred-typ-shortcut-args-desc", text: this.item.description });
         }
-        for (const name of this.item.params) {
+        for (const name of this.felder) {
           new Setting(this.contentEl).setName(name).addText(
             (text) => text.setValue(this.eingaben[name]).onChange((value) => {
               this.eingaben[name] = value;
@@ -1483,17 +1516,17 @@ var require_shortcut_picker = __commonJS({
       }
       onClose() {
         this.contentEl.empty();
-        this.resolve(this.bestaetigt ? buildArgs(this.item.params, this.eingaben) : null);
+        this.resolve(this.bestaetigt ? buildArgs(this.felder, this.eingaben) : null);
       }
     };
     async function pickShortcut(app, key, getScripts, vorhanden = null) {
       const items = [
-        ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description, params: [] })),
+        ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description, params: null })),
         ...getScripts().map(({ name, params, description }) => ({ name: SCRIPT_PREFIX + name, params, description }))
       ];
       const item = await new Promise((resolve) => new ShortcutPickerModal(app, key, items, resolve).open());
       if (!item) return null;
-      if (item.params.length === 0) return { name: item.name };
+      if (inputParams(item.params).length === 0) return { name: item.name };
       const vorbelegung = vorhanden?.name === item.name ? vorhanden.args : null;
       const args = await new Promise((resolve) => new ShortcutArgsModal(app, item, vorbelegung, resolve).open());
       if (args === null) return null;
@@ -4477,7 +4510,13 @@ var require_shortcut_scripts = __commonJS({
         for (const file of files) {
           try {
             const match = (await app.vault.cachedRead(file)).match(SHORTCUT_MARKER);
-            if (match) found.push({ name: file.basename, params: parseParams(match[1]), description: match[2] ?? "" });
+            if (match) {
+              found.push({
+                name: file.basename,
+                params: match[1] === void 0 ? null : parseParams(match[1]),
+                description: match[2] ?? ""
+              });
+            }
           } catch (e) {
             console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
           }
@@ -4522,7 +4561,7 @@ var { registerLinkColors } = require_link_colors();
 var { registerFrontmatterDefaultHighlight } = require_frontmatter_default_highlight();
 var { registerPropertyRenameSync } = require_property_rename_sync();
 var { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require_frontmatter_sort();
-var { resolveShortcuts, scriptNameOf } = require_shortcuts();
+var { resolveShortcuts, scriptNameOf, resolveCallArgs } = require_shortcuts();
 var {
   pickType: pickTypeModal,
   pickSubtype: pickSubtypeModal,
@@ -4647,11 +4686,16 @@ module.exports = class TypSystemPlugin extends Plugin {
   // der jeweils früheren).
   //
   //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
-  //   args     Argumente für den Aufruf, benannt nach den Parametern, die das
-  //            Skript in seinem @typ-shortcut-Marker deklariert (siehe
-  //            shortcut-scripts.js). Leeres Objekt, wenn das Skript keine
-  //            deklariert oder keine gesetzt sind; ein leer gelassenes Feld
-  //            fehlt darin ganz, damit "args.x ?? fallback" im Skript trägt
+  //   params   die im @typ-shortcut-Marker deklarierte Parameterliste des
+  //            Skripts (siehe shortcut-scripts.js), oder null bei einem Marker
+  //            ohne Klammern. Sie stammt aus dem aktuellen Scan, nicht aus dem
+  //            gespeicherten Record - eine geänderte Deklaration wirkt also
+  //            sofort. TYP.js macht daraus mit resolveShortcutArgs() unten die
+  //            Argumentliste des Aufrufs
+  //   args     die eingetippten Argumente, benannt nach den nicht reservierten
+  //            Parametern. Leeres Objekt, wenn keine gesetzt sind; ein leer
+  //            gelassenes Feld fehlt darin ganz, damit "args.x ?? fallback"
+  //            im Skript trägt
   //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
   //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
   //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
@@ -4667,13 +4711,29 @@ module.exports = class TypSystemPlugin extends Plugin {
   // damit für eine Floating Property nicht ungefragt ein Skript läuft.
   getTypeShortcuts(type, { includeFloating = false, subtype = null } = {}) {
     const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+    const skripte = this.getShortcutScripts?.() ?? [];
     const result = {};
     for (const [key, record] of Object.entries(shortcuts)) {
       const name = scriptNameOf(record.name);
       if (name === null) continue;
-      result[key] = { name, args: { ...record.args ?? {} }, fallback: defaults[key] ?? null };
+      const skript = skripte.find((s) => s.name === name);
+      result[key] = {
+        name,
+        params: skript?.params ?? null,
+        args: { ...record.args ?? {} },
+        fallback: defaults[key] ?? null
+      };
     }
     return result;
+  }
+  // Für _obsidian/templater-scripts/TYP.js: macht aus der Parameterliste eines
+  // Shortcuts die Argumente für den Aufruf tp.user.<name>(tp, ...) - siehe
+  // resolveCallArgs in shortcuts.js. Die Auflösung lebt hier statt in TYP.js,
+  // damit die Regeln (reservierte Namen, Punkt-Namen für Objekt-Argumente) nur
+  // an einer Stelle stehen; newFile und ctx kennt allerdings nur TYP.js und
+  // reicht sie deshalb herein.
+  resolveShortcutArgs(params, args, { newFile = null, ctx = null, key = null } = {}) {
+    return resolveCallArgs(params, args, { newFile, ctx, key });
   }
   // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
   // der Reihenfolge ihrer Blöcke, samt Notiz-Anzahl.

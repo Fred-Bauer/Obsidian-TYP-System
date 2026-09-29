@@ -1,11 +1,11 @@
 const { FuzzySuggestModal, Modal, Setting } = require("obsidian");
-const { FIXED_SHORTCUTS, SCRIPT_PREFIX, buildArgs } = require("./shortcuts");
+const { FIXED_SHORTCUTS, SCRIPT_PREFIX, buildArgs, inputParams } = require("./shortcuts");
 
 // Anzeigeform eines Listeneintrags: der Name, bei einem Skript mit deklarierten
 // Parametern zusätzlich deren Namen in Klammern - so ist schon in der Auswahl
 // zu sehen, dass (und womit) ein Skript parametrisiert wird.
 function itemLabel(item) {
-  return item.params?.length > 0 ? `${item.name}(${item.params.join(", ")})` : item.name;
+  return item.params ? `${item.name}(${item.params.join(", ")})` : item.name;
 }
 
 // Auswahl eines Shortcuts für eine Property des TYP-Frontmatters (Knopf bzw.
@@ -79,8 +79,9 @@ class ShortcutArgsModal extends Modal {
     super(app);
     this.item = item;
     this.resolve = resolve;
+    this.felder = inputParams(item.params);
     this.eingaben = {};
-    for (const name of item.params) {
+    for (const name of this.felder) {
       const wert = vorhandene?.[name];
       this.eingaben[name] = wert === undefined || wert === null ? "" : String(wert);
     }
@@ -92,7 +93,7 @@ class ShortcutArgsModal extends Modal {
     if (this.item.description) {
       this.contentEl.createDiv({ cls: "fred-typ-shortcut-args-desc", text: this.item.description });
     }
-    for (const name of this.item.params) {
+    for (const name of this.felder) {
       new Setting(this.contentEl).setName(name).addText((text) =>
         text
           .setValue(this.eingaben[name])
@@ -127,7 +128,7 @@ class ShortcutArgsModal extends Modal {
     // ESC bzw. Klick daneben: kein Shortcut gesetzt, der bisherige bleibt
     // unangetastet - sonst wäre ein versehentliches Schließen ein stiller
     // Datenverlust.
-    this.resolve(this.bestaetigt ? buildArgs(this.item.params, this.eingaben) : null);
+    this.resolve(this.bestaetigt ? buildArgs(this.felder, this.eingaben) : null);
   }
 }
 
@@ -139,13 +140,16 @@ class ShortcutArgsModal extends Modal {
 // abgebrochen wurde.
 async function pickShortcut(app, key, getScripts, vorhanden = null) {
   const items = [
-    ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description, params: [] })),
+    ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description, params: null })),
     ...getScripts().map(({ name, params, description }) => ({ name: SCRIPT_PREFIX + name, params, description })),
   ];
 
   const item = await new Promise((resolve) => new ShortcutPickerModal(app, key, items, resolve).open());
   if (!item) return null;
-  if (item.params.length === 0) return { name: item.name };
+  // Ohne abzufragende Felder entfällt der zweite Schritt ganz - das gilt für
+  // die festen Shortcuts ebenso wie für ein Skript, dessen Parameterliste nur
+  // reservierte Namen enthält (etwa "(newFile)").
+  if (inputParams(item.params).length === 0) return { name: item.name };
 
   // Vorbelegung nur, wenn dasselbe Skript schon gesetzt war - bei einem
   // Wechsel wären die alten Werte für andere Parameternamen bedeutungslos.

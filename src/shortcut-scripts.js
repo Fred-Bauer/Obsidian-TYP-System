@@ -7,13 +7,21 @@ const { TFile, Vault, debounce, normalizePath } = require("obsidian");
 // fehlt er, steht dort nur der Skriptname. Ein abschließendes "*/" eines
 // Blockkommentars gehört nicht zur Beschreibung.
 //
-// Optional folgt direkt auf den Marker eine Parameterliste in Klammern:
-//   // @typ-shortcut(ordner, jahr) Wählt eine PDF als Quelle
-// Das Skript deklariert damit selbst, welche Argumente es erwartet; das Modal
-// fragt genau diese Felder ab und übergibt sie als benanntes Objekt in
-// ctx.args (siehe TYP.js). Ein Skript OHNE Klammern verhält sich unverändert:
-// keine Abfrage, ein Klick - deshalb bleiben bestehende markierte Skripte von
-// der Erweiterung unberührt.
+// Optional folgt direkt auf den Marker eine Parameterliste in Klammern. Sie
+// beschreibt die VOLLSTÄNDIGE Argumentliste des Aufrufs nach "tp" - also nicht
+// nur die abgefragten Werte, sondern auch, an welcher Stelle das Skript die
+// Datei bzw. den Kontext haben will (siehe RESERVED_PARAMS in shortcuts.js):
+//   // @typ-shortcut(ordner, jahr)       -> f(tp, "Literatur", 2024)
+//   // @typ-shortcut(newFile, jahr)      -> f(tp, newFile, 2024)
+//   // @typ-shortcut(property)           -> f(tp, "Familie")
+//   // @typ-shortcut                     -> f(tp, newFile, ctx)
+// Dadurch bekommt jedes Skript seine eigenen Parameter in seiner eigenen
+// Reihenfolge, statt sich einer festen Konvention beugen zu müssen.
+//
+// Unterschieden wird zwischen "gar keine Klammern" (params === null, der
+// herkömmliche Aufruf f(tp, newFile, ctx) - so verhalten sich alle bisher
+// markierten Skripte unverändert) und "leere Klammern" (params === [], ein
+// Aufruf ganz ohne Argumente außer tp).
 //
 // Der Marker muss unmittelbar auf den Kommentarbeginn folgen. Eine frühere
 // Fassung erlaubte beliebigen Text davor - damit genügte aber schon eine
@@ -74,7 +82,15 @@ function registerShortcutScripts(plugin) {
     for (const file of files) {
       try {
         const match = (await app.vault.cachedRead(file)).match(SHORTCUT_MARKER);
-        if (match) found.push({ name: file.basename, params: parseParams(match[1]), description: match[2] ?? "" });
+        // match[1] ist undefined, wenn gar keine Klammern dastehen, und "" bei
+        // leeren Klammern - der Unterschied entscheidet über die Aufrufform.
+        if (match) {
+          found.push({
+            name: file.basename,
+            params: match[1] === undefined ? null : parseParams(match[1]),
+            description: match[2] ?? "",
+          });
+        }
       } catch (e) {
         console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
       }

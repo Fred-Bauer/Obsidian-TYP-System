@@ -62,15 +62,15 @@ function normalizeGlobalOrder(order) {
 // Typ übergeben wurde oder für den Typ keine Standardliste gepflegt ist.
 //
 // Mit subtype zusätzlich die Keys aus dessen Frontmatter-Block (siehe
-// subtypes.js) - dahinter, oder davor, wenn der Subtyp-Block in der TYP-
-// Detailansicht über dem TYP-Frontmatter steht (aboveStandard). Käme ein
-// Key doch in beiden vor, zählt seine erste Position.
+// subtypes.js) - dahinter, da das TYP-Frontmatter immer oben steht. Ein Key,
+// der in BEIDEN Blöcken vorkommt, behält die Position des TYP-Frontmatters
+// (der Subtyp steuert dort nur Wert und Floating-Markierung bei, siehe
+// getTypeDefaults in main.js) - deshalb hier bewusst "erste Position zählt".
 function orderedDefaultKeys(plugin, type, subtype = null) {
   if (!type) return null;
   const isSystemKey = (key) => key === "" || [TYP_PROPERTY, SUBTYP_PROPERTY].some((p) => key.toLowerCase() === p.toLowerCase());
   const subtypeData = subtype ? getSubtype(plugin.settings, type, subtype) : null;
   const blocks = [plugin.settings.typeDefaultFrontmatter[type], subtypeData?.frontmatter];
-  if (subtypeData?.aboveStandard) blocks.reverse();
   const keys = [];
   const seen = new Set();
   for (const block of blocks) {

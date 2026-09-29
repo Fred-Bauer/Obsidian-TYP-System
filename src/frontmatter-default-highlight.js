@@ -27,18 +27,18 @@ function rawKeysForType(type, defaults) {
 // Subtypen (subtype === ALL_SUBTYPES), siehe subtypes.js.
 const ALL_SUBTYPES = Symbol("all-subtypes");
 
-function blockOf(defaults, floatingKeys) {
+function blockOf(defaults, floatingKeys, section = null) {
   const keys = rawKeysForType(true, defaults) ?? [];
-  return { keys, floating: new Set((floatingKeys ?? []).map((key) => key.toLowerCase())) };
+  return { section, keys, floating: new Set((floatingKeys ?? []).map((key) => key.toLowerCase())) };
 }
 
 function blocksForType(plugin, type, subtype) {
   const { settings } = plugin;
-  const blocks = [blockOf(settings.typeDefaultFrontmatter[type], settings.typeFloatingKeys[type])];
+  const blocks = [blockOf(settings.typeDefaultFrontmatter[type], settings.typeFloatingKeys[type], null)];
   const subtypeNames = subtype === ALL_SUBTYPES ? getSubtypeNames(settings, type) : subtype ? [subtype] : [];
   for (const name of subtypeNames) {
     const data = getSubtype(settings, type, name);
-    if (data) blocks.push(blockOf(data.frontmatter, data.floatingKeys));
+    if (data) blocks.push(blockOf(data.frontmatter, data.floatingKeys, name));
   }
   return blocks;
 }
@@ -47,7 +47,9 @@ function blocksForType(plugin, type, subtype) {
 // darzustellende ("floating") Property-Namen (jeweils lowercase) aus den
 // übergebenen Blöcken - Floating-markierte Keys zählen dabei nur zu
 // "floating", nie zusätzlich zu "standard". Kommt ein Key in mehreren Blöcken
-// vor (Subtyp überschreibt TYP), gilt die Markierung des späteren Blocks.
+// vor, gilt die Markierung des späteren Blocks: für eine Notiz sind das
+// TYP-Frontmatter und danach der Block ihres SUBTYPs, der Subtyp gewinnt also
+// - dieselbe Regel wie beim Wert in getTypeDefaults (main.js).
 function splitKeys(blocks) {
   const isFloating = new Map();
   for (const { keys, floating } of blocks) {
@@ -70,26 +72,28 @@ function keysForFile(plugin, file) {
   return splitKeys(blocksForType(plugin, type, subtype));
 }
 
-// Editor der TYP-Detailansicht: der gemeinsame Editor über alle Blöcke eines
-// TYPs (store.unified, siehe unified-frontmatter-editor.js) - Subtyp-Blöcke
-// nur mit dem Unter-Schalter "Subtyp" - bzw. ein einzelner Block (siehe
-// typeStore/subtypeStore in type-frontmatter-editor.js).
+// Editor der TYP-Detailansicht: je Block eine eigene Editor-Instanz (siehe
+// typeStore/subtypeStore in type-frontmatter-editor.js), die Markierung zeigt
+// also genau die Standard-/Floating-Properties dieses einen Blocks -
+// Subtyp-Blöcke nur mit dem Unter-Schalter "Subtyp".
 function keysForStore(plugin, store) {
   const { colorViews } = plugin.settings;
   if (!colorViews.frontmatterDefaults || !store) return NO_KEYS;
-  if (store.unified) {
-    return splitKeys(blocksForType(plugin, store.type, colorViews.frontmatterDefaultsSubtyp ? ALL_SUBTYPES : null));
-  }
   if (store.subtype && !colorViews.frontmatterDefaultsSubtyp) return NO_KEYS;
   return splitKeys([blockOf(store.getFrontmatter(), store.getFloating())]);
 }
 
-// Property-Name (lowercase) -> Map(TYP -> nur als Floating markiert?) über
-// alle Typen, in deren Frontmatter (ggf. inkl. ihrer Subtyp-Blöcke) er
-// vorkommt. Die "All Properties"-Ansicht ist vault-weit und kennt keinen
-// einzelnen TYP-Kontext - daher hier statt eines einzelnen Fett-Flags gleich
-// die vollständige Zuordnung sammeln, damit applyToAllPropertiesView zwischen
-// "genau ein Typ" (einfärben) und "mehrere Typen" (fett) unterscheiden kann.
+// Property-Name (lowercase) -> { types, allFloating } über alle Typen, in
+// deren Frontmatter (ggf. inkl. ihrer Subtyp-Blöcke) er vorkommt. Die "All
+// Properties"-Ansicht ist vault-weit und kennt keinen einzelnen TYP-Kontext -
+// daher hier gleich die vollständige Zuordnung sammeln, damit
+// applyToAllPropertiesView zwischen "genau ein Typ" (einfärben) und "mehrere
+// Typen" (fett) unterscheiden kann. types ist Map(TYP -> Liste der Blöcke,
+// die den Key führen; null steht für das TYP-Frontmatter) - ein Key darf in
+// mehreren Blöcken eines TYPs stehen, eingefärbt wird nur der eindeutige
+// Fall. allFloating ist true, wenn der Key in JEDEM Block JEDES Typs als
+// Floating markiert ist (sonst wäre die Kursiv-Markierung irreführend).
+//
 // Eigener Schalter (colorViews.allProperties), unabhängig von
 // colorViews.frontmatterDefaults. Eine Subtyp-Property zählt für ihren TYP.
 function typesUsingKeyMap(plugin) {
@@ -102,11 +106,13 @@ function typesUsingKeyMap(plugin) {
   ]);
   for (const type of types) {
     const blocks = blocksForType(plugin, type, colorViews.allPropertiesSubtyp ? ALL_SUBTYPES : null);
-    for (const { keys, floating } of blocks) {
+    for (const { section, keys, floating } of blocks) {
       for (const key of keys) {
-        if (!map.has(key)) map.set(key, new Map());
-        const byType = map.get(key);
-        byType.set(type, (byType.get(type) ?? true) && floating.has(key));
+        if (!map.has(key)) map.set(key, { types: new Map(), allFloating: true });
+        const entry = map.get(key);
+        if (!entry.types.has(type)) entry.types.set(type, []);
+        entry.types.get(type).push(section);
+        entry.allFloating = entry.allFloating && floating.has(key);
       }
     }
   }
@@ -139,17 +145,6 @@ function applyToContainer(containerEl, standardKeys, floatingKeys) {
 // um sie zuzuordnen. Nutzen mehrere Typen sie, wäre eine einzelne Farbe
 // irreführend, daher stattdessen fett (dieselbe Markierung wie im
 // Frontmatter-Widget einer Notiz).
-// Subtyp-Block eines TYPs, in dem ein Key steht (Vergleich ohne Groß-/
-// Kleinschreibung), sonst null (TYP-Frontmatter).
-function subtypeOfKey(plugin, type, key) {
-  const lower = key.toLowerCase();
-  return (
-    getSubtypeNames(plugin.settings, type).find((name) =>
-      Object.keys(getSubtype(plugin.settings, type, name)?.frontmatter ?? {}).some((k) => k.toLowerCase() === lower)
-    ) ?? null
-  );
-}
-
 function applyToAllPropertiesView(plugin) {
   const usageMap = typesUsingKeyMap(plugin);
   for (const leaf of plugin.app.workspace.getLeavesOfType(ALL_PROPERTIES_VIEW_TYPE)) {
@@ -159,22 +154,26 @@ function applyToAllPropertiesView(plugin) {
       const titleEl = dom?.titleEl;
       if (!titleEl) continue;
 
-      const types = usageMap.get(key.toLowerCase());
+      const entry = usageMap.get(key.toLowerCase());
+      const types = entry?.types;
       const count = types ? types.size : 0;
       titleEl.classList.toggle(HIGHLIGHT_CLASS, count > 1);
 
-      // Kursiv nur, wenn eindeutig genau ein TYP die Property nutzt UND sie
-      // dort überall (TYP- wie Subtyp-Blöcke) als Floating markiert ist - bei
-      // mehreren TYPs (Fett-Fall) wäre nicht klar, wessen Floating-Markierung
-      // gemeint ist.
-      let isFloating = false;
+      // Kursiv, sobald die Property ÜBERALL als Floating markiert ist - in
+      // jedem Block jedes TYPs, der sie führt. Anders als die Fett-Markierung
+      // ist das nicht auf "genau ein TYP" beschränkt: beides kann also
+      // zusammentreffen (mehrere TYPen, dort durchweg floating).
+      titleEl.classList.toggle(FLOATING_CLASS, count > 0 && entry.allFloating);
+
+      // Mit "Subtyp" in der Farbe des Subtyp-Blocks, aus dem die Property
+      // stammt - aber nur, wenn sie in genau einem Block dieses TYPs steht.
+      // Bei einer Dopplung über mehrere Blöcke wäre die Wahl willkürlich und
+      // würde sich beim Umsortieren der Blöcke ändern, daher dann die
+      // TYP-Farbe (subtypeColor mit null liefert genau die).
       if (count === 1) {
-        const [[onlyType, onlyFloating]] = types;
-        isFloating = onlyFloating;
-        // Mit "Subtyp" in der Farbe des Subtyp-Blocks, aus dem die Property
-        // stammt (jeder Key steht in genau einem Block des TYPs).
+        const [[onlyType, sections]] = types;
         const color = plugin.settings.colorViews.allPropertiesSubtyp
-          ? subtypeColor(plugin.settings, onlyType, subtypeOfKey(plugin, onlyType, key))
+          ? subtypeColor(plugin.settings, onlyType, sections.length === 1 ? sections[0] : null)
           : plugin.settings.typeColors[onlyType];
         // !important via setProperty, da die Fett-Regel für .fred-typ-default-
         // property in styles.css ebenfalls !important color setzt und ein
@@ -185,7 +184,6 @@ function applyToAllPropertiesView(plugin) {
       } else {
         titleEl.style.removeProperty("color");
       }
-      titleEl.classList.toggle(FLOATING_CLASS, isFloating);
     }
   }
 }

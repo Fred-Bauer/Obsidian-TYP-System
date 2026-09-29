@@ -3,7 +3,7 @@ const { DEFAULT_SETTINGS, TypSystemSettingTab } = require("./settings");
 const { registerCommands } = require("./commands");
 const { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require("./typ-view");
 const { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
-const { getSubtype, getSubtypeNames, enforceUniqueKeys } = require("./subtypes");
+const { getSubtype, getSubtypeNames, migrateAboveStandard } = require("./subtypes");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
 const { registerSearchColors } = require("./search-colors");
@@ -102,12 +102,14 @@ module.exports = class TypSystemPlugin extends Plugin {
   // der Ziel-Datei statt des Aufrufzeitpunkts liefert.
   //
   // subtype (optional): ergänzt das TYP-Frontmatter um den Block dieses
-  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter - bzw. stehen
-  // davor, wenn der Subtyp-Block über dem TYP-Frontmatter liegt
-  // (aboveStandard; wichtig für die Reihenfolge der tp.-Platzhalter). Jeder
-  // Key gehört zu genau einem Block (siehe enforceUniqueKeys) - käme er doch
-  // doppelt vor, bliebe seine erste Position, Wert und Floating-Markierung
-  // kämen aus dem späteren Block.
+  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter (wichtig für die
+  // Reihenfolge der tp.-Platzhalter). Steht ein Key in BEIDEN Blöcken, behält
+  // er die Position des TYP-Frontmatters, Wert und Floating-Markierung kommen
+  // aber vom Subtyp - eine Zuweisung auf einen bereits vorhandenen
+  // Objektschlüssel überschreibt ihn, ohne ihn zu verschieben. Die
+  // Frontmatter-Sortierung muss dieselbe Regel verwenden, sonst würde sie
+  // eine gerade angelegte Notiz sofort wieder umsortieren (siehe
+  // orderedDefaultKeys in frontmatter-sort.js).
   getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
     const defaults = {};
     const isFloating = new Map();
@@ -121,9 +123,8 @@ module.exports = class TypSystemPlugin extends Plugin {
       }
     };
     const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
-    if (subtypeData?.aboveStandard) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
     addBlock(this.settings.typeDefaultFrontmatter[type], this.settings.typeFloatingKeys[type]);
-    if (subtypeData && !subtypeData.aboveStandard) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
+    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys);
 
     if (!includeFloating) {
       for (const [key, floating] of isFloating) if (floating) delete defaults[key];
@@ -234,9 +235,9 @@ module.exports = class TypSystemPlugin extends Plugin {
     // Zeit vor "TYP als Listeneintrag" stammt (siehe frontmatter-sort.js).
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
     migrateFloatingFrontmatter(this.settings);
-    // Jeder Key nur in einem Block je TYP (siehe enforceUniqueKeys) - räumt
-    // Daten aus der Zeit auf, als Subtypen Keys noch überschreiben konnten.
-    for (const type of Object.keys(this.settings.typeSubtypes ?? {})) enforceUniqueKeys(this.settings, type);
+    // Subtyp-Blöcke lagen früher wahlweise über dem TYP-Frontmatter; das steht
+    // jetzt fest ganz oben (siehe getSectionOrder in subtypes.js).
+    migrateAboveStandard(this.settings);
   }
 
   async saveSettings() {

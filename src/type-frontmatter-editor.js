@@ -203,7 +203,46 @@ function toggleFloatingProperty(view, store, key) {
 // von typ-view.js vor addBlankProperty() gesetzt, um die als nächstes
 // hinzugefügte (bzw. umbenannte) Property als Floating zu markieren - siehe
 // saveFrontmatter unten.
-function mountFrontmatterEditor(view, containerEl, store) {
+// Tastatur-Navigation über die Grenzen einer Editor-Instanz hinaus (siehe
+// frontmatter-blocks.js): Obsidian bewegt den Fokus nur innerhalb seiner
+// eigenen Zeilenliste - am oberen Ende springt er auf die Überschrift des
+// Editors, am unteren auf dessen "Add property"-Button. Beide sind hier per
+// CSS ausgeblendet, die Kette endete also am Blockrand.
+//
+// Statt owner.shiftFocusBefore/shiftFocusAfter (die Obsidian nur über genau
+// diese beiden ausgeblendeten Elemente erreicht) daher ein eigener Handler in
+// der Capture-Phase, der VOR dem Handler der Zeile läuft. Er greift nur, wenn
+// die Zeile SELBST den Fokus hat (event.target === containerEl der Zeile) -
+// genau die Bedingung, unter der auch Obsidian seine j/k-Navigation zulässt,
+// beim Tippen in einem Key-/Wert-Feld also nie.
+function registerFocusChain(editor, onShiftFocus) {
+  editor.containerEl.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.isComposing || event.defaultPrevented) return;
+      // Mehrfach-Auswahl: Obsidian erweitert damit die Auswahl, statt den
+      // Fokus zu bewegen.
+      if (editor.selectedLines?.size > 1) return;
+      if (event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+
+      const index = editor.rendered.findIndex((row) => row.containerEl === event.target);
+      if (index === -1) return;
+
+      const up = event.key === "ArrowUp" || event.key === "k" || (event.key === "Tab" && event.shiftKey);
+      const down = event.key === "ArrowDown" || event.key === "j" || (event.key === "Tab" && !event.shiftKey);
+      let step = 0;
+      if (up && index === 0) step = -1;
+      else if (down && index === editor.rendered.length - 1) step = 1;
+      if (step === 0 || !onShiftFocus(step)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    true
+  );
+}
+
+function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {}) {
   const app = view.app;
   const EditorClass = getMetadataEditorClass(app);
   if (!EditorClass) {
@@ -263,9 +302,6 @@ function mountFrontmatterEditor(view, containerEl, store) {
           editor.fredPendingFloatingAdd = false;
         }
       }
-      // Erst die Properties, dann die Floating-Markierungen - der Speicher des
-      // gemeinsamen Editors (unified-frontmatter-editor.js) verteilt letztere
-      // anhand der dabei ermittelten Block-Zuordnung.
       store.setFrontmatter(frontmatter);
       store.setFloating(floating);
       view.plugin.saveSettings();
@@ -277,6 +313,7 @@ function mountFrontmatterEditor(view, containerEl, store) {
 
   const editor = new EditorClass(app, owner);
   editor.fredPendingFloatingAdd = false;
+  if (onShiftFocus) registerFocusChain(editor, onShiftFocus);
   // Grenzt die Platzhalter-Vorschläge (placeholder-suggest.js) auf diesen Editor ein.
   editor.containerEl.addClass(PLACEHOLDER_SUGGEST_EDITOR_CLASS);
   containerEl.appendChild(editor.containerEl);

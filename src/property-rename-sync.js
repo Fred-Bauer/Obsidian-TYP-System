@@ -1,6 +1,6 @@
 const { Notice } = require("obsidian");
 const { typeStore, subtypeStore } = require("./type-frontmatter-editor");
-const { getSubtypeNames } = require("./subtypes");
+const { getSubtypeNames, isEmptyValue } = require("./subtypes");
 
 const TYP_PROPERTY = "TYP";
 const SUBTYP_PROPERTY = "SUBTYP";
@@ -10,10 +10,6 @@ const SUBTYP_PROPERTY = "SUBTYP";
 // exakt so übernommen, wie er eingegeben wurde.
 function sameKey(a, b) {
   return a.toLowerCase() === b.toLowerCase();
-}
-
-function isEmptyValue(value) {
-  return value === null || value === undefined || value === "";
 }
 
 // Benennt oldKey in einem Frontmatter-Block (TYP oder Subtyp, siehe
@@ -55,27 +51,6 @@ function renameInStore(store, oldKey, newKey) {
   return true;
 }
 
-// Entfernt oldKey samt Floating-Markierung aus store (ein anderer Block
-// desselben TYPs), weil owner newKey bereits führt - dessen leerer Wert
-// übernimmt dabei den alten. Liefert true bei einer Änderung.
-function moveIntoOwner(store, owner, oldKey, newKey) {
-  const defaults = store.getFrontmatter();
-  const sourceKey = Object.keys(defaults).find((key) => sameKey(key, oldKey));
-  if (sourceKey === undefined) return false;
-
-  const next = { ...defaults };
-  delete next[sourceKey];
-  store.setFrontmatter(next);
-  store.setFloating(store.getFloating().filter((key) => key !== sourceKey));
-
-  const ownerDefaults = owner.getFrontmatter();
-  const targetKey = Object.keys(ownerDefaults).find((key) => sameKey(key, newKey));
-  if (isEmptyValue(ownerDefaults[targetKey]) && !isEmptyValue(defaults[sourceKey])) {
-    owner.setFrontmatter({ ...ownerDefaults, [targetKey]: defaults[sourceKey] });
-  }
-  return true;
-}
-
 // Einzel-Property-Einträge der globalen Reihenfolge - dort sind keine
 // Dopplungen erlaubt, ein bereits vorhandener Zieleintrag behält daher seine
 // Position und der alte entfällt.
@@ -107,20 +82,13 @@ async function syncRename(plugin, oldKey, newKey) {
   for (const type of types) {
     const stores = [typeStore(plugin, type), ...getSubtypeNames(settings, type).map((subtype) => subtypeStore(plugin, type, subtype))];
 
-    // Jeder Key gehört zu genau einem Block eines TYPs (siehe
-    // enforceUniqueKeys in subtypes.js): gibt es newKey schon in einem Block,
-    // behält dieser ihn - aus den übrigen verschwindet oldKey, sein Wert wird
-    // nur übernommen, wenn der bestehende Eintrag leer ist. Bei einer reinen
-    // Änderung der Groß-/Kleinschreibung ist das nie der Fall.
-    const owner = sameKey(oldKey, newKey)
-      ? null
-      : stores.find((store) => Object.keys(store.getFrontmatter()).some((key) => sameKey(key, newKey)));
+    // Eine vault-weite Umbenennung schlägt auf JEDEN Block durch, in dem der
+    // Key steht - derselbe Key darf blockübergreifend mehrfach vorkommen
+    // (siehe Kommentar an typeSubtypes in subtypes.js). Nur INNERHALB eines
+    // Blocks kann der neue Name kollidieren; dort legt renameInStore die
+    // beiden wie bisher zusammen.
     for (const store of stores) {
-      if (!owner || store === owner) {
-        if (renameInStore(store, oldKey, newKey)) count(store);
-      } else if (moveIntoOwner(store, owner, oldKey, newKey)) {
-        count(store);
-      }
+      if (renameInStore(store, oldKey, newKey)) count(store);
     }
   }
   const orderChanged = renameInGlobalOrder(settings, oldKey, newKey);

@@ -8,12 +8,32 @@ function normalizeSubtypeName(raw) {
 }
 
 // Registrierte SUBTYPen je TYP (settings.typeSubtypes):
-//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...], aboveStandard?: true } } }
+//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...] } } }
 // Ein Subtyp gehört immer zu genau einem TYP; derselbe Name darf aber (als
 // eigenständiger Subtyp) auch unter einem anderen TYP vorkommen. Die
 // Reihenfolge der Schlüssel ist die Anzeigereihenfolge der Blöcke in der
-// TYP-Detailansicht. frontmatter ergänzt bzw. überschreibt das
-// TYP-Frontmatter des TYPs, floatingKeys wie typeFloatingKeys.
+// TYP-Detailansicht, stets unterhalb des TYP-Frontmatters. frontmatter
+// ergänzt bzw. überschreibt das TYP-Frontmatter des TYPs, floatingKeys wie
+// typeFloatingKeys.
+//
+// Derselbe Key darf in mehreren Blöcken eines TYPs stehen (nur innerhalb
+// EINES Blocks ist er zwangsläufig eindeutig):
+//   - in zwei Subtyp-Blöcken: konfliktfrei, da eine Notiz höchstens einen
+//     SUBTYP hat und die Blöcke damit nie gleichzeitig gelten;
+//   - im TYP-Frontmatter UND einem Subtyp-Block: der Subtyp überschreibt
+//     Wert und Floating-Markierung, die Zeile behält aber die Position des
+//     TYP-Frontmatters (siehe getTypeDefaults in main.js und
+//     orderedDefaultKeys in frontmatter-sort.js - beide müssen dieselbe
+//     Regel verwenden, sonst sortiert die Frontmatter-Sortierung eine gerade
+//     angelegte Notiz sofort wieder um).
+
+// "Noch auszufüllen" - ein solcher Wert wird beim Zusammenlegen zweier
+// Blöcke bzw. zweier Properties vom jeweils anderen gefüllt, statt den
+// bestehenden Eintrag zu überschreiben (siehe mergeSubtypes hier und
+// renameInStore in property-rename-sync.js).
+function isEmptyValue(value) {
+  return value === null || value === undefined || value === "";
+}
 
 function getSubtypeNames(settings, type) {
   return Object.keys(settings.typeSubtypes?.[type] ?? {});
@@ -42,27 +62,16 @@ function deleteTypeSubtypes(settings, type) {
   if (settings.typeSubtypes) delete settings.typeSubtypes[type];
 }
 
-// Jeder Key gehört zu genau einem Block eines TYPs (TYP-Frontmatter ODER
-// ein Subtyp, Abgleich ohne Beachtung der Groß-/Kleinschreibung). Kommt er
-// trotzdem mehrfach vor (ältere Daten, Zusammenlegen zweier TYPen), bleibt er
-// im ersten Block - TYP-Frontmatter vor den Subtypen in ihrer
-// Reihenfolge - und verschwindet samt Floating-Markierung aus den übrigen.
-// Liefert true bei einer Änderung.
-function enforceUniqueKeys(settings, type) {
-  const seen = new Set(Object.keys(settings.typeDefaultFrontmatter[type] ?? {}).map((key) => key.toLowerCase()));
+// Entfernt die Markierung aboveStandard aus Bestandsdaten: Subtyp-Blöcke
+// durften früher über dem TYP-Frontmatter liegen, das steht jetzt fest ganz
+// oben (siehe getSectionOrder). Liefert true bei einer Änderung.
+function migrateAboveStandard(settings) {
   let changed = false;
-  for (const subtype of getSubtypeNames(settings, type)) {
-    const data = settings.typeSubtypes[type][subtype];
-    for (const key of Object.keys(data.frontmatter)) {
-      if (key === "") continue;
-      const lower = key.toLowerCase();
-      if (seen.has(lower)) {
-        delete data.frontmatter[key];
-        data.floatingKeys = data.floatingKeys.filter((k) => k !== key);
-        changed = true;
-      } else {
-        seen.add(lower);
-      }
+  for (const byName of Object.values(settings.typeSubtypes ?? {})) {
+    for (const data of Object.values(byName)) {
+      if (data.aboveStandard === undefined) continue;
+      delete data.aboveStandard;
+      changed = true;
     }
   }
   return changed;
@@ -71,8 +80,9 @@ function enforceUniqueKeys(settings, type) {
 // Zusammenlegen zweier TYPen: Subtypen, die es nur bei source gibt, werden
 // übernommen. Gleichnamige Blöcke werden vereinigt - bei gleichem Key
 // gewinnen Wert und Floating-Markierung des Ziels, Keys nur aus source
-// werden hinten angehängt. Danach gilt wieder "jeder Key nur in einem
-// Block" (enforceUniqueKeys).
+// werden hinten angehängt. Steht ein übernommener Key zugleich im
+// TYP-Frontmatter des Ziels, bleiben beide stehen - daraus wird die ganz
+// normale Überschreibung (siehe Kommentar an typeSubtypes oben).
 function mergeTypeSubtypes(settings, source, target) {
   const sourceSubtypes = settings.typeSubtypes?.[source];
   if (!sourceSubtypes) return;
@@ -91,7 +101,6 @@ function mergeTypeSubtypes(settings, source, target) {
     }
   }
   delete settings.typeSubtypes[source];
-  enforceUniqueKeys(settings, target);
 }
 
 // Umbenennen eines Subtyps innerhalb seines TYPs - der Block behält dabei
@@ -104,30 +113,23 @@ function renameSubtype(settings, type, oldName, newName) {
   );
 }
 
-// Reihenfolge aller Blöcke eines TYPs, null = TYP-Frontmatter. Subtypen
-// mit aboveStandard stehen davor - als Markierung am Subtyp selbst statt als
-// Position, damit sie Umbenennen, Löschen und Zusammenlegen ohne Nachpflege
-// übersteht. Bestimmt die Anzeige in der TYP-Detailansicht ebenso wie die
-// Frontmatter-Sortierung der Notizen (siehe orderedDefaultKeys).
+// Reihenfolge aller Blöcke eines TYPs, null = TYP-Frontmatter. Das
+// TYP-Frontmatter steht immer ganz oben, die Subtypen folgen in ihrer
+// Schlüsselreihenfolge. Bestimmt die Anzeige in der TYP-Detailansicht ebenso
+// wie die Frontmatter-Sortierung der Notizen (siehe orderedDefaultKeys).
 function getSectionOrder(settings, type) {
-  const names = getSubtypeNames(settings, type);
-  const above = names.filter((name) => settings.typeSubtypes[type][name].aboveStandard);
-  return [...above, null, ...names.filter((name) => !above.includes(name))];
+  return [null, ...getSubtypeNames(settings, type)];
 }
 
 // Neue Block-Reihenfolge (Drag & Drop in der TYP-Detailansicht): order wie
-// getSectionOrder, samt null für das TYP-Frontmatter. Nicht genannte
-// Subtypen bleiben dahinter erhalten.
+// getSectionOrder, das führende null für das TYP-Frontmatter wird dabei
+// ignoriert (es ist nicht verschiebbar). Nicht genannte Subtypen bleiben
+// dahinter erhalten.
 function reorderSubtypes(settings, type, order) {
   const byName = settings.typeSubtypes?.[type];
   if (!byName) return;
-  const standardIndex = order.indexOf(null);
   const names = order.filter((name) => name !== null && byName[name]);
   const ordered = [...names, ...Object.keys(byName).filter((name) => !names.includes(name))];
-  for (const name of ordered) {
-    if (standardIndex !== -1 && order.indexOf(name) !== -1 && order.indexOf(name) < standardIndex) byName[name].aboveStandard = true;
-    else delete byName[name].aboveStandard;
-  }
   settings.typeSubtypes[type] = Object.fromEntries(ordered.map((name) => [name, byName[name]]));
 }
 
@@ -139,16 +141,30 @@ function deleteSubtype(settings, type, name) {
 }
 
 // Zusammenlegen zweier Subtypen desselben TYPs: die Properties von source
-// wandern ans Ende des Ziel-Blocks (Keys kommen ohnehin nur in einem Block
-// vor, siehe enforceUniqueKeys), source verschwindet.
+// wandern ans Ende des Ziel-Blocks, source verschwindet. Führt das Ziel einen
+// Key bereits, behält es Position, Wert und Floating-Markierung - nur ein
+// leerer Zielwert wird aus source gefüllt (dasselbe Muster wie renameInStore
+// in property-rename-sync.js beim Zusammenlegen zweier Properties). Innerhalb
+// eines Blocks bleibt jeder Key zwangsläufig eindeutig, blockübergreifende
+// Dopplungen sind davon nicht betroffen.
 function mergeSubtypes(settings, type, source, target) {
   const sourceData = getSubtype(settings, type, source);
   const targetData = getSubtype(settings, type, target);
   if (!sourceData || !targetData || source === target) return;
-  Object.assign(targetData.frontmatter, sourceData.frontmatter);
-  targetData.floatingKeys.push(...sourceData.floatingKeys.filter((key) => !targetData.floatingKeys.includes(key)));
+
+  const targetKeys = new Map(Object.keys(targetData.frontmatter).map((key) => [key.toLowerCase(), key]));
+  for (const [key, value] of Object.entries(sourceData.frontmatter)) {
+    if (key === "") continue;
+    const existing = targetKeys.get(key.toLowerCase());
+    if (existing === undefined) {
+      targetData.frontmatter[key] = value;
+      targetKeys.set(key.toLowerCase(), key);
+      if (sourceData.floatingKeys.includes(key) && !targetData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
+    } else if (isEmptyValue(targetData.frontmatter[existing])) {
+      targetData.frontmatter[existing] = value;
+    }
+  }
   deleteSubtype(settings, type, source);
-  enforceUniqueKeys(settings, type);
 }
 
 // Schreibt den SUBTYP-Wert aller Notizen mit TYP-Schlüssel type und
@@ -170,10 +186,11 @@ async function renameSubtypeInNotes(plugin, type, oldKey, newValue) {
 
 module.exports = {
   normalizeSubtypeName,
+  isEmptyValue,
   getSubtypeNames,
   getSubtype,
   ensureSubtype,
-  enforceUniqueKeys,
+  migrateAboveStandard,
   moveTypeSubtypes,
   deleteTypeSubtypes,
   mergeTypeSubtypes,

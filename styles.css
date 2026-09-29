@@ -515,8 +515,8 @@
   color: var(--interactive-accent-hover);
 }
 
-/* Eigenständige Subtyp-Blöcke außerhalb des gemeinsamen Editors (nicht
-   erfasste Subtypen, neu angelegter Subtyp während der Namenseingabe) - im
+/* Subtyp-Blöcke ohne eigenen Property-Editor (nicht erfasste Subtypen, neu
+   angelegter Subtyp während der Namenseingabe) - im
    Stil der Gruppen in Obsidians eigenen Einstellungen (.setting-group
    .setting-items): Rundung und Rahmen von dort. Die Fläche aber nicht
    --setting-items-background - das entspricht z. B. im Minimal-Theme genau
@@ -525,7 +525,7 @@
    Seitenleiste (--background-secondary) abhebt. Seitlicher Innenabstand
    bewusst knapp: unter 250px Breite bricht Obsidians Property-Widget Name
    und Wert auf zwei Zeilen um (@container metadata). Die Blöcke im
-   gemeinsamen Editor (.fred-typ-unified-card unten) nutzen dieselben Maße. */
+   registrierten Blöcke (.fred-typ-block unten) nutzen dieselben Maße. */
 .fred-typ-frontmatter-block {
   background-color: var(--background-primary);
   border-radius: var(--setting-items-radius);
@@ -551,8 +551,8 @@
 }
 
 /* Neu angelegter Subtyp während der Namenseingabe (siehe startAddSubtype) -
-   steht außerhalb des gemeinsamen Editors, übernimmt aber exakt dessen Maße
-   (Abstand, Überschrift, Abschluss, siehe .fred-typ-unified unten), damit
+   steht außerhalb der Blockliste, übernimmt aber exakt deren Maße
+   (Abstand, Überschrift, Abschluss, siehe .fred-typ-block unten), damit
    beim Abschließen nichts springt. */
 .fred-typ-subtype-pending {
   margin-top: var(--size-4-3);
@@ -582,26 +582,27 @@
   outline: none;
 }
 
-/* Gemeinsamer Editor über TYP-Frontmatter und Subtyp-Blöcke (siehe
-   unified-frontmatter-editor.js). Die Blöcke sind nur Optik: Überschrift
-   (.fred-typ-section-header) und Abschluss (.fred-typ-section-footer) stehen
-   als eigene Elemente zwischen Obsidians Zeilen, die Kartenfläche der
-   Subtyp-Blöcke liegt als eigene Ebene dahinter (.fred-typ-unified-card) -
-   gleiche Maße wie .fred-typ-frontmatter-block oben. */
-.fred-typ-unified {
+/* Frontmatter-Blöcke eines TYPs (siehe frontmatter-blocks.js): je Block ein
+   eigener Container mit Überschrift (.fred-typ-section-header), Obsidians
+   Property-Editor und Abschluss (.fred-typ-section-footer). Seitlicher
+   Innenabstand am Block, die vertikalen Abstände liefern Überschrift und
+   Abschluss - dieselben Maße wie der noch unbenannte Block während der
+   Namenseingabe (.fred-typ-subtype-pending oben). */
+.fred-typ-blocks {
   position: relative;
 }
 
-.fred-typ-unified-cards {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+.fred-typ-block {
+  padding: 0 var(--size-4-2);
 }
 
-.fred-typ-unified-card {
-  position: absolute;
-  left: 0;
-  right: 0;
+.fred-typ-block + .fred-typ-block {
+  margin-top: var(--size-4-3);
+}
+
+/* Kartenfläche nur für die Subtyp-Blöcke - das TYP-Frontmatter bleibt
+   transparent. Rundung und Rahmen wie .fred-typ-frontmatter-block oben. */
+.fred-typ-block.fred-typ-subtype-block {
   background-color: var(--background-primary);
   border-radius: var(--setting-items-radius);
   border: var(--setting-items-border-width) solid var(--setting-items-border-color);
@@ -609,26 +610,25 @@
 
 /* Hover: Blockfläche leicht aufgehellt - Obsidians Hover-Hintergrund über der
    Kartenfarbe. Gilt ebenso für die nicht erfassten Subtypen, nicht aber für
-   das (transparente) TYP-Frontmatter. Die Karte bekommt is-hovered per
-   JS (siehe unified-frontmatter-editor.js), da die Liste über ihr liegt. */
-.fred-typ-unified-card.is-hovered,
+   das (transparente) TYP-Frontmatter. Während ein Block gezogen wird, bleibt
+   das Aufleuchten aus. */
+body:not(.fred-typ-block-dragging) .fred-typ-block.fred-typ-subtype-block:hover,
 .fred-typ-subtype-unregistered:hover {
   background-image: linear-gradient(var(--background-modifier-hover), var(--background-modifier-hover));
 }
 
-/* Block-Drag (siehe unified-frontmatter-editor.js): keine Textauswahl
-   während des Ziehens, der Cursor bleibt bewusst unverändert. */
+/* Block-Drag (siehe frontmatter-blocks.js): keine Textauswahl während des
+   Ziehens, der Cursor bleibt bewusst unverändert. */
 body.fred-typ-block-dragging,
 body.fred-typ-block-dragging * {
   user-select: none;
 }
 
-.fred-typ-unified .fred-typ-block-drag-source,
-.fred-typ-unified-card.is-dragging {
+.fred-typ-block.is-dragging {
   opacity: 0.4;
 }
 
-.fred-typ-unified-drop-indicator {
+.fred-typ-block-drop-indicator {
   position: absolute;
   left: 0;
   right: 0;
@@ -638,41 +638,32 @@ body.fred-typ-block-dragging * {
   pointer-events: none;
 }
 
-/* Über der Kartenebene, sonst läge die (positionierte) Ebene darüber. */
-.fred-typ-unified > .metadata-container {
-  position: relative;
+.fred-typ-block > .metadata-container {
   margin-bottom: 0;
 }
 
-.fred-typ-unified .metadata-properties {
-  padding: 0 var(--size-4-2);
+.fred-typ-block .metadata-properties {
+  padding: 0;
 }
 
 /* Obsidians Property-Editor verkleinert in seinem Bereich die Icons - die
-   Überschriften stehen zwar in dessen Liste, sollen aber wie die übrige
-   Detailansicht aussehen (normale Icongröße der "+"-Buttons). */
-.fred-typ-unified .fred-typ-section-header {
+   Überschriften sollen aber wie die übrige Detailansicht aussehen (normale
+   Icongröße der "+"-Buttons). */
+.fred-typ-block .fred-typ-section-header {
   margin: 0;
   padding: var(--size-4-2) 0 var(--size-4-1);
   --icon-size: var(--icon-m);
   --icon-stroke: var(--icon-m-stroke-width);
 }
 
-/* Abstand zwischen den Blöcken, egal an welcher Stelle das TYP-
-   Frontmatter steht (Subtypen dürfen auch darüber liegen) - nur der
-   oberste Block beginnt ohne. */
-.fred-typ-unified .fred-typ-section-header:not(:first-child) {
-  margin-top: var(--size-4-3);
-}
-
-.fred-typ-unified .fred-typ-section-footer {
+.fred-typ-block .fred-typ-section-footer {
   height: var(--size-4-1);
 }
 
 /* Abschluss eines Subtyp-Blocks (siehe renderSectionFooter in typ-view.js):
    links Farbpunkt und Zurücksetzen, rechts die Aktionen - Icongröße wie in
    den Überschriften. */
-.fred-typ-unified .fred-typ-section-footer.fred-typ-subtype-actions,
+.fred-typ-block .fred-typ-section-footer.fred-typ-subtype-actions,
 .fred-typ-subtype-pending .fred-typ-section-footer.fred-typ-subtype-actions {
   display: flex;
   align-items: center;

@@ -1,5 +1,5 @@
 const { ItemView, Menu, Modal, Notice, setIcon, debounce } = require("obsidian");
-const { mountUnifiedFrontmatterEditor } = require("./unified-frontmatter-editor");
+const { mountFrontmatterBlocks } = require("./frontmatter-blocks");
 const {
   normalizeSubtypeName,
   getSubtypeNames,
@@ -285,7 +285,7 @@ class TypView extends ItemView {
   async onOpen() {
     this.isEditing = false;
     this.selectedType = null;
-    this.frontmatterEditor = null;
+    this.frontmatterBlocks = null;
     this.frontmatterEditors = [];
 
     this.contentEl.empty();
@@ -451,13 +451,13 @@ class TypView extends ItemView {
   // deshalb vor jedem Neuaufbau der Detail-Ansicht explizit entladen werden -
   // contentEl.empty() allein würde nur die DOM-Elemente entfernen, nicht aber
   // den darauf registrierten metadataTypeManager-Listener der Editor-Instanz.
-  // frontmatterEditor ist der Editor des TYP-Blocks (u. a. für den Befehl
-  // "Standard-Property hinzufügen"), frontmatterEditors alle Editoren der
-  // Detailansicht inkl. der Subtyp-Blöcke.
+  // frontmatterBlocks ist die Steuerung über alle Blöcke (u. a. für den
+  // Befehl "Standard-Property hinzufügen"), frontmatterEditors alle Editoren
+  // der Detailansicht inkl. der Subtyp-Blöcke.
   destroyFrontmatterEditor() {
     for (const editor of this.frontmatterEditors ?? []) this.removeChild(editor);
     this.frontmatterEditors = [];
-    this.frontmatterEditor = null;
+    this.frontmatterBlocks = null;
   }
 
   render() {
@@ -872,14 +872,14 @@ class TypView extends ItemView {
     // Trennt die Frontmatter-Blöcke von den übrigen Einstellungen des TYPs.
     // body.createDiv({ cls: "fred-typ-detail-separator" });
 
-    // TYP-Frontmatter und je registriertem Subtyp ein Block darunter, alle
-    // in einem gemeinsamen Property-Editor (siehe unified-frontmatter-editor.js)
-    // - jeder Key gehört zu genau einem Block, Drag & Drop reicht über alle
-    // Blöcke. Ein Subtyp-Block ergänzt das TYP-Frontmatter für Notizen
-    // mit diesem SUBTYP (siehe subtypes.js).
+    // TYP-Frontmatter und je registriertem Subtyp ein Block darunter, jeder
+    // mit eigener Editor-Instanz (siehe frontmatter-blocks.js) - derselbe Key
+    // darf deshalb in mehreren Blöcken stehen. Ein Subtyp-Block ergänzt das
+    // TYP-Frontmatter für Notizen mit diesem SUBTYP und überschreibt dort
+    // gleichnamige Properties (siehe subtypes.js).
     const bucket = this.plugin.typIndex.subtypeBucket(type);
-    this.frontmatterEditor = mountUnifiedFrontmatterEditor(this, body, type, {
-      renderHeader: (section, el, editor) => this.renderSectionHeader(el, type, section, bucket, editor),
+    this.frontmatterBlocks = mountFrontmatterBlocks(this, body, type, {
+      renderHeader: (section, el, blocks) => this.renderSectionHeader(el, type, section, bucket, blocks),
       renderFooter: (section, el) => {
         if (section !== null) this.renderSectionFooter(el, type, section);
       },
@@ -890,7 +890,7 @@ class TypView extends ItemView {
       },
       onSectionContextMenu: (section) => this.openSubtypeSearch(type, section),
     });
-    if (this.frontmatterEditor) this.frontmatterEditors.push(this.frontmatterEditor);
+    this.frontmatterEditors.push(...this.frontmatterBlocks.editors);
 
     // Bewusst über die volle Breite und in Akzentfarbe, damit er sich von den
     // kleinen Icon-Buttons der Blöcke abhebt.
@@ -912,12 +912,12 @@ class TypView extends ItemView {
     this.plugin.refreshFrontmatterHighlight?.();
   }
 
-  // Überschrift eines Blocks im gemeinsamen Editor (siehe
-  // unified-frontmatter-editor.js): Titel mit Notiz-Anzahl (beim TYP-
-  // Frontmatter die Notizen ohne SUBTYP - für die gilt nur dieser Block),
-  // Suche per Rechtsklick (beim TYP-Frontmatter auf den Titel), und die beiden "Property
-  // hinzufügen"-Buttons, die eine Leerzeile in genau diesem Block anlegen.
-  renderSectionHeader(el, type, section, bucket, editor) {
+  // Überschrift eines Blocks (siehe frontmatter-blocks.js): Titel mit
+  // Notiz-Anzahl (beim TYP-Frontmatter die Notizen ohne SUBTYP - für die gilt
+  // nur dieser Block), Suche per Rechtsklick (beim TYP-Frontmatter auf den
+  // Titel), und die beiden "Property hinzufügen"-Buttons, die eine Leerzeile
+  // in genau diesem Block anlegen.
+  renderSectionHeader(el, type, section, bucket, blocks) {
     const titleGroup = el.createDiv({ cls: "fred-typ-frontmatter-title-group" });
     const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? `${type}-Frontmatter` });
     if (section === null) {
@@ -962,14 +962,14 @@ class TypView extends ItemView {
       attr: { "aria-label": "Floating Property hinzufügen" },
     });
     setIcon(addFloatingPropertyBtn, "plus");
-    addFloatingPropertyBtn.addEventListener("click", () => editor.fredAddBlank(section, true));
+    addFloatingPropertyBtn.addEventListener("click", () => blocks.addBlank(section, true));
 
     const addPropertyBtn = addButtons.createDiv({
       cls: "clickable-icon fred-typ-frontmatter-add",
       attr: { "aria-label": "Property hinzufügen" },
     });
     setIcon(addPropertyBtn, "plus");
-    addPropertyBtn.addEventListener("click", () => editor.fredAddBlank(section, false));
+    addPropertyBtn.addEventListener("click", () => blocks.addBlank(section, false));
   }
 
   // Abschluss eines Subtyp-Blocks: links die Farbe des Subtyps (Farbpunkt, der
@@ -1690,7 +1690,7 @@ async function addTypPropertyCommand(plugin) {
 
   const activeTypView = app.workspace.getActiveViewOfType(TypView);
   if (activeTypView && activeTypView.selectedType !== null) {
-    activeTypView.frontmatterEditor?.fredAddBlank(null);
+    activeTypView.frontmatterBlocks?.addBlank(null);
     return;
   }
 
@@ -1702,7 +1702,7 @@ async function addTypPropertyCommand(plugin) {
       .find((leaf) => leaf.view instanceof TypView && leaf.view.selectedType !== null);
     if (openLeaf) {
       await app.workspace.revealLeaf(openLeaf);
-      openLeaf.view.frontmatterEditor?.fredAddBlank(null);
+      openLeaf.view.frontmatterBlocks?.addBlank(null);
       return;
     }
     new Notice(file ? "Aktive Notiz hat keinen TYP und in der TYP-View ist kein TYP geöffnet." : "Keine Notiz offen und in der TYP-View ist kein TYP geöffnet.");
@@ -1713,7 +1713,7 @@ async function addTypPropertyCommand(plugin) {
   const view = app.__fredTypLeaf?.view;
   if (!(view instanceof TypView)) return;
   view.openTypeSettings(type);
-  view.frontmatterEditor?.fredAddBlank(null);
+  view.frontmatterBlocks?.addBlank(null);
 }
 
 // Öffnet bei Bedarf erst die TYP-View (bzw. verlässt eine offene Detailansicht

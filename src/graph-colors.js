@@ -24,9 +24,13 @@ function patchRenderer(plugin, renderer) {
       if (node.color) continue;
 
       if (node.type === "tag") {
-        if (plugin.settings.graphTagColorEnabled && plugin.settings.graphTagColor) {
-          node.color = { a: 1, rgb: hexToInt(plugin.settings.graphTagColor) };
-        }
+        // Eigene Tag-Farbe deaktiviert (30.09.2026): Tag-Knoten lassen sich im
+        // Minimal Theme bereits über die Style Settings einfärben (Graphs →
+        // "Tag node color"), das hier war eine Dopplung. Die TYP-Einfärbung der
+        // Notiz-Knoten unten bleibt, die kann Style Settings nicht.
+        // if (plugin.settings.graphTagColorEnabled && plugin.settings.graphTagColor) {
+        //   node.color = { a: 1, rgb: hexToInt(plugin.settings.graphTagColor) };
+        // }
         continue;
       }
 
@@ -34,9 +38,11 @@ function patchRenderer(plugin, renderer) {
       let color = null;
 
       if (file && file.extension !== "md") {
-        if (plugin.settings.graphAttachmentColorEnabled && plugin.settings.graphAttachmentColor) {
-          color = plugin.settings.graphAttachmentColor;
-        }
+        // Eigene Anhänge-Farbe deaktiviert (30.09.2026), wie die Tag-Farbe oben:
+        // Style Settings des Minimal Theme, Graphs → "Attachment node color".
+        // if (plugin.settings.graphAttachmentColorEnabled && plugin.settings.graphAttachmentColor) {
+        //   color = plugin.settings.graphAttachmentColor;
+        // }
       } else if (plugin.settings.colorViews.graph) {
         color = colorForFile(plugin, file, "graph");
       }
@@ -62,7 +68,10 @@ function registerGraphColors(plugin) {
   const refresh = () => {
     for (const leaf of getGraphLeaves(plugin.app)) {
       if (leaf.view?.renderer) patchRenderer(plugin, leaf.view.renderer);
-      leaf.view?.dataEngine?.render();
+      // Der globale Graph hält seine Engine in view.dataEngine, der lokale in
+      // view.engine - ohne den zweiten Fall bekam ein lokaler Graph eine
+      // geänderte TYP-Farbe erst beim nächsten eigenen Neuaufbau zu sehen.
+      (leaf.view?.dataEngine ?? leaf.view?.engine)?.render();
     }
   };
 

@@ -22,14 +22,35 @@ const {
   hasColorOffset,
   subtypeHasOwnColor,
   paintColorDot,
+  nameColor,
   channelBounds,
   clampedOffset,
   SUBTYPE_COLOR_CHANNELS,
+  DEFAULT_TYPE_COLOR,
 } = require("./type-colors");
 
 const VIEW_TYPE_TYP = "fred-typ-view";
-const DEFAULT_TYPE_COLOR = "#888888";
 const DEFAULT_SORT_ORDER = "count-desc";
+const DEFAULT_SECONDARY = "subtypes";
+
+// Was in der TYP-Liste rechts neben dem Namen steht (settings.typListSecondary).
+// Umgeschaltet wird nicht über die Einstellungen, sondern über einen Knopf im
+// Listen-Header neben der Sortierung, der die Modi der Reihe nach durchschaltet
+// (siehe cycleSecondary) - es sind zu wenige und zu unmittelbar sichtbare
+// Zustaende fuer ein Menue.
+//   subtypes    - die Subtypen des TYPs in Klammern, je in seiner Farbe
+//                 (wie die Vorschau im separaten TYP-Picker, siehe
+//                 renderSubtypePreview in type-picker.js)
+//   description - Textfeld zur Bearbeitung der TYP-Beschreibung
+//   none        - nichts, der Name bekommt die ganze Zeile
+// Die Reihenfolge ist zugleich die des Durchschaltens, der erste Eintrag der
+// Standard (DEFAULT_SECONDARY): die Subtypen stehen sonst nirgends in der
+// Liste, die Beschreibung dagegen auch in der Detailansicht des TYPs.
+const SECONDARY_MODES = [
+  { mode: "subtypes", title: "Subtypen", icon: "list-tree" },
+  { mode: "description", title: "Beschreibung", icon: "text-cursor-input" },
+  { mode: "none", title: "Nichts", icon: "minus" },
+];
 
 const SORT_OPTIONS = [
   // Nutzt (anders als die übrigen Modi) keinen eigenen Vergleich, sondern die
@@ -501,7 +522,9 @@ class TypView extends ItemView {
         unregisteredRows.push({ type: null, count: noType });
       }
 
-      const listCls = "fred-typ-list nav-files-container" + (this.plugin.settings.typListDescriptionEnabled ? "" : " fred-typ-list-no-description");
+      // Ohne zweite Spalte darf der Name die ganze Zeile nehmen (siehe
+      // .fred-typ-list-no-secondary in styles.css).
+      const listCls = "fred-typ-list nav-files-container" + (this.secondaryMode() === "none" ? " fred-typ-list-no-secondary" : "");
       this.listEl = contentEl.createDiv({ cls: listCls });
       this.separatorEl = null;
 
@@ -545,6 +568,40 @@ class TypView extends ItemView {
     });
     setIcon(sortBtn, "lucide-sort-asc");
     sortBtn.addEventListener("click", (event) => this.showSortMenu(event));
+
+    // Zweite Spalte: bewusst kein Menue, sondern ein Knopf, der die drei Modi
+    // der Reihe nach durchschaltet - bei so wenigen Zustaenden, deren Wirkung
+    // direkt darunter sichtbar wird, ist Durchklicken schneller als Aufklappen
+    // und Auswaehlen. Icon und Tooltip zeigen den aktuellen Modus.
+    const current = SECONDARY_MODES[this.secondaryIndex()];
+    const secondaryBtn = buttonsContainer.createDiv({
+      cls: "clickable-icon nav-action-button",
+      attr: { "aria-label": `Neben dem Namen: ${current.title}` },
+    });
+    setIcon(secondaryBtn, current.icon);
+    secondaryBtn.addEventListener("click", () => this.cycleSecondary());
+  }
+
+  // settings.typListSecondary, aber immer ein gueltiger Modus - Bestandsdaten
+  // kennen den Schluessel noch nicht (siehe migrateTypListSecondary in main.js),
+  // und ein spaeter entfernter Modus soll die Liste nicht leer lassen.
+  secondaryMode() {
+    const mode = this.plugin.settings.typListSecondary;
+    return SECONDARY_MODES.some((entry) => entry.mode === mode) ? mode : DEFAULT_SECONDARY;
+  }
+
+  secondaryIndex() {
+    return SECONDARY_MODES.findIndex((entry) => entry.mode === this.secondaryMode());
+  }
+
+  async cycleSecondary() {
+    const next = SECONDARY_MODES[(this.secondaryIndex() + 1) % SECONDARY_MODES.length];
+    this.plugin.settings.typListSecondary = next.mode;
+    await this.plugin.saveSettings();
+    // Wie im Sortier-Menue: nur neu zeichnen. Der Modus betrifft ausschliesslich
+    // diese Liste, nicht die Einfaerbung anderswo - refreshTypColors waere hier
+    // also nur ein unnoetiges Rundum-Neuzeichnen aller Ansichten.
+    this.render();
   }
 
   showSortMenu(event) {
@@ -711,25 +768,11 @@ class TypView extends ItemView {
     const color = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
     if (color) nameEl.style.color = color;
 
-    // Echtes Text-Input statt nur Anzeige: direkt in der Liste bearbeitbar, ohne
-    // dafür erst die Detailansicht öffnen zu müssen. click hier muss die Zeile
-    // selbst gezielt NICHT auslösen (self.addEventListener("click", ...) unten
-    // öffnet sonst die Detailansicht), daher stopPropagation. Über die Einstellung
-    // "Beschreibungs-Textfeld anzeigen" komplett ausstellbar.
-    if (this.plugin.settings.typListDescriptionEnabled) {
-      const descInput = self.createEl("input", {
-        type: "text",
-        cls: "fred-typ-list-description-input",
-      });
-      descInput.value = this.plugin.settings.typeDescriptions[type] ?? "";
-      descInput.addEventListener("click", (event) => event.stopPropagation());
-      descInput.addEventListener("change", async () => {
-        const value = descInput.value.trim();
-        if (value) this.plugin.settings.typeDescriptions[type] = value;
-        else delete this.plugin.settings.typeDescriptions[type];
-        await this.plugin.saveSettings();
-      });
-    }
+    // Zweite Spalte, umgeschaltet ueber den Knopf im Listen-Header (siehe
+    // SECONDARY_MODES und cycleSecondary).
+    const secondary = this.secondaryMode();
+    if (secondary === "description") this.renderDescriptionInput(self, type);
+    else if (secondary === "subtypes") this.renderSubtypePreview(self, type);
 
     this.renderCountFlair(self, count);
 
@@ -783,6 +826,56 @@ class TypView extends ItemView {
         this.render();
       });
     }
+  }
+
+  // Echtes Text-Input statt nur Anzeige: die Beschreibung ist direkt in der
+  // Liste bearbeitbar, ohne dafür erst die Detailansicht öffnen zu müssen.
+  // click hier muss die Zeile selbst gezielt NICHT auslösen
+  // (self.addEventListener("click", ...) in renderRegisteredItem öffnet sonst
+  // die Detailansicht), daher stopPropagation.
+  renderDescriptionInput(self, type) {
+    const descInput = self.createEl("input", {
+      type: "text",
+      cls: "fred-typ-list-description-input",
+    });
+    descInput.value = this.plugin.settings.typeDescriptions[type] ?? "";
+    descInput.addEventListener("click", (event) => event.stopPropagation());
+    descInput.addEventListener("change", async () => {
+      const value = descInput.value.trim();
+      if (value) this.plugin.settings.typeDescriptions[type] = value;
+      else delete this.plugin.settings.typeDescriptions[type];
+      await this.plugin.saveSettings();
+    });
+  }
+
+  // "(Subtyp 1, Subtyp 2)" statt der Beschreibung - dieselbe Darstellung wie
+  // die Subtyp-Vorschau im separaten TYP-Picker (renderSubtypePreview in
+  // type-picker.js, gemeinsame Farbgrundlage nameColor in type-colors.js):
+  // Klammern und Kommas muted, jeder Name in seiner eigenen Subtyp-Farbe; ohne
+  // "TYP View einfärben" bleibt die Vorschau wie der TYP-Name selbst ungefärbt,
+  // und ohne dessen Unter-Schalter "Subtyp" stehen alle in der TYP-Farbe.
+  // Bewusst nur die erfassten Subtypen und ohne Notiz-Anzahl: nicht erfasste
+  // Werte haben weder Farbe noch Definition, und Zahlen je Name würden die
+  // Zeile so verlängern, dass bei mehreren Subtypen nichts mehr davon zu lesen
+  // wäre. Reine Anzeige - Klick und Rechtsklick gehören weiter der ganzen
+  // Zeile (Detailansicht bzw. Suche). Ob die Liste links hinter dem Namen
+  // beginnt oder rechtsbündig vor der Anzahl endet, ist hier bewusst nicht
+  // abgefragt: das schaltet Style Settings über eine body-Klasse (siehe den
+  // @settings-Block und .fred-typ-list-subtypes in styles.css), das Markup
+  // bleibt in beiden Fällen dasselbe.
+  renderSubtypePreview(self, type) {
+    const subtypes = getSubtypeNames(this.plugin.settings, type);
+    if (subtypes.length === 0) return;
+
+    const colorize = this.plugin.settings.colorViews.typList;
+    const wrap = self.createSpan({ cls: "fred-typ-list-subtypes" });
+    wrap.appendText("(");
+    subtypes.forEach((subtype, index) => {
+      if (index > 0) wrap.appendText(", ");
+      const span = wrap.createSpan({ text: subtype });
+      if (colorize) span.style.color = nameColor(this.plugin.settings, type, subtype).color;
+    });
+    wrap.appendText(")");
   }
 
   renderUnregisteredItem(type, count) {

@@ -1,3 +1,17 @@
+/* @settings
+
+name: TYP-System
+id: typ-system
+settings:
+    -
+        id: typ-system-subtypes-right
+        title: Subtypen rechtsbündig
+        description: "Stellt die Subtyp-Liste der TYP-Liste rechtsbündig direkt vor die Notiz-Anzahl, statt sie links hinter dem TYP-Namen beginnen zu lassen. Betrifft nur die Subtyp-Anzeige (umschaltbar über den Button im Listen-Header), nicht das Beschreibungs-Textfeld."
+        type: class-toggle
+        default: false
+
+*/
+
 /* Core-Views wie der File Explorer hängen nav-header/nav-files-container an einer
    ungepolsterten Stelle ein und umgehen damit das Standard-Padding von view-content.
    Als Plugin-View können wir das nur nachbilden, indem wir es hier zurücknehmen. */
@@ -64,13 +78,52 @@
 }
 
 /* Der Name (tree-item-inner) soll nicht mehr den ganzen restlichen Platz der
-   Zeile einnehmen (Obsidians Core-Stil dafür: flex-grow: 1) - das Beschreibungs-
-   Input daneben braucht den Platz stattdessen. Nur, wenn das Feld überhaupt
-   angezeigt wird (siehe Einstellung "Beschreibungs-Textfeld anzeigen") - sonst
-   soll der Name wie gewohnt den ganzen Rest der Zeile einnehmen. Scoped auf die
-   TYP-Liste, damit andere Tree-Views (Datei-Explorer etc.) unberührt bleiben. */
-.fred-typ-list:not(.fred-typ-list-no-description) .tree-item-inner {
+   Zeile einnehmen (Obsidians Core-Stil dafür: flex-grow: 1) - die zweite Spalte
+   daneben (Beschreibungs-Input bzw. Subtyp-Vorschau, siehe SECONDARY_MODES in
+   typ-view.js) braucht den Platz stattdessen. Nur, wenn es sie überhaupt gibt -
+   im Modus "Nichts" soll der Name wie gewohnt den ganzen Rest der Zeile
+   einnehmen. Scoped auf die TYP-Liste, damit andere Tree-Views (Datei-Explorer
+   etc.) unberührt bleiben. */
+.fred-typ-list:not(.fred-typ-list-no-secondary) .tree-item-inner {
   flex: 0 1 auto;
+}
+
+/* "(Subtyp 1, Subtyp 2)" neben dem TYP-Namen - Klammern und Kommas muted, die
+   Namen in ihrer Farbe (siehe renderSubtypePreview in typ-view.js). Gleiche
+   Darstellung wie die Vorschau im TYP-Picker (.fred-typ-picker-subtypes), hier
+   aber mit flex-grow, damit der Zähler rechts wie beim Beschreibungsfeld an
+   derselben Stelle steht statt direkt hinter der Klammer. */
+.fred-typ-list-subtypes {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 0.4em;
+}
+
+/* Subtyp-Vorschau rechtsbündig: die Klammerlisten enden bündig direkt vor den
+   Zahlen und bilden so eine zweite rechte Kante, statt in jeder Zeile an
+   anderer Stelle hinter dem TYP-Namen zu beginnen; TYPen ohne Subtypen lassen
+   die Zeile einfach leer.
+
+   Bewusst NUR für die Subtypen und nicht für das Beschreibungsfeld: ein input
+   scrollt seinen Inhalt selbst und zeigt rechtsbündig bei zu langem Text
+   dessen ENDE, schneidet den Anfang also links ab ("…planung" statt
+   "Projektplanung …") - bei einer Beschreibung ist aber gerade der Anfang das
+   Aussagekräftige.
+
+   Geschaltet wird das nicht über eine eigene Plugin-Einstellung, sondern über
+   den @settings-Block ganz oben: es ist eine reine Darstellungsfrage, und Style
+   Settings setzt dafür die Klasse "typ-system-subtypes-right" auf den body -
+   das Plugin selbst muss davon nichts wissen und rendert in beiden Fällen
+   dasselbe Markup. Ohne Style Settings fehlt die Klasse und die Liste steht
+   linksbündig; der im @settings-Block angegebene Standard (an) greift nur,
+   solange das Plugin installiert ist. */
+body.typ-system-subtypes-right .fred-typ-list-subtypes {
+  text-align: right;
 }
 
 /* Feste Breite für die Zähler-Flair, statt sich an deren Ziffernanzahl anzupassen
@@ -1085,12 +1138,33 @@ input[type="range"].fred-typ-subtype-color-slider {
   flex-shrink: 0;
 }
 
+/* "TYP (Subtyp 1, Subtyp 2)" in der TYP-Auswahl des separaten Ablaufs (siehe
+   renderSubtypePreview in type-picker.js) - Klammern und Kommas muted, die
+   Namen in ihrer Farbe. Schrumpft vor der Beschreibung, damit lange Listen die
+   Zeile nicht sprengen. */
+.fred-typ-picker-subtypes {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 3em;
+}
+
 .fred-typ-picker-desc {
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1 1 auto;
+}
+
+/* Der Zusatz der "ohne Subtyp"-Zeile im Subtyp-Picker (siehe
+   SubtypPickerModal in type-picker.js): in normaler Textfarbe, nicht muted wie
+   eine Beschreibung - die Zeile ist eine Wahl wie jede andere und hebt sich so
+   von den Subtyp-Zeilen ab, die nur aus ihrem Namen bestehen. */
+.fred-typ-picker-none {
+  color: var(--text-normal);
 }
 
 .fred-typ-picker-count {

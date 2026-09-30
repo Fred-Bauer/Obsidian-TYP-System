@@ -1,5 +1,10 @@
 const { getSubtype } = require("./subtypes");
 
+// Farbe eines TYPs ohne eigene Farbe - hier statt in typ-view.js, weil sie
+// unterhalb der View gebraucht wird (siehe nameColor); typ-view.js reicht sie
+// unverändert weiter, damit bestehende Importe dort gültig bleiben.
+const DEFAULT_TYPE_COLOR = "#888888";
+
 // --- Subtyp-Farben ----------------------------------------------------------
 // Ein Subtyp speichert keine eigene Farbe, sondern nur eine Abweichung von der
 // Farbe seines TYPs (settings.typeSubtypes[TYP][SUBTYP].color = { h, l }; in
@@ -270,6 +275,23 @@ function subtypeHasOwnColor(settings, type, subtype) {
   return hasColorOffset(clampedOffset(settings, getSubtype(settings, type, subtype)?.color));
 }
 
+// Farbe, in der ein TYP- bzw. Subtyp-Name dargestellt wird - gemeinsame
+// Grundlage für den Picker (renderColoredName/nameColor in type-picker.js) und
+// die Subtyp-Vorschau der TYP-Liste (renderSubtypePreview in typ-view.js),
+// damit beide nicht auseinanderlaufen. Mit subtype die Farbe des Subtyps,
+// aber nur wenn der Unter-Schalter "Subtyp" von "TYP View" das zulässt - sonst
+// die des TYPs. isDefault = Standardwert, also hohler Ring statt gefülltem
+// Punkt (siehe paintColorDot): ein TYP ohne Farbe grau, ein Subtyp ohne eigene
+// Abweichung in der TYP-Farbe, die er übernimmt.
+function nameColor(settings, type, subtype = null) {
+  const useSubtype = !!subtype && settings.colorViews.typListSubtyp;
+  const typeColor = settings.typeColors[type] ?? null;
+  return {
+    color: (useSubtype ? subtypeColor(settings, type, subtype) : typeColor) ?? DEFAULT_TYPE_COLOR,
+    isDefault: !typeColor || (useSubtype && !subtypeHasOwnColor(settings, type, subtype)),
+  };
+}
+
 // Farbpunkt (TYP-Liste, Detailansicht, Picker, Bestätigungen): gefüllt bei
 // einer eigenen Farbe, als hohler Ring beim Standardwert - ein TYP ohne Farbe
 // als grauer Ring, ein Subtyp ohne eigene Einstellung als Ring in der
@@ -292,6 +314,8 @@ function colorForFile(plugin, file, viewKey = null) {
 
 module.exports = {
   colorForFile,
+  nameColor,
+  DEFAULT_TYPE_COLOR,
   subtypeColor,
   applyColorOffset,
   hasColorOffset,

@@ -55,15 +55,23 @@ const DEFAULT_SETTINGS = {
   // oberen oder unteren Rand des Property-Blocks sitzt.
   noteTitleVerticalAlign: "top",
   typSortOrder: "count-desc",
-  typListDescriptionEnabled: true,
+  // Was in der TYP-Liste rechts neben dem Namen steht - "description",
+  // "subtypes" oder "none". Umgeschaltet wird das nicht hier, sondern über den
+  // Knopf im Listen-Header neben der Sortierung (siehe SECONDARY_MODES in
+  // typ-view.js), wie schon die Sortierreihenfolge: beides betrifft nur das
+  // Aussehen dieser einen Liste und gehört daher an sie selbst, nicht in eine
+  // Einstellungsseite, die man dafür jedes Mal öffnen müsste.
+  typListSecondary: "subtypes",
   // Siehe pickTypeAndSubtype in type-picker.js: false = Subtypen eingerückt
   // direkt im TYP-Picker, true = eigener Subtyp-Picker nach der TYP-Auswahl.
   separateSubtypePicker: false,
   includeIgnoredFiles: false,
-  graphTagColorEnabled: false,
-  graphTagColor: "",
-  graphAttachmentColorEnabled: false,
-  graphAttachmentColor: "",
+  // Eigene Tag-/Anhänge-Farbe im Graph deaktiviert (30.09.2026): beides ist in
+  // den Style Settings des Minimal Theme einstellbar, siehe graph-colors.js.
+  // graphTagColorEnabled: false,
+  // graphTagColor: "",
+  // graphAttachmentColorEnabled: false,
+  // graphAttachmentColor: "",
   // Wie weit die Farbe eines Subtyps höchstens von der seines TYPs abweichen
   // darf (±), siehe type-colors.js: Farbton in Grad, Helligkeit in % des Wegs
   // zu Weiß bzw. Schwarz.
@@ -126,18 +134,6 @@ class TypSystemSettingTab extends PluginSettingTab {
       .setHeading("TYP-Liste")
       .addSetting((setting) =>
         setting
-          .setName("Beschreibungs-Textfeld anzeigen")
-          .setDesc("Zeigt in der TYP-Liste neben jedem registrierten TYP ein Textfeld zur Bearbeitung seiner Beschreibung.")
-          .addToggle((toggle) =>
-            toggle.setValue(this.plugin.settings.typListDescriptionEnabled).onChange(async (value) => {
-              this.plugin.settings.typListDescriptionEnabled = value;
-              await this.plugin.saveSettings();
-              this.plugin.refreshTypColors?.();
-            })
-          )
-      )
-      .addSetting((setting) =>
-        setting
           .setName("Ignorierte Notizen IMMER berücksichtigen")
           .setDesc(
             "Bezieht Notizen aus Obsidians \"Excluded files\"-Liste (dort tragen auch Plugins wie Hide Folders ausgeblendete Ordner ein) wieder in TYP-Zähler, TYP-Picker und die Frontmatter-Sortierung mit ein, statt sie zu überspringen."
@@ -155,7 +151,7 @@ class TypSystemSettingTab extends PluginSettingTab {
       setting
         .setName("Subtyp-Picker separat")
         .setDesc(
-          "Beim Anlegen einer Notiz folgt auf den TYP-Picker ein eigener Subtyp-Picker (ESC dort führt zurück zur TYP-Auswahl), statt die Subtypen direkt eingerückt unter ihrem TYP im TYP-Picker anzuzeigen."
+          "Beim Anlegen einer Notiz folgt auf den TYP-Picker ein eigener Subtyp-Picker (ESC dort führt zurück zur TYP-Auswahl), statt die Subtypen direkt eingerückt unter ihrem TYP im TYP-Picker anzuzeigen. Der TYP-Picker nennt die Subtypen dann hinter dem TYP-Namen."
         )
         .addToggle((toggle) =>
           toggle.setValue(this.plugin.settings.separateSubtypePicker).onChange(async (value) => {
@@ -419,57 +415,61 @@ class TypSystemSettingTab extends PluginSettingTab {
       );
     }
 
-    const graphGroup = new SettingGroup(containerEl).setHeading("Graph");
-
-    // Ein Setting pro Node-Typ, den Obsidians Graph-Engine kennt - gleicher
-    // Aufbau (Toggle + Farbwahl + Zurücksetzen) für jeden, daher als Helper
-    // statt dupliziert.
-    const graphColorSetting = (enabledKey, colorKey, defaultColor, name, desc) =>
-      graphGroup.addSetting((setting) =>
-        setting
-          .setName(name)
-          .setDesc(desc)
-          .addToggle((toggle) =>
-            toggle.setValue(this.plugin.settings[enabledKey]).onChange(async (value) => {
-              this.plugin.settings[enabledKey] = value;
-              await this.plugin.saveSettings();
-              this.plugin.refreshTypColors?.();
-            })
-          )
-          .addColorPicker((picker) =>
-            picker.setValue(this.plugin.settings[colorKey] || defaultColor).onChange(async (value) => {
-              this.plugin.settings[colorKey] = value;
-              await this.plugin.saveSettings();
-              this.plugin.refreshTypColors?.();
-            })
-          )
-          .addExtraButton((button) =>
-            button
-              .setIcon("rotate-ccw")
-              .setTooltip("Zurücksetzen auf Standardfarbe")
-              .onClick(async () => {
-                this.plugin.settings[colorKey] = "";
-                await this.plugin.saveSettings();
-                this.plugin.refreshTypColors?.();
-                this.display();
-              })
-          )
-      );
-
-    graphColorSetting(
-      "graphTagColorEnabled",
-      "graphTagColor",
-      "#888888",
-      "Tag-Farbe",
-      "Eigene Farbe für Tag-Knoten im Graph (global und lokal) verwenden statt der Standardfarbe. Eigene Farbgruppen im Graph haben weiterhin Vorrang."
-    );
-    graphColorSetting(
-      "graphAttachmentColorEnabled",
-      "graphAttachmentColor",
-      "#e0ac00",
-      "Anhänge-Farbe",
-      "Eigene Farbe für Anhang-Knoten (Nicht-Markdown-Dateien wie Bilder oder PDFs) im Graph verwenden statt der Standardfarbe."
-    );
+    // Gruppe "Graph" (Tag-/Anhänge-Farbe) deaktiviert (30.09.2026): beides ist im
+    // Minimal Theme über die Style Settings einstellbar, siehe graph-colors.js.
+    // Die TYP-Einfärbung der Notiz-Knoten bleibt aktiv, Schalter oben unter
+    // "Einfärbung" → "Graph".
+    //     const graphGroup = new SettingGroup(containerEl).setHeading("Graph");
+    //
+    //     // Ein Setting pro Node-Typ, den Obsidians Graph-Engine kennt - gleicher
+    //     // Aufbau (Toggle + Farbwahl + Zurücksetzen) für jeden, daher als Helper
+    //     // statt dupliziert.
+    //     const graphColorSetting = (enabledKey, colorKey, defaultColor, name, desc) =>
+    //       graphGroup.addSetting((setting) =>
+    //         setting
+    //           .setName(name)
+    //           .setDesc(desc)
+    //           .addToggle((toggle) =>
+    //             toggle.setValue(this.plugin.settings[enabledKey]).onChange(async (value) => {
+    //               this.plugin.settings[enabledKey] = value;
+    //               await this.plugin.saveSettings();
+    //               this.plugin.refreshTypColors?.();
+    //             })
+    //           )
+    //           .addColorPicker((picker) =>
+    //             picker.setValue(this.plugin.settings[colorKey] || defaultColor).onChange(async (value) => {
+    //               this.plugin.settings[colorKey] = value;
+    //               await this.plugin.saveSettings();
+    //               this.plugin.refreshTypColors?.();
+    //             })
+    //           )
+    //           .addExtraButton((button) =>
+    //             button
+    //               .setIcon("rotate-ccw")
+    //               .setTooltip("Zurücksetzen auf Standardfarbe")
+    //               .onClick(async () => {
+    //                 this.plugin.settings[colorKey] = "";
+    //                 await this.plugin.saveSettings();
+    //                 this.plugin.refreshTypColors?.();
+    //                 this.display();
+    //               })
+    //           )
+    //       );
+    //
+    //     graphColorSetting(
+    //       "graphTagColorEnabled",
+    //       "graphTagColor",
+    //       "#888888",
+    //       "Tag-Farbe",
+    //       "Eigene Farbe für Tag-Knoten im Graph (global und lokal) verwenden statt der Standardfarbe. Eigene Farbgruppen im Graph haben weiterhin Vorrang."
+    //     );
+    //     graphColorSetting(
+    //       "graphAttachmentColorEnabled",
+    //       "graphAttachmentColor",
+    //       "#e0ac00",
+    //       "Anhänge-Farbe",
+    //       "Eigene Farbe für Anhang-Knoten (Nicht-Markdown-Dateien wie Bilder oder PDFs) im Graph verwenden statt der Standardfarbe."
+    //     );
 
     const frontmatterGroup = new SettingGroup(containerEl).setHeading("TYP-Frontmatter");
 

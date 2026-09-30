@@ -41,6 +41,38 @@ function migrateFloatingFrontmatter(settings) {
   delete settings.typeFloatingFrontmatter;
 }
 
+// Aus dem frueheren Schalter "Beschreibungs-Textfeld anzeigen" (Boolean) ist
+// der dreistufige Modus der zweiten Spalte geworden, umgeschaltet ueber den
+// Knopf im Listen-Header (siehe SECONDARY_MODES in typ-view.js). Der alte Wert
+// kennt nur zwei der drei Zustaende - true wird zur Beschreibung, false zu
+// "nichts"; "subtypes" gab es damals noch nicht. Liefert true bei einer
+// Aenderung, damit der Aufrufer sie gleich schreibt und der alte Schluessel
+// nicht in data.json liegen bleibt.
+//
+// Geprueft wird gegen stored (die rohen geladenen Daten), NICHT gegen settings:
+// dort hat Object.assign den neuen Schluessel laengst aus DEFAULT_SETTINGS
+// gefuellt, "noch nicht gesetzt" waere daran also nie zu erkennen und der alte
+// Wert bliebe stillschweigend liegen.
+function migrateTypListSecondary(settings, stored) {
+  if (stored?.typListDescriptionEnabled === undefined) return false;
+  if (stored.typListSecondary === undefined) {
+    settings.typListSecondary = stored.typListDescriptionEnabled ? "description" : "none";
+  }
+  delete settings.typListDescriptionEnabled;
+  return true;
+}
+
+// Die Ausrichtung der Subtyp-Vorschau war kurzzeitig eine eigene Einstellung
+// und ist jetzt ein Style Setting (body-Klasse, siehe den @settings-Block in
+// styles.css) - das Plugin liest den Schluessel nicht mehr. Ohne dieses
+// Aufraeumen bliebe er ueber Object.assign in loadSettings dauerhaft in
+// data.json stehen.
+function dropTypListSubtypesAlign(settings) {
+  if (settings.typListSubtypesRightAligned === undefined) return false;
+  delete settings.typListSubtypesRightAligned;
+  return true;
+}
+
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -80,6 +112,23 @@ module.exports = class TypSystemPlugin extends Plugin {
       this.refreshFrontmatterHighlight,
     ];
     this.refreshTypColors = () => refreshFns.forEach((fn) => fn());
+
+    // Der @settings-Block in styles.css (Style Settings, siehe dort) wird sonst
+    // je nach Ladereihenfolge uebersehen: Style Settings liest die Stylesheets
+    // beim eigenen Laden und danach nur noch bei "css-change" - das feuert aber
+    // ausschliesslich fuer Themes und Snippets, nicht fuer das styles.css eines
+    // Plugins. Wer spaeter geladen wird als Style Settings (oder per Hot-Reload
+    // neu geladen wird), taucht dort also gar nicht auf. "parse-style-settings"
+    // ist der dafuer vorgesehene Hook; ohne installiertes Style Settings hoert
+    // niemand zu und der Aufruf verpufft folgenlos.
+    //
+    // Erst im naechsten Tick: Obsidian haengt das styles.css eines Plugins erst
+    // NACH dessen onload() in den DOM - synchron hier gerufen fuende Style
+    // Settings das Stylesheet noch gar nicht und liesse den Abschnitt aus.
+    // onLayoutReady taugt dafuer nicht: beim Hot-Reload ist das Layout laengst
+    // fertig, der Rueckruf liefe also sofort und damit genauso zu frueh.
+    const parseStyleSettings = window.setTimeout(() => this.app.workspace.trigger("parse-style-settings"), 0);
+    this.register(() => window.clearTimeout(parseStyleSettings));
   }
 
   onunload() {}
@@ -230,9 +279,10 @@ module.exports = class TypSystemPlugin extends Plugin {
   // Für _obsidian/templater-scripts/TYP.js: Subtyp-Picker (siehe
   // type-picker.js). Löst mit dem gewählten Subtyp auf, mit "" für "Kein
   // Subtyp" (bzw. ohne Picker, wenn der TYP keine Subtypen hat), oder mit
-  // null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück).
-  pickSubtype(type) {
-    return pickSubtypeModal(this.app, this, type);
+  // null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück). query (optional):
+  // eine schon getippte Suchanfrage, nach der die Liste vorsortiert steht.
+  pickSubtype(type, query = "") {
+    return pickSubtypeModal(this.app, this, type, query);
   }
 
   // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter:
@@ -302,7 +352,8 @@ module.exports = class TypSystemPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const stored = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
     // Object.assign ersetzt verschachtelte Objekte als Ganzes - später
     // hinzugekommene Ansichten (z. B. colorViews.links) fehlten in bereits
     // gespeicherten Einstellungen sonst und wären stillschweigend aus.
@@ -314,9 +365,12 @@ module.exports = class TypSystemPlugin extends Plugin {
     // Subtyp-Blöcke lagen früher wahlweise über dem TYP-Frontmatter; das steht
     // jetzt fest ganz oben (siehe getSectionOrder in subtypes.js).
     migrateAboveStandard(this.settings);
-    // Anders als die übrigen Migrationen gleich schreiben: sie rechnet
-    // gespeicherte Zahlen um und darf das beim nächsten Start nicht erneut tun.
-    if (migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES)) await this.saveSettings();
+    // Anders als die übrigen Migrationen gleich schreiben: die eine rechnet
+    // gespeicherte Zahlen um und darf das beim nächsten Start nicht erneut tun,
+    // die andere entfernt einen Schlüssel, der sonst bei jedem Start wieder
+    // gelesen würde.
+    const migrated = [migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES), migrateTypListSecondary(this.settings, stored), dropTypListSubtypesAlign(this.settings)];
+    if (migrated.some(Boolean)) await this.saveSettings();
   }
 
   async saveSettings() {

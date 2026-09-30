@@ -328,14 +328,20 @@ class TypView extends ItemView {
     // nie eine Frontmatter-Property haben können) - daher explizit auf .md eingrenzen.
     // Für eine Liste (unregistrierter Schlüssel "[A, B]") gibt es keine exakte
     // Suchsyntax - dann nach Notizen suchen, die alle ihre Einträge tragen.
-    const raw = type === null ? undefined : this.plugin.typIndex.rawValueOf(type);
-    const query =
-      type === null
-        ? `-["${TYP_PROPERTY}"] file:.md`
-        : Array.isArray(raw)
-          ? raw.map((v) => `["${TYP_PROPERTY}":"${String(v ?? "").trim()}"]`).join(" ")
-          : `["${TYP_PROPERTY}":"${type}"]`;
+    const query = type === null ? `-["${TYP_PROPERTY}"] file:.md` : this.typeClause(type);
     globalSearch.instance.openGlobalSearch(query);
+  }
+
+  // Suchklausel für einen TYP-Schlüssel. Für eine Liste (unregistrierter
+  // Schlüssel "[A, B]") gibt es keine exakte Suchsyntax - dann nach Notizen
+  // suchen, die alle ihre Einträge tragen. Auch von openSubtypeSearch()
+  // genutzt: seit die nicht erfassten Subtypen in der Liste stehen, kann dort
+  // auch ein nicht erfasster (und damit unsauberer) TYP-Schlüssel ankommen.
+  typeClause(type) {
+    const raw = this.plugin.typIndex.rawValueOf(type);
+    return Array.isArray(raw)
+      ? raw.map((v) => `["${TYP_PROPERTY}":"${String(v ?? "").trim()}"]`).join(" ")
+      : `["${TYP_PROPERTY}":"${type}"]`;
   }
 
   // typeKey kommt 1:1 aus den tatsächlichen Frontmatter-Werten (siehe
@@ -346,25 +352,31 @@ class TypView extends ItemView {
   // die betroffenen Notizen werden gleich mit umgeschrieben, damit sie nicht
   // weiterhin als "nicht registriert" auftauchen.
   async registerType(typeKey) {
-    const raw = this.plugin.typIndex.rawValueOf(typeKey);
-    const normalized = normalizeRawType(raw === undefined ? typeKey : raw);
-    if (!normalized) return;
-    if (!this.plugin.settings.types.includes(normalized)) {
-      this.plugin.settings.types.push(normalized);
-    }
-
-    let renamed = 0;
-    if (normalized !== typeKey) {
-      renamed = await renameTypeInNotes(this.plugin, typeKey, normalized);
-    }
+    const result = await this.applyTypeRegistration(typeKey);
+    if (!result) return;
 
     await this.plugin.saveSettings();
     this.render();
     this.plugin.refreshTypColors?.();
 
-    if (renamed > 0) {
-      new Notice(`TYP ${normalized} registriert, ${renamed} Notiz(en) angepasst.`);
+    if (result.renamed > 0) {
+      new Notice(`TYP ${result.type} registriert, ${result.renamed} Notiz(en) angepasst.`);
     }
+  }
+
+  // Der eigentliche Vorgang aus registerType(), ohne Speichern, Neuzeichnen
+  // und Notice: so kann registerTypeWithSubtype() TYP und Subtyp nacheinander
+  // eintragen und danach EINMAL speichern und EINE Notice zeigen, statt zweimal.
+  // Liefert { type, renamed } oder null, wenn nichts Brauchbares übrig bleibt.
+  async applyTypeRegistration(typeKey) {
+    const raw = this.plugin.typIndex.rawValueOf(typeKey);
+    const normalized = normalizeRawType(raw === undefined ? typeKey : raw);
+    if (!normalized) return null;
+    if (!this.plugin.settings.types.includes(normalized)) {
+      this.plugin.settings.types.push(normalized);
+    }
+    const renamed = normalized !== typeKey ? await renameTypeInNotes(this.plugin, typeKey, normalized) : 0;
+    return { type: normalized, renamed };
   }
 
   // Neues, leeres Tree-Item anlegen und sofort in den Editier-Modus versetzen -
@@ -512,15 +524,11 @@ class TypView extends ItemView {
 
       this.renderListHeader(contentEl);
 
-      // "[KEIN TYP]" ist kein echter Typ und nimmt an der Sortierung nicht teil -
-      // steht unabhängig von seiner Anzahl immer zuletzt.
       const unregisteredRows = [...counts.keys()]
         .filter((type) => !registered.includes(type))
         .sort(byCurrentOrder)
         .map((type) => ({ type, count: counts.get(type) ?? 0 }));
-      if (noType > 0) {
-        unregisteredRows.push({ type: null, count: noType });
-      }
+      const unregisteredSubtypeRows = this.unregisteredSubtypeRows();
 
       // Ohne zweite Spalte darf der Name die ganze Zeile nehmen (siehe
       // .fred-typ-list-no-secondary in styles.css).
@@ -538,13 +546,32 @@ class TypView extends ItemView {
         this.renderRegisteredItem(type, counts.get(type) ?? 0, { draggable: isManualSort, index });
       });
 
-      if (unregisteredRows.length > 0) {
-        this.separatorEl = this.listEl.createDiv({ cls: "fred-typ-separator" });
-        for (const row of unregisteredRows) {
-          if (row.type === null) this.renderNoTypeItem(row.count);
-          else this.renderUnregisteredItem(row.type, row.count);
-        }
+      // Unterhalb der Trennlinie drei Abschnitte, jeder für sich optional:
+      // nicht erfasste TYPen, nicht erfasste Subtypen, "[KEIN TYP]". Die
+      // Subtypen bekommen eine eigene Trennlinie, weil sie nach einer anderen
+      // Regel sortiert sind als die TYPen darüber (Anzahl statt Sortier-Button,
+      // siehe unregisteredSubtypeRows) - ohne sichtbaren Schnitt sähe das nach
+      // kaputter Sortierung aus. "[KEIN TYP]" ist kein echter Typ, nimmt an
+      // keiner Sortierung teil und steht unabhängig von seiner Anzahl zuletzt;
+      // es schließt direkt an, statt eine dritte Linie zu bekommen.
+      //
+      // this.separatorEl bleibt bewusst die ERSTE Linie: startAdd() hängt das
+      // neue Tree-Item davor, und ein neuer TYP gehört ans Ende der erfassten,
+      // nicht zwischen die nicht erfassten Abschnitte.
+      const separator = () => {
+        const el = this.listEl.createDiv({ cls: "fred-typ-separator" });
+        this.separatorEl = this.separatorEl ?? el;
+      };
+
+      if (unregisteredRows.length > 0 || unregisteredSubtypeRows.length > 0 || noType > 0) separator();
+      for (const row of unregisteredRows) this.renderUnregisteredItem(row.type, row.count);
+
+      if (unregisteredSubtypeRows.length > 0) {
+        if (unregisteredRows.length > 0) separator();
+        for (const row of unregisteredSubtypeRows) this.renderUnregisteredSubtypeItem(row);
       }
+
+      if (noType > 0) this.renderNoTypeItem(noType);
     } finally {
       this._rendering = false;
     }
@@ -890,6 +917,100 @@ class TypView extends ItemView {
       event.stopPropagation();
       this.openSearch(type);
     });
+  }
+
+  // Alle SUBTYP-Werte, die in Notizen vorkommen, aber unter ihrem TYP nicht
+  // erfasst sind - über den ganzen Vault, nicht nur für einen TYP wie
+  // renderUnregisteredSubtypes() in der Detailansicht. Der Index führt seine
+  // Buckets über ALLE TYP-Schlüssel, also auch über nicht erfasste; deren
+  // Subtypen kommen daher mit (Klick erfasst dann beides, siehe
+  // registerTypeWithSubtype).
+  //
+  // Sortiert nach Anzahl, dann nach dem Zeilentext von links nach rechts (erst
+  // TYP, dann Subtyp) - dieselbe Regel wie in der Detailansicht, wo das
+  // Häufigste oben steht. Bewusst NICHT nach dem Sortier-Button der Liste:
+  // "Farbe" und "Manuell" haben für nicht erfasste Werte keine Bedeutung.
+  //
+  // Eine Notiz ohne TYP bleibt außen vor - der Index verwirft ihren SUBTYP
+  // schon beim Zählen (siehe aggregate() in typ-index.js), ein SUBTYP ohne TYP
+  // hat keinen Kontext.
+  unregisteredSubtypeRows() {
+    const registered = this.plugin.settings.types;
+    const rows = [];
+    for (const [type, bucket] of this.plugin.typIndex.subtypeCounts()) {
+      const known = getSubtypeNames(this.plugin.settings, type);
+      for (const [subtype, count] of bucket.counts) {
+        if (known.includes(subtype)) continue;
+        rows.push({ type, subtype, count, typeRegistered: registered.includes(type) });
+      }
+    }
+    return rows.sort((a, b) => b.count - a.count || a.type.localeCompare(b.type) || a.subtype.localeCompare(b.subtype));
+  }
+
+  // "NOTIZ / Kurz Geschichte" - der Subtyp allein wäre mehrdeutig, denselben
+  // Namen kann es unter mehreren TYPen geben. Ist der TYP bereits erfasst,
+  // trägt sein Teil der Zeile seine Farbe (bzw. einen Farbpunkt davor, je nach
+  // Einstellung "TYP View einfärben") - abgeschwächt über das Style Setting
+  // "Farbe erfasster TYPen in dieser Liste", damit die Zeilen trotz Farbe
+  // hinter den erfassten TYPen oben zurückbleiben. Ist auch der TYP nicht
+  // erfasst, bleibt die ganze Zeile muted wie die Einträge darüber.
+  renderUnregisteredSubtypeItem({ type, subtype, count, typeRegistered }) {
+    const treeItem = this.listEl.createDiv({ cls: "tree-item" });
+    const self = treeItem.createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
+
+    const colorize = this.plugin.settings.colorViews.typList;
+    const { color, isDefault } = nameColor(this.plugin.settings, type);
+    if (typeRegistered && !colorize) {
+      const wrap = self.createDiv({ cls: "fred-typ-color-wrap fred-typ-unregistered-subtype-color" });
+      paintColorDot(wrap.createDiv({ cls: "fred-typ-color-dot" }), color, isDefault);
+    }
+
+    const inner = self.createDiv({ cls: "tree-item-inner" });
+    const typeEl = inner.createSpan({ cls: "fred-typ-unregistered-subtype-type", text: displayTypeKey(type) });
+    if (typeRegistered && colorize && !isDefault) {
+      typeEl.style.color = color;
+      typeEl.addClass("fred-typ-unregistered-subtype-color");
+    }
+    inner.createSpan({ cls: "fred-typ-unregistered-subtype-slash", text: " / " });
+    inner.createSpan({ text: displayTypeKey(subtype) });
+
+    this.renderCountFlair(self, count);
+
+    self.addEventListener("click", () => this.registerTypeWithSubtype(type, subtype));
+    self.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openSubtypeSearch(type, subtype);
+    });
+  }
+
+  // Klick auf eine solche Zeile: erfasst den Subtyp - und, falls nötig, seinen
+  // TYP gleich mit. Reihenfolge zwingend erst TYP, dann Subtyp: das Erfassen
+  // eines TYPs kann dessen Wert in den Notizen bereinigen (" buch" → "BUCH"),
+  // danach muss der Subtyp-Abgleich schon den NEUEN TYP-Namen verwenden, sonst
+  // findet renameSubtypeInNotes() keine Datei mehr.
+  //
+  // Beides zusammen wird direkt ausgeführt, ohne Bestätigung: es ist eine
+  // reine Erfassung. Notizen ändern sich nur, wenn der Rohwert unsauber war und
+  // dabei bereinigt wird - ein sauberer Wert fasst keine einzige Datei an.
+  async registerTypeWithSubtype(typeKey, subtypeKey) {
+    const bucket = this.plugin.typIndex.subtypeBucket(typeKey);
+    const typeResult = this.plugin.settings.types.includes(typeKey)
+      ? { type: typeKey, renamed: 0 }
+      : await this.applyTypeRegistration(typeKey);
+    if (!typeResult) return;
+
+    const subtypeResult = await this.applySubtypeRegistration(typeResult.type, subtypeKey, bucket);
+    await this.plugin.saveSettings();
+    this.render();
+    this.plugin.refreshTypColors?.();
+
+    if (!subtypeResult) return;
+    const parts = [];
+    if (typeResult.type !== typeKey) parts.push(`TYP ${typeResult.type}`);
+    parts.push(`SUBTYP ${subtypeResult.subtype}`);
+    const changed = typeResult.renamed + subtypeResult.renamed;
+    new Notice(`${parts.join(" und ")} registriert${changed > 0 ? `, ${changed} Notiz(en) angepasst` : ""}.`);
   }
 
   renderTypeSettings(type) {
@@ -1359,7 +1480,7 @@ class TypView extends ItemView {
   openSubtypeSearch(type, subtypeKey) {
     const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
     if (!globalSearch) return;
-    const typClause = `["${TYP_PROPERTY}":"${type}"]`;
+    const typClause = this.typeClause(type);
     let subtypClause;
     if (subtypeKey === null) {
       subtypClause = `-["${SUBTYP_PROPERTY}"]`;
@@ -1377,19 +1498,27 @@ class TypView extends ItemView {
   // betroffenen Notizen gleich mit um. Gibt es den Subtyp in anderer Schreib-
   // weise schon, landen die Notizen dort.
   async registerSubtype(type, subtypeKey, bucket) {
+    const result = await this.applySubtypeRegistration(type, subtypeKey, bucket);
+    if (!result) return;
+
+    await this.plugin.saveSettings();
+    this.plugin.refreshTypColors?.();
+    if (result.renamed > 0) new Notice(`SUBTYP ${result.subtype} registriert, ${result.renamed} Notiz(en) angepasst.`);
+  }
+
+  // Wie applyTypeRegistration für den TYP: der Vorgang ohne Speichern und
+  // Notice, damit registerTypeWithSubtype() ihn mit der TYP-Erfassung bündeln
+  // kann. Liefert { subtype, renamed } oder null.
+  async applySubtypeRegistration(type, subtypeKey, bucket) {
     const raw = bucket.rawByKey.get(subtypeKey);
     const normalized = normalizeRawType(raw === undefined ? subtypeKey : raw, normalizeSubtypeName);
-    if (!normalized) return;
+    if (!normalized) return null;
     const existing = getSubtypeNames(this.plugin.settings, type).find((name) => name.toLowerCase() === normalized.toLowerCase());
     const subtype = existing ?? normalized;
     ensureSubtype(this.plugin.settings, type, subtype);
 
-    let renamed = 0;
-    if (subtype !== subtypeKey) renamed = await renameSubtypeInNotes(this.plugin, type, subtypeKey, subtype);
-
-    await this.plugin.saveSettings();
-    this.plugin.refreshTypColors?.();
-    if (renamed > 0) new Notice(`SUBTYP ${subtype} registriert, ${renamed} Notiz(en) angepasst.`);
+    const renamed = subtype !== subtypeKey ? await renameSubtypeInNotes(this.plugin, type, subtypeKey, subtype) : 0;
+    return { subtype, renamed };
   }
 
   // Neuer, leerer Subtyp-Block direkt über dem "Subtyp hinzufügen"-Button,

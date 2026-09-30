@@ -9,6 +9,15 @@ settings:
         description: "Stellt die Subtyp-Liste der TYP-Liste rechtsbündig direkt vor die Notiz-Anzahl, statt sie links hinter dem TYP-Namen beginnen zu lassen. Betrifft nur die Subtyp-Anzeige (umschaltbar über den Button im Listen-Header), nicht das Beschreibungs-Textfeld."
         type: class-toggle
         default: false
+    -
+        id: typ-system-unregistered-subtype-opacity
+        title: Farbe erfasster TYPen bei nicht erfassten Subtypen
+        description: "Wie kräftig der TYP-Teil einer Zeile \"TYP / Subtyp\" unten in der TYP-Liste dargestellt wird, wenn der TYP selbst bereits erfasst ist. Niedriger heißt blasser, also weiter hinter die erfassten TYPen oben zurücktretend. 1 zeigt die volle TYP-Farbe."
+        type: variable-number-slider
+        default: 0.7
+        min: 0.2
+        max: 1
+        step: 0.05
 
 */
 
@@ -168,6 +177,28 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
 .fred-typ-list-description-input:focus {
   background: var(--background-modifier-form-field);
   box-shadow: none !important;
+}
+
+/* Nicht erfasste Subtypen unten in der Liste: "NOTIZ / Kurz Geschichte" (siehe
+   renderUnregisteredSubtypeItem in typ-view.js). Der Schrägstrich steht noch
+   blasser als die Namen, damit die Zeile als ein Eintrag liest und nicht als
+   zwei nebeneinandergestellte Werte. */
+.fred-typ-unregistered-subtype-slash {
+  color: var(--text-faint);
+  opacity: 0.6;
+}
+
+/* Trägt der TYP-Teil eine Farbe (weil der TYP schon erfasst ist), wird sie
+   abgeschwächt - sonst zöge die Farbe den Blick stärker auf diese Zeilen als
+   auf die erfassten TYPen oben, obwohl hier nur Aufräumbedarf steht. Bewusst
+   opacity und nicht filter: brightness(): opacity blendet zum jeweiligen
+   Hintergrund hin aus und nimmt damit in hell wie dunkel zugleich Buntheit und
+   Kontrast, während Abdunkeln im Light Mode den Kontrast sogar erhöhen würde.
+   Die Stärke ist über Style Settings einstellbar (siehe @settings oben), der
+   Fallback hier gilt ohne dieses Plugin. Sitzt je nach Einstellung "TYP View
+   einfärben" auf dem Namen oder auf dem Farbpunkt. */
+.fred-typ-unregistered-subtype-color {
+  opacity: var(--typ-system-unregistered-subtype-opacity, 0.55);
 }
 
 .fred-typ-color-wrap {

@@ -748,38 +748,48 @@ class TypView extends ItemView {
     return this.plugin.settings.typeManual;
   }
 
-  // Nachgebaut wie Obsidians eigener ToggleComponent (checkbox-container +
-  // verstecktes input[type=checkbox]), da wir hier direkt im DOM statt über
-  // die Setting-API bauen. Standardmäßig an - daher wird (wie bei den anderen
-  // typeXxx-Dicts) nur die Abweichung vom Default gespeichert, hier also nur
-  // "aus" (false); fehlender Eintrag bzw. true bedeuten "an". Steuert, ob ein
-  // TYP in getTypes() (siehe main.js) exportiert wird, siehe dortiger Kommentar.
+  // Ein Icon-Knopf statt eines beschrifteten Schalters: die Einstellung ist zu
+  // klein, um mit Label und Toggle so viel Platz und Aufmerksamkeit zu
+  // bekommen wie das Beschreibungsfeld darunter. Zustand wie bei den übrigen
+  // Icon-Knöpfen der Ansicht über eine Klasse (is-active, siehe styles.css),
+  // der Sinn steht im Tooltip - role/aria-checked halten ihn trotzdem als
+  // Schalter lesbar.
+  //
+  // Standardmäßig an - daher wird (wie bei den anderen typeXxx-Dicts) nur die
+  // Abweichung vom Default gespeichert, hier also nur "aus" (false); fehlender
+  // Eintrag bzw. true bedeuten "an". Steuert, ob ein TYP in getTypes() (siehe
+  // main.js) exportiert wird, siehe dortiger Kommentar.
   renderManualToggle(parent, type) {
-    const current = this.ensureTypeManual()[type] !== false;
-    const toggleEl = parent.createDiv({
-      cls: "checkbox-container" + (current ? " is-enabled" : ""),
-      attr: { tabindex: "0", role: "checkbox", "aria-checked": String(current) },
+    const btn = parent.createDiv({
+      cls: "clickable-icon fred-typ-manual-icon",
+      attr: { tabindex: "0", role: "checkbox" },
     });
-    toggleEl.createEl("input", { type: "checkbox" });
+    setIcon(btn, "file-pen-line");
+
+    const showState = (on) => {
+      btn.toggleClass("is-active", on);
+      btn.setAttribute("aria-checked", String(on));
+      btn.setAttribute("aria-label", on ? "Manuell erstellbar" : "Nicht manuell erstellbar");
+    };
+    showState(this.ensureTypeManual()[type] !== false);
 
     const toggle = async () => {
-      const next = !toggleEl.hasClass("is-enabled");
-      toggleEl.toggleClass("is-enabled", next);
-      toggleEl.setAttribute("aria-checked", String(next));
+      const next = !btn.hasClass("is-active");
+      showState(next);
       if (next) delete this.ensureTypeManual()[type];
       else this.ensureTypeManual()[type] = false;
       await this.plugin.saveSettings();
     };
 
-    toggleEl.addEventListener("click", toggle);
-    toggleEl.addEventListener("keydown", (event) => {
+    btn.addEventListener("click", toggle);
+    btn.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         toggle();
       }
     });
 
-    return toggleEl;
+    return btn;
   }
 
   renderRegisteredItem(type, count, { draggable = false, index = -1 } = {}) {
@@ -1024,7 +1034,11 @@ class TypView extends ItemView {
 
     const titleEl = header.createDiv({ cls: "fred-typ-detail-title", text: type });
     const titleColor = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
-    if (titleColor) titleEl.style.color = titleColor;
+    // Die TYP-Farbe bewusst als Custom Property statt direkt als color: eine
+    // Inline-Farbe schlägt jede Stylesheet-Regel, die Akzentfarbe beim Hovern
+    // (siehe .fred-typ-searchable) käme sonst nur mit !important dagegen an.
+    if (titleColor) titleEl.style.setProperty("--fred-typ-name-color", titleColor);
+    this.makeSearchable(titleEl, () => this.openSearch(type));
 
     const { counts } = this.plugin.typIndex.typeCounts();
     header.createSpan({ cls: "fred-typ-detail-count", text: String(counts.get(type) ?? 0) });
@@ -1050,12 +1064,12 @@ class TypView extends ItemView {
 
     const body = contentEl.createDiv({ cls: "fred-typ-detail-body" });
 
-    const descSection = body.createDiv({ cls: "fred-typ-description-section" });
+    // Eine Zeile unter der Kopfzeile: links "manuell erstellbar" und die
+    // TYP-Farbe, rechts daneben die Beschreibung über den restlichen Platz.
+    // Umbenennen und Löschen stehen oben in der Kopfzeile.
+    const optionsHeader = body.createDiv({ cls: "fred-typ-frontmatter-header fred-typ-options-header" });
 
-    const optionsHeader = descSection.createDiv({ cls: "fred-typ-frontmatter-header fred-typ-options-header" });
-    const manualToggleWrap = optionsHeader.createDiv({ cls: "fred-typ-manual-toggle" });
-    manualToggleWrap.createSpan({ cls: "fred-typ-detail-section-title", text: "Manueller TYP" });
-    this.renderManualToggle(manualToggleWrap, type);
+    this.renderManualToggle(optionsHeader, type);
 
     const colorRow = optionsHeader.createDiv({ cls: "fred-typ-detail-color-row" });
     this.renderColorPicker(
@@ -1063,17 +1077,23 @@ class TypView extends ItemView {
       type,
       (newColor) => {
         if (!this.plugin.settings.colorViews.typList) return;
-        titleEl.style.color = newColor;
+        // Dieselbe Custom Property wie beim Aufbau oben, nicht style.color:
+        // eine Inline-Farbe wuerde die Akzentfarbe beim Hovern wieder schlagen.
+        titleEl.style.setProperty("--fred-typ-name-color", newColor);
       },
       { showReset: true }
     );
 
-    const descHeader = descSection.createDiv({ cls: "fred-typ-frontmatter-header" });
-    descHeader.createDiv({ cls: "fred-typ-detail-section-title", text: "Beschreibung" });
-
-    const descInput = descSection.createEl("textarea", {
+    // Rechts neben den beiden Knöpfen, den übrigen Platz der Zeile füllend. Einzeiliges Input statt des früheren zweizeiligen
+    // Textarea - in einer Zeile neben den Icons hat ein mehrzeiliges Feld
+    // keinen Platz, und dieselbe Beschreibung ist in der TYP-Liste ohnehin
+    // schon als einzeiliges Input bearbeitbar (siehe renderDescriptionInput).
+    // Ohne eigene Überschrift: solange das Feld leer ist, sagt sein
+    // Platzhalter (gefadet, siehe styles.css), worum es geht.
+    const descInput = optionsHeader.createEl("input", {
+      type: "text",
       cls: "fred-typ-description-input",
-      attr: { rows: "2" },
+      attr: { placeholder: "Beschreibung" },
     });
     descInput.value = this.plugin.settings.typeDescriptions[type] ?? "";
     descInput.addEventListener("change", async () => {
@@ -1083,8 +1103,9 @@ class TypView extends ItemView {
       await this.plugin.saveSettings();
     });
 
-    // Trennt die Frontmatter-Blöcke von den übrigen Einstellungen des TYPs.
-    // body.createDiv({ cls: "fred-typ-detail-separator" });
+    // Trennt die Frontmatter-Blöcke von den übrigen Einstellungen des TYPs
+    // (Beschreibung, Farbe, "manuell erstellbar").
+    body.createDiv({ cls: "fred-typ-detail-separator" });
 
     // TYP-Frontmatter und je registriertem Subtyp ein Block darunter, jeder
     // mit eigener Editor-Instanz (siehe frontmatter-blocks.js) - derselbe Key
@@ -1102,7 +1123,6 @@ class TypView extends ItemView {
         await this.plugin.saveSettings();
         this.render();
       },
-      onSectionContextMenu: (section) => this.openSubtypeSearch(type, section),
     });
     this.frontmatterEditors.push(...this.frontmatterBlocks.editors);
 
@@ -1128,9 +1148,9 @@ class TypView extends ItemView {
 
   // Überschrift eines Blocks (siehe frontmatter-blocks.js): Titel mit
   // Notiz-Anzahl (beim TYP-Frontmatter die Notizen ohne SUBTYP - für die gilt
-  // nur dieser Block), Suche per Rechtsklick (beim TYP-Frontmatter auf den
-  // Titel), und die beiden "Property hinzufügen"-Buttons, die eine Leerzeile
-  // in genau diesem Block anlegen.
+  // nur dieser Block), Suche per Klick auf den Titel, und die beiden
+  // "Property hinzufügen"-Buttons, die eine Leerzeile in genau diesem Block
+  // anlegen.
   renderSectionHeader(el, type, section, bucket, blocks) {
     const titleGroup = el.createDiv({ cls: "fred-typ-frontmatter-title-group" });
     // Bewusst nie eingefärbt (weder in der TYP- noch in der Subtyp-Farbe),
@@ -1139,15 +1159,7 @@ class TypView extends ItemView {
     const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? `${type}-Frontmatter` });
     const count = section === null ? bucket.noSubtype : bucket.counts.get(section) ?? 0;
     titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
-    // Subtyp-Blöcke reagieren auf ihrer ganzen Fläche (siehe
-    // onSectionContextMenu in renderTypeSettings), das TYP-Frontmatter
-    // nur auf dem Titel.
-    if (section === null) {
-      titleEl.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        this.openSubtypeSearch(type, null);
-      });
-    }
+    this.makeSearchable(titleEl, () => this.openSubtypeSearch(type, section));
 
     // Floating Properties (siehe typeFloatingKeys in settings.js) sind Teil
     // derselben Liste und Reihenfolge wie die übrigen Properties (wichtig für
@@ -1449,8 +1461,12 @@ class TypView extends ItemView {
   // Wie die unregistrierten Einträge der TYP-Liste: SUBTYP-Werte von Notizen
   // dieses TYPs, die (noch) keinen eigenen Block haben (Notizen ganz ohne
   // SUBTYP zählt stattdessen das TYP-Frontmatter). Dargestellt wie die
-  // Subtyp-Blöcke, aber nur mit (ausgegrauter) Überschrift samt Anzahl.
-  // Linksklick übernimmt einen Wert als Subtyp, Rechtsklick öffnet die Suche.
+  // Subtyp-Blöcke, aber nur mit Überschrift samt Anzahl. Ein Klick auf die
+  // Blockfläche übernimmt den Wert als Subtyp, ein Klick auf den Namen öffnet
+  // stattdessen die Suche - vor dem Erfassen nachzusehen, was in einem Wert
+  // eigentlich steckt, ist hier der häufige Fall. Der Name hebt sich beim
+  // Hovern in Akzentfarbe ab und zeigt damit selbst an, dass er etwas anderes
+  // tut als die Fläche um ihn herum.
   renderUnregisteredSubtypes(parent, type, bucket) {
     const registered = getSubtypeNames(this.plugin.settings, type);
     const unregistered = [...bucket.counts.keys()]
@@ -1463,15 +1479,32 @@ class TypView extends ItemView {
       const block = listEl.createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block fred-typ-subtype-unregistered" });
       const header = block.createDiv({ cls: "fred-typ-frontmatter-header" });
       const titleGroup = header.createDiv({ cls: "fred-typ-frontmatter-title-group" });
-      titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: displayTypeKey(key) });
+      const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: displayTypeKey(key) });
       titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(bucket.counts.get(key)) });
       block.addEventListener("click", () => this.registerSubtype(type, key, bucket));
-      block.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.openSubtypeSearch(type, key);
-      });
+      // stopPropagation, sonst erfasste derselbe Klick über den Block-Handler
+      // zusätzlich den Wert, den man gerade erst nachschlagen wollte.
+      this.makeSearchable(titleEl, () => this.openSubtypeSearch(type, key), { stopPropagation: true });
     }
+  }
+
+  // Ein Name, dessen Klick die Suche öffnet: Zeiger-Cursor und Akzentfarbe beim
+  // Hovern (siehe .fred-typ-searchable in styles.css), damit die Ansicht selbst
+  // zeigt, wo etwas passiert. Die Suche lag hier früher auf dem Rechtsklick -
+  // beim TYP-Frontmatter auf dem Titel, bei Subtyp-Blöcken auf der ganzen
+  // Blockfläche - und war damit praktisch unauffindbar: nichts deutete darauf
+  // hin, und ein Rechtsklick ist überall sonst ein Kontextmenü. Der Name ist
+  // der Ort, an dem man "zeig mir diese Notizen" erwartet, also hängt es jetzt
+  // genau dort. Während einer Umbenennung trägt dasselbe Element die Klasse
+  // is-being-renamed und ist ein Eingabefeld - dann darf ein Klick hinein den
+  // Cursor setzen und keine Suche auslösen.
+  makeSearchable(el, onSearch, { stopPropagation = false } = {}) {
+    el.addClass("fred-typ-searchable");
+    el.addEventListener("click", (event) => {
+      if (el.hasClass("is-being-renamed")) return;
+      if (stopPropagation) event.stopPropagation();
+      onSearch();
+    });
   }
 
   // subtypeKey === null → Notizen dieses TYPs ohne SUBTYP. Für eine Liste

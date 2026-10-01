@@ -32,9 +32,8 @@ function isGrabTarget(target) {
 // renderHeader(section, el, blocks) / renderFooter(section, el, blocks) füllen
 // Überschrift bzw. Abschluss eines Blocks. onMoveSection(order) meldet die
 // neue Block-Reihenfolge nach einem Block-Drag (wie getSectionOrder, samt
-// führendem null für das TYP-Frontmatter), onSectionContextMenu(section,
-// event) einen Rechtsklick in einem Subtyp-Block.
-function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderFooter, onMoveSection, onSectionContextMenu }) {
+// führendem null für das TYP-Frontmatter).
+function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderFooter, onMoveSection }) {
   const wrapper = containerEl.createDiv({ cls: "fred-typ-blocks" });
   const sections = getSectionOrder(view.plugin.settings, type);
   const editors = new Map();
@@ -95,14 +94,10 @@ function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderF
     renderFooter?.(section, footer, api);
 
     if (!isSub) continue;
-    // Subtyp-Blöcke reagieren auf ihrer ganzen Fläche; Obsidians eigene Menüs
-    // (z. B. das einer Property) und Textfelder haben Vorrang - sie reagieren
-    // vorher und setzen defaultPrevented.
-    blockEl.addEventListener("contextmenu", (event) => {
-      if (event.defaultPrevented || event.target.closest("input, textarea, [contenteditable='true']")) return;
-      event.preventDefault();
-      onSectionContextMenu?.(section, event);
-    });
+    // Hier lag früher ein contextmenu-Handler, der auf der ganzen Blockfläche
+    // die Suche öffnete. Die hängt jetzt am Klick auf den Block-Namen (siehe
+    // makeSearchable in typ-view.js), womit der Rechtsklick im Block wieder
+    // Obsidians eigenen Menüs gehört.
     blockEl.addEventListener("mousedown", (event) => startBlockDrag(event, section));
   }
 

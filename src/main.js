@@ -317,7 +317,7 @@ module.exports = class TypSystemPlugin extends Plugin {
   // in derselben Reihenfolge, in der sie auch in der TYP-Liste selbst erscheinen
   // (aktuelle Sortiereinstellung dort, z. B. Häufigkeit oder Name).
   //
-  // TYPen mit deaktiviertem "Manueller TYP"-Schalter (siehe TYP-Detailansicht)
+  // TYPen mit abgeschaltetem "Manuell erstellbar" (Icon in der TYP-Detailansicht)
   // sind nicht für die manuelle Auswahl gedacht (z. B. beim Anlegen einer neuen
   // Notiz) und werden deshalb standardmäßig ausgeklammert - Aufrufer, die
   // trotzdem alle TYPen brauchen, übergeben includeManualOff: true.

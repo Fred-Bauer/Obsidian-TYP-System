@@ -265,7 +265,7 @@ function unregisteredItems(app, plugin) {
 
 // Für _obsidian/templater-scripts/TYP.js sowie überall sonst im Plugin, wo
 // ein einzelner TYP ausgewählt werden muss. includeManualOff wie bei
-// plugin.getTypes(): TYPen mit deaktiviertem "Manueller TYP"-Schalter sind
+// plugin.getTypes(): TYPen mit abgeschaltetem "Manuell erstellbar" sind
 // standardmäßig ausgeklammert. includeUnregistered ergänzt zusätzlich TYPen,
 // die in Notizen vorkommen, aber nicht in der TYP-Liste registriert sind -
 // muted dargestellt, da für sie keine Farbe/Beschreibung existiert. Löst mit

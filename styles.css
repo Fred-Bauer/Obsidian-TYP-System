@@ -10,6 +10,12 @@ settings:
         type: class-toggle
         default: false
     -
+        id: typ-system-stacked-options
+        title: Beschreibungsfeld hoch
+        description: "Stapelt in der TYP-Detailansicht „manuell erstellbar“ und die Farbwahl links übereinander, sodass das Beschreibungsfeld daneben über beide Zeilen reicht und doppelt so hoch wird. Aus steht alles nebeneinander in einer flachen Zeile."
+        type: class-toggle
+        default: false
+    -
         id: typ-system-unregistered-subtype-opacity
         title: Farbe erfasster TYPen bei nicht erfassten Subtypen
         description: "Wie kräftig der TYP-Teil einer Zeile \"TYP / Subtyp\" unten in der TYP-Liste dargestellt wird, wenn der TYP selbst bereits erfasst ist. Niedriger heißt blasser, also weiter hinter die erfassten TYPen oben zurücktretend. 1 zeigt die volle TYP-Farbe."
@@ -198,7 +204,7 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
    Fallback hier gilt ohne dieses Plugin. Sitzt je nach Einstellung "TYP View
    einfärben" auf dem Namen oder auf dem Farbpunkt. */
 .fred-typ-unregistered-subtype-color {
-  opacity: var(--typ-system-unregistered-subtype-opacity, 0.55);
+  opacity: var(--typ-system-unregistered-subtype-opacity, 0.7);
 }
 
 .fred-typ-color-wrap {
@@ -411,7 +417,7 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   padding: var(--size-4-2) var(--size-4-3);
 }
 
-/* Auf Höhe des "Beschreibung"-Labels rechts daneben statt im (beengten) Header -
+/* Auf Höhe des "Beschreibung"-Labels links davor statt im (beengten) Header -
    dort darf der Farbpunkt deutlich größer als in der TYP-Liste sein. */
 .fred-typ-detail-color-row {
   display: flex;
@@ -429,6 +435,7 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
    Headerzeile füllen und die Zähler-Zahl (siehe .fred-typ-detail-count) an
    deren rechten Rand statt direkt hinter den Namen schieben. */
 .fred-typ-detail-title {
+  color: var(--fred-typ-name-color, inherit);
   flex: 0 1 auto;
   margin-left: 0;
   font-weight: 600;
@@ -526,30 +533,97 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   padding: 0 var(--size-4-3) var(--size-4-3);
 }
 
-.fred-typ-description-section {
+/* Eine Zeile aus drei Teilen: links "manuell erstellbar" und die TYP-Farbe,
+   rechts daneben das Beschreibungsfeld. Das space-between der gemeinsamen
+   Header-Klasse läuft dabei ins Leere - den Platz verteilt das flex-grow des
+   Feldes; der gap hält es von den Knöpfen ab. */
+.fred-typ-options-header {
+  align-items: center;
+  gap: var(--size-4-2);
+  /* Überschreibt den knapperen Abstand der gemeinsamen Header-Klasse: die
+     Zeile schliesst den Kopfteil des TYPs ab, darunter beginnen die
+     Frontmatter-Blöcke. */
   margin-bottom: var(--size-4-3);
 }
 
-/* Label bodenbündig statt (wie die TYP-Frontmatter-Kopfzeile sonst)
-   vertikal mittig - der größere Farbpunkt daneben macht die Zeile höher als
-   das Label/den Schalter links, die dadurch sonst nicht mehr nahtlos über
-   dem Textfeld sitzen. */
-.fred-typ-options-header {
-  align-items: flex-end;
+/* "Manuell erstellbar" (siehe renderManualToggle in typ-view.js): bewusst nur
+   ein Icon-Knopf wie Umbenennen/Löschen oben, kein beschrifteter Schalter -
+   die Einstellung ist zu klein, um neben dem Beschreibungsfeld eine eigene
+   Zeile mit Label zu rechtfertigen. An sieht aus wie jeder andere Icon-Knopf
+   (der Normalfall, siehe getTypes() in main.js), aus ist abgeblendet; beim
+   Hovern wird auch der abgeblendete Zustand voll sichtbar, damit er nicht mit
+   einem deaktivierten Knopf verwechselt wird (vgl. .fred-typ-color-reset.is-disabled,
+   der zusätzlich pointer-events abschaltet). */
+.fred-typ-manual-icon {
+  flex-shrink: 0;
 }
 
-.fred-typ-manual-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.fred-typ-manual-icon:not(.is-active) {
+  opacity: 0.35;
 }
 
+.fred-typ-manual-icon:not(.is-active):hover {
+  opacity: 1;
+}
+
+/* Füllt die Mitte der Optionszeile. min-width: 0 ist nötig, damit das Feld
+   als Flex-Kind unter seine Standard-Inhaltsbreite schrumpfen darf, statt die
+   Zeile bei schmaler Seitenleiste aufzudehnen und die Icons hinauszudrücken.
+   Die Höhe kommt bewusst aus Obsidians eigener input-Regel (--input-height):
+   deren Selektor input[type="text"] ist spezifischer als diese Klasse, eine
+   Angabe hier würde also ohnehin verlieren - und die Standardhöhe passt zu
+   den Icons links und rechts. */
 .fred-typ-description-input {
-  width: 100%;
-  resize: none;
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: inherit;
   font-size: var(--font-ui-small);
-  margin-top: var(--size-4-1);
+  padding: var(--size-4-1) var(--size-4-2);
+}
+
+/* Alternatives Layout der Optionszeile, geschaltet über den @settings-Block
+   ganz oben (Style Settings setzt die Klasse auf den body): links
+   „manuell erstellbar“ über der Farbwahl gestapelt, rechts daneben das
+   Beschreibungsfeld über beide Zeilen. Wie bei den rechtsbündigen Subtypen
+   bewusst kein Plugin-Schalter - das Plugin rendert in beiden Fällen
+   dasselbe Markup, nur Grid statt Flex verteilt es anders. Die Platzierung
+   kommt dabei allein aus den grid-row/column-Angaben, nicht aus der
+   DOM-Reihenfolge (die bleibt Knopf, Farbe, Feld). */
+body.typ-system-stacked-options .fred-typ-options-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+}
+
+body.typ-system-stacked-options .fred-typ-manual-icon {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+}
+
+body.typ-system-stacked-options .fred-typ-detail-color-row {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+/* align-self und height zusammen: das align-items: center der flachen Zeile
+   würde das Feld sonst mittig zwischen beiden Zeilen hängen lassen, und
+   align-self allein reicht nicht, weil Obsidians input[type="text"]-Regel eine
+   feste --input-height setzt (und als Element-plus-Attribut-Selektor
+   spezifischer ist als die Klasse allein). Dieser Selektor steht mit zwei
+   Klassen darüber, 100% meint die beiden Grid-Zeilen. */
+body.typ-system-stacked-options .fred-typ-description-input {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: stretch;
+  height: 100%;
+}
+
+/* Deutlich blasser als eingetragener Text (--text-faint statt --text-muted):
+   der Platzhalter ist nur eine Beschriftung des leeren Feldes und soll nicht
+   wie eine bereits hinterlegte Beschreibung aussehen. */
+.fred-typ-description-input::placeholder {
+  color: var(--text-faint);
 }
 
 .fred-typ-frontmatter-header {
@@ -559,10 +633,36 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   margin-bottom: var(--size-4-2);
 }
 
+/* Ein Name, dessen Klick die Suche öffnet (siehe makeSearchable in
+   typ-view.js): der Titel der Detailansicht und jede Block-Überschrift. Die
+   Akzentfarbe beim Hovern ist das einzige Signal dafür, dass hier überhaupt
+   etwas passiert - vorher lag die Suche auf dem Rechtsklick und war damit
+   unsichtbar. Schlägt auch die TYP-Farbe des Titels, weil die als Custom
+   Property statt inline gesetzt wird. Während einer Umbenennung ist dasselbe
+   Element ein Eingabefeld (is-being-renamed), dann bleibt beides aus. */
+.fred-typ-searchable:not(.is-being-renamed) {
+  cursor: var(--cursor-link);
+}
+
+.fred-typ-searchable:not(.is-being-renamed):hover {
+  color: var(--text-accent);
+}
+
 .fred-typ-detail-section-title {
   font-size: var(--font-ui-small);
   font-weight: 600;
   color: var(--text-muted);
+}
+
+/* In der TYP-Detailansicht stehen die Abschnitts-Überschriften auf --text-normal
+   statt auf dem gedämpften Grau darüber: sie standen damit blasser da als
+   Obsidians eigene "Properties"-Überschrift direkt daneben und waren schlecht
+   zu lesen. Bewusst auf .fred-typ-view eingegrenzt - dieselbe Klasse trägt auch
+   die Überschrift "Globale Property-Reihenfolge" in den Plugin-Einstellungen
+   (siehe mountGlobalOrderEditor in frontmatter-order-editor.js), und dort ist
+   eine gedämpfte Abschnitts-Überschrift Obsidians eigene Optik. */
+.fred-typ-view .fred-typ-detail-section-title {
+  color: var(--text-normal);
 }
 
 .fred-typ-frontmatter-header .fred-typ-detail-section-title {
@@ -847,8 +947,13 @@ input[type="range"].fred-typ-subtype-color-slider {
 }
 
 /* Nicht erfasste Subtypen (siehe renderUnregisteredSubtypes) - Blöcke wie die
-   registrierten, aber nur mit ausgegrauter Überschrift und als Ganzes
-   anklickbar. */
+   registrierten, nur ohne Inhalt und als Ganzes anklickbar. Die Überschrift
+   stand hier früher auf --text-faint; das war als "noch nicht erfasst"-Signal
+   gedacht, machte die Namen aber schlechter lesbar als alles andere in der
+   Detailansicht - ausgerechnet dort, wo man sie zum Beurteilen lesen muss. Sie
+   nutzt jetzt dieselbe Farbe wie jede andere Block-Überschrift; erkennbar
+   bleiben die Blöcke daran, dass ihnen Farbpunkt, Aktionen und Properties
+   fehlen. */
 .fred-typ-subtype-unregistered-list {
   margin-top: var(--size-4-3);
 }
@@ -859,10 +964,6 @@ input[type="range"].fred-typ-subtype-color-slider {
 
 .fred-typ-subtype-unregistered .fred-typ-frontmatter-header {
   margin-bottom: 0;
-}
-
-.fred-typ-subtype-unregistered .fred-typ-detail-section-title {
-  color: var(--text-faint);
 }
 
 .fred-typ-frontmatter-unavailable {

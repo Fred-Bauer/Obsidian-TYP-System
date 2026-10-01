@@ -1,4 +1,4 @@
-const { MarkdownView, Menu, setIcon } = require("obsidian");
+const { MarkdownView, Menu, WorkspaceLeaf, setIcon } = require("obsidian");
 const { shortcutLabel } = require("./shortcuts");
 const { pickShortcut } = require("./shortcut-picker");
 const { getSubtype, ensureSubtype } = require("./subtypes");
@@ -104,7 +104,38 @@ function getMetadataEditorClass(app) {
       return cachedEditorClass;
     }
   }
-  return null;
+  cachedEditorClass = harvestEditorClass(app);
+  return cachedEditorClass;
+}
+
+// Solange in dieser Session noch keine Notiz offen war (z. B. direkt nach dem
+// Start, wenn die TYP-Ansicht die erste ist, die man öffnet), gibt es keine
+// einzige MarkdownView und damit auch keine Instanz, über die die Klasse oben
+// erreichbar wäre. Dann baut sich dieser Weg selbst eine: eine freie
+// WorkspaceLeaf (ohne Parent, nie in einem Split und nie im DOM) und darauf
+// eine MarkdownView aus Obsidians eigener View-Registry - deren Konstruktor
+// legt die metadataEditor-Instanz unconditional an (dasselbe, was sonst jede
+// geöffnete Notiz tut). Gebraucht wird nur die Klassenreferenz; die View wird
+// direkt danach wieder entladen, die Leaf hängt an nichts und verschwindet mit
+// ihr. Bewusst NICHT leaf.detach(): das erwartet einen Parent, den diese Leaf
+// nie hatte.
+function harvestEditorClass(app) {
+  let view = null;
+  try {
+    const createView = app.viewRegistry?.getViewCreatorByType?.("markdown");
+    if (!createView) return null;
+    view = createView(new WorkspaceLeaf(app));
+    return view.metadataEditor?.constructor ?? null;
+  } catch (error) {
+    console.error("[typ-system] MetadataEditor-Klasse konnte nicht ermittelt werden", error);
+    return null;
+  } finally {
+    try {
+      view?.unload();
+    } catch (error) {
+      console.error("[typ-system] Verwerfen der Hilfs-MarkdownView fehlgeschlagen", error);
+    }
+  }
 }
 
 // Analog zu getMetadataEditorClass oben: Referenz auf die private Property-

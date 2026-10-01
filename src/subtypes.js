@@ -8,7 +8,7 @@ function normalizeSubtypeName(raw) {
 }
 
 // Registrierte SUBTYPen je TYP (settings.typeSubtypes):
-//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...], shortcuts: {...} } } }
+//   { [TYP]: { [SUBTYP]: { frontmatter: {...}, floatingKeys: [...], shortcuts: {...}, manual?: false } } }
 // Ein Subtyp gehört immer zu genau einem TYP; derselbe Name darf aber (als
 // eigenständiger Subtyp) auch unter einem anderen TYP vorkommen. Die
 // Reihenfolge der Schlüssel ist die Anzeigereihenfolge der Blöcke in der
@@ -17,7 +17,8 @@ function normalizeSubtypeName(raw) {
 // typeFloatingKeys, shortcuts wie typeShortcuts (siehe shortcuts.js) - je Key
 // des Blocks ein Shortcut-Record, der Wert des Keys bleibt dabei als
 // Rückfallwert stehen. Bestandsdaten führen shortcuts noch nicht, Leser müssen
-// es daher als optional behandeln.
+// es daher als optional behandeln. manual wie settings.typeManual für TYPen -
+// nur die Abweichung vom Standard wird gespeichert (siehe isSubtypeManual).
 //
 // Derselbe Key darf in mehreren Blöcken eines TYPs stehen (nur innerhalb
 // EINES Blocks ist er zwangsläufig eindeutig):
@@ -50,8 +51,60 @@ function ensureSubtype(settings, type, subtype) {
   if (!settings.typeSubtypes) settings.typeSubtypes = {};
   if (!settings.typeSubtypes[type]) settings.typeSubtypes[type] = {};
   const byName = settings.typeSubtypes[type];
-  if (!byName[subtype]) byName[subtype] = { frontmatter: {}, floatingKeys: [], shortcuts: {} };
+  if (!byName[subtype]) {
+    byName[subtype] = { frontmatter: {}, floatingKeys: [], shortcuts: {} };
+    // Ein neuer Subtyp eines nicht manuell erstellbaren TYPs ist selbst keiner:
+    // ein manuell erstellbarer Subtyp setzt seinen TYP voraus, da der Picker
+    // nur über ihn zu den Subtypen führt (siehe isSubtypeManual).
+    if (settings.typeManual?.[type] === false) byName[subtype].manual = false;
+  }
   return byName[subtype];
+}
+
+/* --- "Manuell erstellbar" je Subtyp --------------------------------------
+ * Wie settings.typeManual für TYPen (siehe renderManualToggle in typ-view.js):
+ * gespeichert wird nur die Abweichung vom Standard, also allein das Abschalten
+ * (manual: false); fehlender Eintrag bzw. true bedeuten "an". Steuert, ob der
+ * Subtyp in getSubtypes() (siehe main.js) und damit im Subtyp-Picker auftaucht.
+ *
+ * TYP und Subtypen hängen dabei zusammen, weil der Picker nur über den TYP zu
+ * dessen Subtypen führt: ein abgeschalteter TYP schaltet alle seine Subtypen
+ * mit ab, ein angeschalteter alle mit an (setAllSubtypesManual), und ein
+ * einzeln angeschalteter Subtyp schaltet seinen TYP mit an - die übrigen
+ * Subtypen bleiben davon aber unberührt (siehe renderSubtypeManualToggle in
+ * typ-view.js). Damit gilt immer: ein Subtyp ist höchstens dann manuell
+ * erstellbar, wenn sein TYP es auch ist.
+ * --------------------------------------------------------------------- */
+function isSubtypeManual(settings, type, subtype) {
+  return getSubtype(settings, type, subtype)?.manual !== false;
+}
+
+function setSubtypeManual(settings, type, subtype, on) {
+  const data = getSubtype(settings, type, subtype);
+  if (!data) return;
+  if (on) delete data.manual;
+  else data.manual = false;
+}
+
+function setAllSubtypesManual(settings, type, on) {
+  for (const subtype of getSubtypeNames(settings, type)) setSubtypeManual(settings, type, subtype, on);
+}
+
+// Zieht diese Regel in Bestandsdaten einmalig nach: dort gab es den Schalter
+// je Subtyp noch nicht, die Subtypen eines abgeschalteten TYPs stünden also
+// alle auf "an" - in der Detailansicht sichtbar als vier angeschaltete
+// Subtypen unter einem abgeschalteten TYP. Liefert true bei einer Änderung.
+function migrateSubtypeManual(settings) {
+  let changed = false;
+  for (const [type, off] of Object.entries(settings.typeManual ?? {})) {
+    if (off !== false) continue;
+    for (const subtype of getSubtypeNames(settings, type)) {
+      if (!isSubtypeManual(settings, type, subtype)) continue;
+      setSubtypeManual(settings, type, subtype, false);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 // Beim Umbenennen eines TYPs: Subtypen wandern unter den neuen Namen mit.
@@ -249,6 +302,10 @@ module.exports = {
   getSubtypeNames,
   getSubtype,
   ensureSubtype,
+  isSubtypeManual,
+  setSubtypeManual,
+  setAllSubtypesManual,
+  migrateSubtypeManual,
   migrateAboveStandard,
   migrateSubtypeColorScale,
   moveTypeSubtypes,

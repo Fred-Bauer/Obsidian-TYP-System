@@ -227,14 +227,16 @@ function sortByQuery(items, query, itemText) {
 // Blöcke in der TYP-Detailansicht). query ist die Suchanfrage aus dem
 // TYP-Picker, nach der die Liste vorsortiert wird (siehe sortByQuery): wer
 // dort "Lehrveranstaltung" tippte und so zu ORGA kam, meinte diesen Subtyp und
-// findet ihn hier oben - Enter genügt. Löst auf mit
+// findet ihn hier oben - Enter genügt. options wie bei getSubtypes: Subtypen
+// mit abgeschaltetem "Manuell erstellbar" sind standardmäßig ausgeklammert,
+// genau wie die so abgeschalteten TYPen in der TYP-Auswahl davor. Löst auf mit
 //  - dem gewählten Subtyp,
 //  - "" für "ohne Subtyp" (ohne Anfrage der erste Eintrag der Liste) - bzw.
-//    sofort, ohne Picker, wenn der TYP gar keine Subtypen hat,
+//    sofort, ohne Picker, wenn der TYP gar keinen auswählbaren Subtyp hat,
 //  - null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück).
-function pickSubtype(app, plugin, type, query = "") {
+function pickSubtype(app, plugin, type, query = "", options = {}) {
   return new Promise((resolve) => {
-    const items = plugin.getSubtypes(type).map(({ subtype, count }) => ({ type: subtype, description: "", count }));
+    const items = plugin.getSubtypes(type, options).map(({ subtype, count }) => ({ type: subtype, description: "", count }));
     if (items.length === 0) {
       resolve("");
       return;
@@ -303,7 +305,7 @@ function typeItems(app, plugin, { includeManualOff = false, includeUnregistered 
   // Nur registrierte TYPen haben gepflegte Subtypen - für die übrigen bleibt
   // die Liste leer und die Zeile damit unverändert.
   if (showSubtypes) {
-    for (const item of items) item.subtypes = plugin.getSubtypes(item.type).map(({ subtype }) => subtype);
+    for (const item of items) item.subtypes = plugin.getSubtypes(item.type, { includeManualOff }).map(({ subtype }) => subtype);
   }
   if (items.length > 0) return items;
   new Notice("Keine TYPen vorhanden.");
@@ -314,9 +316,11 @@ function typeItems(app, plugin, { includeManualOff = false, includeUnregistered 
 // nach Einstellung separateSubtypePicker entweder ein einziger Picker mit den
 // Subtypen eingerückt unter ihrem TYP (Standard), oder wie früher erst der
 // TYP-Picker - dort mit den Subtypen des TYPs hinter dessen Namen, damit man
-// sie schon vor der Wahl sieht - und danach, falls der TYP Subtypen hat, der
-// Subtyp-Picker, vorsortiert nach der Suchanfrage von dort (ESC führt zurück
-// zur TYP-Auswahl). Optionen wie bei pickType. Löst auf mit
+// sie schon vor der Wahl sieht - und danach, falls der TYP auswählbare
+// Subtypen hat, der Subtyp-Picker, vorsortiert nach der Suchanfrage von dort
+// (ESC führt zurück zur TYP-Auswahl). Optionen wie bei pickType;
+// includeManualOff gilt dabei auch für die Subtypen (siehe pickSubtype).
+// Löst auf mit
 // { type, subtype } (subtype null für "ohne Subtyp"), oder mit null bei
 // Abbruch.
 async function pickTypeAndSubtype(app, plugin, options = {}) {
@@ -324,7 +328,7 @@ async function pickTypeAndSubtype(app, plugin, options = {}) {
     while (true) {
       const entry = await pickTypeEntry(app, plugin, { ...options, showSubtypes: true });
       if (!entry) return null;
-      const subtype = await pickSubtype(app, plugin, entry.type, entry.query);
+      const subtype = await pickSubtype(app, plugin, entry.type, entry.query, options);
       if (subtype !== null) return { type: entry.type, subtype: subtype || null };
     }
   }
@@ -333,7 +337,7 @@ async function pickTypeAndSubtype(app, plugin, options = {}) {
   if (!items) return null;
   const groups = items.map((item) => ({
     item,
-    subtypes: plugin.getSubtypes(item.type).map(({ subtype, count }) => ({ type: item.type, subtype, count })),
+    subtypes: plugin.getSubtypes(item.type, options).map(({ subtype, count }) => ({ type: item.type, subtype, count })),
   }));
   return new Promise((resolve) => new TypSubtypPickerModal(app, plugin, groups, resolve).open());
 }

@@ -3,7 +3,14 @@ const { DEFAULT_SETTINGS, TypSystemSettingTab } = require("./settings");
 const { registerCommands } = require("./commands");
 const { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require("./typ-view");
 const { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
-const { getSubtype, getSubtypeNames, migrateAboveStandard, migrateSubtypeColorScale } = require("./subtypes");
+const {
+  getSubtype,
+  getSubtypeNames,
+  isSubtypeManual,
+  migrateAboveStandard,
+  migrateSubtypeColorScale,
+  migrateSubtypeManual,
+} = require("./subtypes");
 const { DEFAULT_SUBTYPE_COLOR_RANGES } = require("./type-colors");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
@@ -271,9 +278,16 @@ module.exports = class TypSystemPlugin extends Plugin {
 
   // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
   // der Reihenfolge ihrer Blöcke, samt Notiz-Anzahl.
-  getSubtypes(type) {
+  //
+  // Subtypen mit abgeschaltetem "Manuell erstellbar" (Icon links neben dem
+  // Namen ihres Blocks, siehe renderSubtypeManualToggle in typ-view.js) bleiben
+  // wie die so abgeschalteten TYPen in getTypes() außen vor - außer
+  // includeManualOff ist gesetzt.
+  getSubtypes(type, { includeManualOff = false } = {}) {
     const { counts } = this.typIndex.subtypeBucket(type);
-    return getSubtypeNames(this.settings, type).map((subtype) => ({ subtype, count: counts.get(subtype) ?? 0 }));
+    return getSubtypeNames(this.settings, type)
+      .filter((subtype) => includeManualOff || isSubtypeManual(this.settings, type, subtype))
+      .map((subtype) => ({ subtype, count: counts.get(subtype) ?? 0 }));
   }
 
   // Für _obsidian/templater-scripts/TYP.js: Subtyp-Picker (siehe
@@ -281,8 +295,9 @@ module.exports = class TypSystemPlugin extends Plugin {
   // Subtyp" (bzw. ohne Picker, wenn der TYP keine Subtypen hat), oder mit
   // null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück). query (optional):
   // eine schon getippte Suchanfrage, nach der die Liste vorsortiert steht.
-  pickSubtype(type, query = "") {
-    return pickSubtypeModal(this.app, this, type, query);
+  // options wie bei getSubtypes (includeManualOff).
+  pickSubtype(type, query = "", options = {}) {
+    return pickSubtypeModal(this.app, this, type, query, options);
   }
 
   // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter:
@@ -368,8 +383,15 @@ module.exports = class TypSystemPlugin extends Plugin {
     // Anders als die übrigen Migrationen gleich schreiben: die eine rechnet
     // gespeicherte Zahlen um und darf das beim nächsten Start nicht erneut tun,
     // die andere entfernt einen Schlüssel, der sonst bei jedem Start wieder
-    // gelesen würde.
-    const migrated = [migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES), migrateTypListSecondary(this.settings, stored), dropTypListSubtypesAlign(this.settings)];
+    // gelesen würde - und die letzte ergänzt Schalter, die der Nutzer von da an
+    // selbst umstellen kann und die ihm beim nächsten Start nicht erneut
+    // überschrieben werden dürfen.
+    const migrated = [
+      migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES),
+      migrateTypListSecondary(this.settings, stored),
+      dropTypListSubtypesAlign(this.settings),
+      migrateSubtypeManual(this.settings),
+    ];
     if (migrated.some(Boolean)) await this.saveSettings();
   }
 

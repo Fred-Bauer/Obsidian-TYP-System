@@ -10,12 +10,6 @@ settings:
         type: class-toggle
         default: false
     -
-        id: typ-system-stacked-options
-        title: Beschreibungsfeld hoch
-        description: "Stapelt in der TYP-Detailansicht „manuell erstellbar“ und die Farbwahl links übereinander, sodass das Beschreibungsfeld daneben über beide Zeilen reicht und doppelt so hoch wird. Aus steht alles nebeneinander in einer flachen Zeile."
-        type: class-toggle
-        default: false
-    -
         id: typ-system-unregistered-subtype-opacity
         title: Farbe erfasster TYPen bei nicht erfassten Subtypen
         description: "Wie kräftig der TYP-Teil einer Zeile \"TYP / Subtyp\" unten in der TYP-Liste dargestellt wird, wenn der TYP selbst bereits erfasst ist. Niedriger heißt blasser, also weiter hinter die erfassten TYPen oben zurücktretend. 1 zeigt die volle TYP-Farbe."
@@ -533,10 +527,10 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   padding: 0 var(--size-4-3) var(--size-4-3);
 }
 
-/* Eine Zeile aus drei Teilen: links "manuell erstellbar" und die TYP-Farbe,
-   rechts daneben das Beschreibungsfeld. Das space-between der gemeinsamen
-   Header-Klasse läuft dabei ins Leere - den Platz verteilt das flex-grow des
-   Feldes; der gap hält es von den Knöpfen ab. */
+/* Eine Zeile aus zwei Teilen: links die TYP-Farbe, rechts daneben das
+   Beschreibungsfeld. Das space-between der gemeinsamen Header-Klasse läuft
+   dabei ins Leere - den Platz verteilt das flex-grow des Feldes; der gap hält
+   es von der Farbwahl ab. */
 .fred-typ-options-header {
   align-items: center;
   gap: var(--size-4-2);
@@ -546,14 +540,20 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   margin-bottom: var(--size-4-3);
 }
 
-/* "Manuell erstellbar" (siehe renderManualToggle in typ-view.js): bewusst nur
-   ein Icon-Knopf wie Umbenennen/Löschen oben, kein beschrifteter Schalter -
-   die Einstellung ist zu klein, um neben dem Beschreibungsfeld eine eigene
-   Zeile mit Label zu rechtfertigen. An sieht aus wie jeder andere Icon-Knopf
-   (der Normalfall, siehe getTypes() in main.js), aus ist abgeblendet; beim
-   Hovern wird auch der abgeblendete Zustand voll sichtbar, damit er nicht mit
-   einem deaktivierten Knopf verwechselt wird (vgl. .fred-typ-color-reset.is-disabled,
-   der zusätzlich pointer-events abschaltet). */
+/* "Manuell erstellbar" (siehe renderManualIcon in typ-view.js): bewusst nur
+   ein Icon-Knopf wie Umbenennen/Löschen daneben, kein beschrifteter Schalter -
+   die Einstellung ist zu klein, um eine eigene Zeile mit Label zu
+   rechtfertigen. An sieht aus wie jeder andere Icon-Knopf (der Normalfall,
+   siehe getTypes() in main.js), aus ist abgeblendet; beim Hovern wird auch der
+   abgeblendete Zustand voll sichtbar, damit er nicht mit einem deaktivierten
+   Knopf verwechselt wird (vgl. .fred-typ-color-reset.is-disabled, der
+   zusätzlich pointer-events abschaltet).
+
+   Der Knopf steht zwischen Umbenennen und Löschen: beim TYP in der Kopfzeile
+   der Detailansicht, bei jedem Subtyp in den Aktionen im Abschluss seines
+   Blocks (.fred-typ-subtype-action-group, siehe renderSectionFooter) - gleiche
+   Einstellung, gleiche Optik, nur eine Ebene tiefer; die Icongröße kommt dort
+   aus dem Abschluss selbst. */
 .fred-typ-manual-icon {
   flex-shrink: 0;
 }
@@ -581,43 +581,12 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   padding: var(--size-4-1) var(--size-4-2);
 }
 
-/* Alternatives Layout der Optionszeile, geschaltet über den @settings-Block
-   ganz oben (Style Settings setzt die Klasse auf den body): links
-   „manuell erstellbar“ über der Farbwahl gestapelt, rechts daneben das
-   Beschreibungsfeld über beide Zeilen. Wie bei den rechtsbündigen Subtypen
-   bewusst kein Plugin-Schalter - das Plugin rendert in beiden Fällen
-   dasselbe Markup, nur Grid statt Flex verteilt es anders. Die Platzierung
-   kommt dabei allein aus den grid-row/column-Angaben, nicht aus der
-   DOM-Reihenfolge (die bleibt Knopf, Farbe, Feld). */
-body.typ-system-stacked-options .fred-typ-options-header {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-}
-
-body.typ-system-stacked-options .fred-typ-manual-icon {
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: center;
-}
-
-body.typ-system-stacked-options .fred-typ-detail-color-row {
-  grid-column: 1;
-  grid-row: 2;
-}
-
-/* align-self und height zusammen: das align-items: center der flachen Zeile
-   würde das Feld sonst mittig zwischen beiden Zeilen hängen lassen, und
-   align-self allein reicht nicht, weil Obsidians input[type="text"]-Regel eine
-   feste --input-height setzt (und als Element-plus-Attribut-Selektor
-   spezifischer ist als die Klasse allein). Dieser Selektor steht mit zwei
-   Klassen darüber, 100% meint die beiden Grid-Zeilen. */
-body.typ-system-stacked-options .fred-typ-description-input {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: stretch;
-  height: 100%;
-}
+/* Hier stand das Style Setting "Beschreibungsfeld hoch", das die Optionszeile
+   auf Grid umstellte und "manuell erstellbar" über der Farbwahl stapelte,
+   damit das Beschreibungsfeld daneben zwei Zeilen hoch werden konnte. Der
+   Knopf steht jetzt oben in der Kopfzeile bei den übrigen Icon-Knöpfen (siehe
+   renderManualToggle), in der Zeile bleiben nur Farbwahl und Feld - es gibt
+   also nichts mehr zu stapeln. */
 
 /* Deutlich blasser als eingetragener Text (--text-faint statt --text-muted):
    der Platzhalter ist nur eine Beschriftung des leeren Feldes und soll nicht
@@ -859,8 +828,8 @@ body.fred-typ-block-dragging * {
 }
 
 /* Abschluss eines Subtyp-Blocks (siehe renderSectionFooter in typ-view.js):
-   links Farbpunkt und Zurücksetzen, rechts die Aktionen - Icongröße wie in
-   den Überschriften. */
+   links Farbpunkt und Zurücksetzen, rechts die Aktionen samt "manuell
+   erstellbar" - Icongröße wie in den Überschriften. */
 .fred-typ-block .fred-typ-section-footer.fred-typ-subtype-actions,
 .fred-typ-subtype-pending .fred-typ-section-footer.fred-typ-subtype-actions {
   display: flex;

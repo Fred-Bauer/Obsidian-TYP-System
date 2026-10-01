@@ -8,6 +8,9 @@ const {
   deleteTypeSubtypes,
   mergeTypeSubtypes,
   getSubtype,
+  isSubtypeManual,
+  setSubtypeManual,
+  setAllSubtypesManual,
   renameSubtype,
   reorderSubtypes,
   deleteSubtype,
@@ -748,39 +751,34 @@ class TypView extends ItemView {
     return this.plugin.settings.typeManual;
   }
 
-  // Ein Icon-Knopf statt eines beschrifteten Schalters: die Einstellung ist zu
-  // klein, um mit Label und Toggle so viel Platz und Aufmerksamkeit zu
-  // bekommen wie das Beschreibungsfeld darunter. Zustand wie bei den übrigen
-  // Icon-Knöpfen der Ansicht über eine Klasse (is-active, siehe styles.css),
-  // der Sinn steht im Tooltip - role/aria-checked halten ihn trotzdem als
-  // Schalter lesbar.
+  // Gemeinsamer "Manuell erstellbar"-Knopf von TYP (renderManualToggle) und
+  // Subtyp (renderSubtypeManualToggle), jeweils zwischen Umbenennen und
+  // Löschen: ein Icon-Knopf statt eines beschrifteten Schalters - die
+  // Einstellung ist zu klein, um mit Label und Toggle eine eigene Zeile zu
+  // bekommen, und in der Reihe der übrigen Icon-Knöpfe fällt sie nicht mehr
+  // auf als diese. Zustand wie bei ihnen über eine Klasse (is-active, siehe
+  // styles.css), der Sinn steht im Tooltip - role/aria-checked halten ihn
+  // trotzdem als Schalter lesbar.
   //
-  // Standardmäßig an - daher wird (wie bei den anderen typeXxx-Dicts) nur die
-  // Abweichung vom Default gespeichert, hier also nur "aus" (false); fehlender
-  // Eintrag bzw. true bedeuten "an". Steuert, ob ein TYP in getTypes() (siehe
-  // main.js) exportiert wird, siehe dortiger Kommentar.
-  renderManualToggle(parent, type) {
+  // onToggle bekommt den neuen Zustand, speichert ihn und zieht die abhängigen
+  // Knöpfe nach (siehe syncManualToggles) - das Anzeigen übernimmt bewusst
+  // nicht der Klick selbst, da eine Umschaltung hier nie nur diesen einen
+  // Knopf betrifft.
+  renderManualIcon(parent, cls, isOn, onToggle) {
     const btn = parent.createDiv({
-      cls: "clickable-icon fred-typ-manual-icon",
+      cls: `clickable-icon fred-typ-manual-icon ${cls}`,
       attr: { tabindex: "0", role: "checkbox" },
     });
     setIcon(btn, "file-pen-line");
 
-    const showState = (on) => {
+    btn.fredShowManualState = (on) => {
       btn.toggleClass("is-active", on);
       btn.setAttribute("aria-checked", String(on));
       btn.setAttribute("aria-label", on ? "Manuell erstellbar" : "Nicht manuell erstellbar");
     };
-    showState(this.ensureTypeManual()[type] !== false);
+    btn.fredShowManualState(isOn);
 
-    const toggle = async () => {
-      const next = !btn.hasClass("is-active");
-      showState(next);
-      if (next) delete this.ensureTypeManual()[type];
-      else this.ensureTypeManual()[type] = false;
-      await this.plugin.saveSettings();
-    };
-
+    const toggle = () => onToggle(!btn.hasClass("is-active"));
     btn.addEventListener("click", toggle);
     btn.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -790,6 +788,63 @@ class TypView extends ItemView {
     });
 
     return btn;
+  }
+
+  // "Manuell erstellbar" des TYPs, in der Kopfzeile der Detailansicht zwischen
+  // Umbenennen und Löschen.
+  //
+  // Standardmäßig an - daher wird (wie bei den anderen typeXxx-Dicts) nur die
+  // Abweichung vom Default gespeichert, hier also nur "aus" (false); fehlender
+  // Eintrag bzw. true bedeuten "an". Steuert, ob ein TYP in getTypes() (siehe
+  // main.js) exportiert wird, siehe dortiger Kommentar.
+  //
+  // Der TYP zieht seine Subtypen dabei immer mit: der Picker führt nur über
+  // ihn zu ihnen, ein abgeschalteter TYP würde seine angeschalteten Subtypen
+  // also stumm unerreichbar machen (siehe setAllSubtypesManual in subtypes.js).
+  renderManualToggle(parent, type) {
+    return this.renderManualIcon(parent, "fred-typ-manual-type", this.ensureTypeManual()[type] !== false, async (on) => {
+      if (on) delete this.ensureTypeManual()[type];
+      else this.ensureTypeManual()[type] = false;
+      setAllSubtypesManual(this.plugin.settings, type, on);
+      await this.plugin.saveSettings();
+      this.syncManualToggles(type);
+    });
+  }
+
+  // "Manuell erstellbar" eines Subtyps, in den Aktionen im Abschluss seines
+  // Blocks zwischen Umbenennen und Löschen (siehe renderSectionFooter). Anders
+  // als der TYP-Knopf zieht er nur in eine Richtung mit: ein angeschalteter Subtyp schaltet seinen TYP mit
+  // an (sonst wäre er im Picker nicht zu erreichen), die übrigen Subtypen
+  // bleiben aber, wie sie sind - genau dafür ist der Knopf da.
+  renderSubtypeManualToggle(parent, type, subtype) {
+    const btn = this.renderManualIcon(
+      parent,
+      "fred-typ-manual-subtype",
+      isSubtypeManual(this.plugin.settings, type, subtype),
+      async (on) => {
+        setSubtypeManual(this.plugin.settings, type, subtype, on);
+        if (on) delete this.ensureTypeManual()[type];
+        await this.plugin.saveSettings();
+        this.syncManualToggles(type);
+      }
+    );
+    btn.fredSubtype = subtype;
+    return btn;
+  }
+
+  // Zeigt alle Manuell-Knöpfe der Detailansicht neu an, nachdem einer von ihnen
+  // die anderen mitgezogen hat. Bewusst nur die Knöpfe statt eines render():
+  // ein Neuaufbau nimmt die Frontmatter-Editoren aller Blöcke mit (siehe
+  // destroyFrontmatterEditor), samt einer gerade bearbeiteten Zeile, obwohl
+  // sich an ihnen nichts geändert hat. Gefunden werden die Knöpfe wie die
+  // Farbpunkte der Subtyp-Blöcke über das DOM der Ansicht (siehe
+  // openSubtypeColorPopover): den Abschluss eines Blocks baut
+  // frontmatter-blocks.js auf, eine Liste davon liegt hier nicht.
+  syncManualToggles(type) {
+    this.contentEl.querySelector(".fred-typ-manual-type")?.fredShowManualState(this.ensureTypeManual()[type] !== false);
+    for (const el of this.contentEl.querySelectorAll(".fred-typ-manual-subtype")) {
+      el.fredShowManualState(isSubtypeManual(this.plugin.settings, type, el.fredSubtype));
+    }
   }
 
   renderRegisteredItem(type, count, { draggable = false, index = -1 } = {}) {
@@ -1058,18 +1113,22 @@ class TypView extends ItemView {
     setIcon(renameBtn, "pencil");
     renameBtn.addEventListener("click", () => this.startDetailRename(type, titleEl));
 
+    // Zwischen Umbenennen und Löschen, an derselben Stelle wie bei den
+    // Subtypen (siehe renderSectionFooter): in der Reihe der übrigen
+    // Icon-Knöpfen des TYPs statt als vierter Beteiligter neben Namen,
+    // Anzahl und Aktionen.
+    this.renderManualToggle(header, type);
+
     const deleteBtn = header.createDiv({ cls: "clickable-icon fred-typ-detail-delete", attr: { "aria-label": "Löschen" } });
     setIcon(deleteBtn, "trash");
     deleteBtn.addEventListener("click", () => this.showDeleteConfirm(type));
 
     const body = contentEl.createDiv({ cls: "fred-typ-detail-body" });
 
-    // Eine Zeile unter der Kopfzeile: links "manuell erstellbar" und die
-    // TYP-Farbe, rechts daneben die Beschreibung über den restlichen Platz.
-    // Umbenennen und Löschen stehen oben in der Kopfzeile.
+    // Eine Zeile unter der Kopfzeile: links die TYP-Farbe, rechts daneben die
+    // Beschreibung über den restlichen Platz. Umbenennen, Löschen und
+    // "manuell erstellbar" stehen oben in der Kopfzeile.
     const optionsHeader = body.createDiv({ cls: "fred-typ-frontmatter-header fred-typ-options-header" });
-
-    this.renderManualToggle(optionsHeader, type);
 
     const colorRow = optionsHeader.createDiv({ cls: "fred-typ-detail-color-row" });
     this.renderColorPicker(
@@ -1084,7 +1143,7 @@ class TypView extends ItemView {
       { showReset: true }
     );
 
-    // Rechts neben den beiden Knöpfen, den übrigen Platz der Zeile füllend. Einzeiliges Input statt des früheren zweizeiligen
+    // Rechts neben der Farbwahl, den übrigen Platz der Zeile füllend. Einzeiliges Input statt des früheren zweizeiligen
     // Textarea - in einer Zeile neben den Icons hat ein mehrzeiliges Feld
     // keinen Platz, und dieselbe Beschreibung ist in der TYP-Liste ohnehin
     // schon als einzeiliges Input bearbeitbar (siehe renderDescriptionInput).
@@ -1104,7 +1163,7 @@ class TypView extends ItemView {
     });
 
     // Trennt die Frontmatter-Blöcke von den übrigen Einstellungen des TYPs
-    // (Beschreibung, Farbe, "manuell erstellbar").
+    // (Farbe, Beschreibung).
     body.createDiv({ cls: "fred-typ-detail-separator" });
 
     // TYP-Frontmatter und je registriertem Subtyp ein Block darunter, jeder
@@ -1191,10 +1250,11 @@ class TypView extends ItemView {
   }
 
   // Abschluss eines Subtyp-Blocks: links die Farbe des Subtyps (Farbpunkt, der
-  // die Regler öffnet, daneben Zurücksetzen), rechts die Aktionen wie im Kopf
-  // der TYP-Detailansicht (Umbenennen inkl. Notizen, Umbenennen, Löschen). Das
-  // TYP-Frontmatter hat keinen. Der Titel wird erst beim Klick gesucht -
-  // Überschrift und Abschluss entstehen bei jedem synchronize() neu.
+  // die Regler öffnet, daneben Zurücksetzen), rechts dieselben Aktionen in
+  // derselben Reihenfolge wie im Kopf der TYP-Detailansicht (Umbenennen inkl.
+  // Notizen, Umbenennen, "manuell erstellbar", Löschen). Das TYP-Frontmatter
+  // hat keinen Abschluss. Der Titel wird erst beim Klick gesucht - Überschrift und
+  // Abschluss entstehen bei jedem synchronize() neu.
   renderSectionFooter(el, type, subtype) {
     el.addClass("fred-typ-subtype-actions");
     const colorGroup = el.createDiv({ cls: "fred-typ-subtype-color-group" });
@@ -1242,6 +1302,8 @@ class TypView extends ItemView {
     const renameBtn = actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename", attr: { "aria-label": "Umbenennen" } });
     setIcon(renameBtn, "pencil");
     renameBtn.addEventListener("click", () => rename(false));
+
+    this.renderSubtypeManualToggle(actions, type, subtype);
 
     const deleteBtn = actions.createDiv({ cls: "clickable-icon fred-typ-detail-delete", attr: { "aria-label": "Löschen" } });
     setIcon(deleteBtn, "trash");
@@ -1579,6 +1641,10 @@ class TypView extends ItemView {
     const actions = footer.createDiv({ cls: "fred-typ-subtype-action-group" });
     setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename-notes" }), "pencil");
     setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename" }), "pencil");
+    // Zustand wie der, den ensureSubtype dem neuen Subtyp gleich geben wird:
+    // der seines TYPs (siehe subtypes.js).
+    const manualCls = "clickable-icon fred-typ-manual-icon" + (this.ensureTypeManual()[type] !== false ? " is-active" : "");
+    setIcon(actions.createDiv({ cls: manualCls }), "file-pen-line");
     setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-delete" }), "trash");
     nameEl.setAttribute("contenteditable", "true");
     nameEl.setAttribute("spellcheck", "false");
@@ -1778,6 +1844,17 @@ class TypView extends ItemView {
   // source verschwindet aus der TYP-Liste samt eigener Einstellungen (target
   // behält seine). Die Subtypen von source werden übernommen, gleichnamige
   // Blöcke zusammengeführt (siehe mergeTypeSubtypes in subtypes.js).
+  //
+  // "Manuell erstellbar" ist der eine Fall, in dem das Zusammenlegen nicht nur
+  // Daten umhängt: die übernommenen Subtypen bringen ihren eigenen Schalter
+  // mit, der von source stammt, geraten aber unter den Schalter von target.
+  // War source an und target aus, stünden sie danach als angeschaltete
+  // Subtypen unter einem abgeschalteten TYP - im Picker unerreichbar, da er
+  // nur über den TYP zu ihnen führt. Ein abgeschaltetes target zieht sie
+  // deshalb mit ab, genau wie sein eigener Knopf es täte (siehe
+  // renderManualToggle). Ist target an, bleiben sie, wie sie waren - ein
+  // abgeschalteter Subtyp unter einem angeschalteten TYP ist der Normalfall,
+  // und das ist, was bei source eingestellt war.
   async mergeType(source, target) {
     const settings = this.plugin.settings;
     const renamed = await renameTypeInNotes(this.plugin, source, target);
@@ -1790,6 +1867,7 @@ class TypView extends ItemView {
     delete settings.typeShortcuts[source];
     delete this.ensureTypeManual()[source];
     mergeTypeSubtypes(settings, source, target);
+    if (this.ensureTypeManual()[target] === false) setAllSubtypesManual(settings, target, false);
 
     // Vor refreshTypColors() setzen, aus demselben Grund wie in applyRename.
     this.selectedType = target;
@@ -1836,12 +1914,6 @@ function registerTypView(plugin) {
     id: "typ-property-hinzufuegen",
     name: "TYP-Property hinzufügen",
     callback: () => addTypPropertyCommand(plugin),
-  });
-
-  plugin.addCommand({
-    id: "typ-hinzufuegen",
-    name: "Neuen TYP hinzufügen",
-    callback: () => addTypCommand(plugin),
   });
 
   // Beim Hot-Reload bleibt der alte Leaf als Objekt unangetastet bestehen (nur
@@ -1952,18 +2024,6 @@ async function addTypPropertyCommand(plugin) {
   if (!(view instanceof TypView)) return;
   view.openTypeSettings(type);
   view.frontmatterBlocks?.addBlank(null);
-}
-
-// Öffnet bei Bedarf erst die TYP-View (bzw. verlässt eine offene Detailansicht
-// zurück zur Liste - startAdd() legt das neue Tree-Item in this.listEl an, das
-// es nur in der Listenansicht gibt), und stößt dort denselben Ablauf wie der
-// +-Button im Listen-Header an.
-async function addTypCommand(plugin) {
-  await activateTypView(plugin);
-  const view = plugin.app.__fredTypLeaf?.view;
-  if (!(view instanceof TypView)) return;
-  if (view.selectedType !== null) view.closeTypeSettings();
-  view.startAdd();
 }
 
 module.exports = { registerTypView, VIEW_TYPE_TYP, compareTypes, sortTypesByMode, DEFAULT_SORT_ORDER, DEFAULT_TYPE_COLOR };

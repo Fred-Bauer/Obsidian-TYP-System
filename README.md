@@ -1,6 +1,6 @@
 # TYP-System
 
-Notiz-Typ-System für diesen Vault: eine eigene, links andockende **TYP-Pane** (Befehl „TYP-View öffnen“), ein nativer **TYP-Picker**, TYP-Frontmatter je Typ, Frontmatter-Sortierung sowie Einfärbung der Notiznamen nach ihrem `TYP`-Frontmatter in mehreren Ansichten. Ehemals Teil des Plugins **Fred**, seit der Aufteilung in ein eigenes Plugin ausgelagert.
+Notiz-Typ-System für diesen Vault: eine eigene, links andockende **TYP-Pane** (Befehl „TYP-View öffnen“), ein nativer **TYP-Picker**, TYP-Frontmatter je Typ, Frontmatter-Sortierung, aus einem TYP erzeugte **Bases** sowie Einfärbung der Notiznamen nach ihrem `TYP`-Frontmatter in mehreren Ansichten. Ehemals Teil des Plugins **Fred**, seit der Aufteilung in ein eigenes Plugin ausgelagert.
 
 ## TYP-Pane
 
@@ -107,6 +107,39 @@ Nativer Ersatz für Templaters eigenen `tp.system.suggester` bei der Typ-Auswahl
   - Der Subtyp-Picker führt die Nicht-Wahl als `TYP (ohne Subtyp)` – der TYP in seiner Farbe, der Zusatz in normaler Textfarbe –, standardmäßig an erster Stelle, sodass sie ohne Tippen mit Enter erledigt ist
   - Seine Liste steht nach der Suchanfrage des TYP-Pickers vorsortiert: wer dort „Lehrveranstaltung“ tippte und so zu ORGA kam, meinte diesen Subtyp und findet ihn hier oben. Weil die Nicht-Wahl den TYP-Namen zeigt, holt ein getipptes „ORGA“ umgekehrt sie selbst wieder nach vorn. Passt die Anfrage auf nichts (getippt war z. B. eine Beschreibung), bleibt die Reihenfolge unverändert
 
+## Bases
+
+Erzeugt aus einem TYP eine Obsidian-**Base**: Filter, Views und Spalten ergeben sich aus dem, was im TYP ohnehin gepflegt ist. Geschrieben wird dabei ausschließlich über Obsidians eigene Bases-Schnittstelle bzw. deren eigene Serialisierung – nie über selbst geparstes YAML, damit Formelblöcke und Sonderschlüssel einer bestehenden Datei den Vorgang unverändert überstehen.
+
+### Befehl „Base für TYP anlegen“
+
+- Fragt über den normalen TYP-Picker (inkl. der nicht manuell erstellbaren Typen, ohne die unregistrierten) ab, **wofür** die Base sein soll – eine dort gewählte TYP-Zeile meint den TYP, eine Subtyp-Zeile den Subtyp
+- Danach ein Dialog mit drei Schaltern, alle standardmäßig aus, darunter eine laufend aktualisierte Vorschau der entstehenden Spaltenliste:
+  - **Floating Properties** – die kursiv markierten Properties mitnehmen
+  - **Alle Subtyp-Properties** – zusätzlich die Properties sämtlicher Subtyp-Blöcke des TYPs. Nur bei einem TYP-Ziel sichtbar: in einer Subtyp-View blieben die Properties der übrigen Subtypen durchweg leer
+  - **tags** – die `tags`-Property als eigene Spalte
+- Die Datei heißt wie der TYP bzw. der Subtyp und liegt im Vault-Root (`MEDIA.base`, `Buch.base`). Fertig wird sie in einem neuen Tab geöffnet
+- **Ziel TYP:** Root-Filter `TYP == "…"`; eine Table-View mit dem Namen des TYPs, nach `SUBTYP` aufsteigend gruppiert (entfällt, wenn der TYP keine Subtypen hat), und dahinter je registriertem Subtyp eine gleichnamige Table-View mit `SUBTYP == "…"`. Subtyp-Werte, die nur in Notizen vorkommen und nicht erfasst sind, bekommen keine eigene View – sie erscheinen in der gruppierten Haupt-View
+- **Ziel Subtyp:** Root-Filter nur `SUBTYP == "…"`, ohne TYP-Bindung, und eine einzelne Table-View. Führen mehrere TYPen einen Subtyp dieses Namens, wird die View nach `TYP` aufsteigend gruppiert und ihre Spalten sind die Vereinigung aller beteiligten Blöcke in der Reihenfolge der TYP-Liste
+- **Gibt es die Datei schon**, wird sie geöffnet und nur um die fehlenden Views ergänzt; deren Filter stehen dann vollständig in der View selbst, der vorhandene Root-Filter bleibt unangetastet. Eine gleichnamige View wird **nicht** ersetzt, sondern stehen gelassen und in der Notice benannt
+
+### Befehl „Spalten der Base-View aktualisieren“
+
+- Erscheint nur, solange eine Base im Vordergrund ist, und arbeitet genau auf deren gerade sichtbarer View
+- Der TYP wird aus dem Filter gelesen (Root- und View-Filter zusammen, nur und-Verknüpfungen – eine oder-Gruppe oder ein zweiter, anderer Wert zählt als nicht lesbar). Ist nichts Eindeutiges zu finden, fragt der Befehl über den TYP-Picker nach und schreibt die Antwort gleich als Filter in die View, damit der nächste Lauf sie selbst liest
+- Danach derselbe Schalter-Dialog wie beim Anlegen
+- Ergänzen und Umsortieren laufen stumm durch. Jede Spalte, die **nicht** zum Ziel gehört, kommt in ein Modal als einzeln abwählbarer Entfernungs-Vorschlag (alle vorbelegt) – betrifft auch Formel-Spalten und Properties, die dem TYP-System gar nicht bekannt sind. Abgewählte Spalten bleiben erhalten und stehen danach vorn, direkt hinter `file.name`. Gibt es nichts zu entfernen, erscheint kein Modal
+- Angefasst wird ausschließlich die Spaltenliste. Spaltenbreiten, Sortierung, Gruppierung, Formeln und Anzeigenamen der View bleiben, wie sie sind
+
+### Spaltenreihenfolge
+
+`file.name` steht immer vorn, dahinter greift die **globale Property-Reihenfolge** als Gerüst (siehe *Frontmatter-Sortierung*) – eine Base ist damit genauso sortiert wie das Frontmatter der Notizen darin:
+
+- **„TYP-Frontmatter“** liefert den Hauptblock: das TYP-Frontmatter in gespeicherter Reihenfolge, die Floating Properties an ihrer jeweiligen Stelle dazwischen, dahinter die zusätzlichen Properties des Subtyp-Blocks. Ein Key aus beiden Blöcken behält die Position des TYP-Frontmatters, und die Floating-Markierung des Subtyps schlägt die des TYPs: ein Subtyp kann eine Standard-Property so gezielt aus seiner View heraushalten
+- **„Sonstige Properties“** nimmt die Properties der übrigen Subtyp-Blöcke auf, sofern der entsprechende Schalter gesetzt ist
+- **Fest platzierte Einzel-Properties** werden nur für `tags` ausgewertet (und nur bei gesetztem Schalter) – `cssclasses` oder `aliases` sind als Spalte einer Übersichtstabelle nicht gemeint
+- **`TYP` und `SUBTYP` selbst** werden nie zu Spalten: Filter bzw. Gruppierung sagen sie ohnehin
+
 ## Frontmatter-Sortierung
 
 Bringt die in einer Notiz vorhandenen Properties in eine feste Reihenfolge (ergänzt oder ändert keine Werte):
@@ -182,6 +215,7 @@ Umgesetzt in `TYP.js`, damit möglichst jedes Templater-Skript als Shortcut im T
 - **Frontmatter-Blöcke** (`src/frontmatter-blocks.js`): je Block ein eigener Container mit eigener Obsidian-Property-Editor-Instanz (gebunden an `typeStore`/`subtypeStore`). Nur so sind doppelte Keys über Blockgrenzen möglich – ein einziger, gemeinsamer Editor hielte alle Blöcke in **einem** flachen Objekt und könnte denselben Namen gar nicht zweimal darstellen. Zwei Dinge, die dadurch je Instanz enden, sind nachgerüstet:
   - **Tastatur-Navigation** über alle Blöcke: Obsidian erreicht seine `shiftFocusBefore`/`shiftFocusAfter`-Haken nur über die hier ausgeblendete Überschrift bzw. den „Add property“-Button, daher ein eigener Handler in der Capture-Phase (`registerFocusChain` in `type-frontmatter-editor.js`), der nur greift, wenn die Zeile selbst den Fokus hat – beim Tippen in einem Feld also nie
   - **Zeilen-Drag über Blockgrenzen** (`registerPropertyDrag`): setzt auf Obsidians eigenem Drag auf, statt ein zweites danebenzustellen. Dessen Ghost hängt ohnehin am `document.body` und folgt dem Cursor überallhin; dazu kommen nur ein leeres Zusatzkind in der Zeilenliste (sonst startet Obsidian den Drag gar nicht, wenn ein Block nur eine Zeile hat – Prüfung `n.firstChild !== n.lastChild`), ein Platzhalter mit Obsidians eigener Klasse `.drag-ghost-hidden` im Zielblock und ein `reorderKey` je Instanz, das beim Loslassen über einem fremden Block umhängt statt zu sortieren
+- **Bases** (`src/bases.js`, `src/base-dialogs.js`): schreibt nie selbst geparstes YAML. Eine neue Datei entsteht aus einem selbst gebauten Objekt, alles Weitere läuft über die Bases-eigenen Methoden (`query.setGlobalFilters`/`setViewFilters`, `cfg.setOrder`/`setGroupBy`, `query.save`). Views in eine bestehende Base werden über `query.getSerializable()` ergänzt – genau die Struktur, die Bases auch beim eigenen Speichern schreibt (nachgeprüft: der Round-Trip gibt Bestandsdateien samt `|-`-Formelblöcken und ``-Schlüsseln byte-identisch zurück), angefasst wird davon nur die `views`-Liste. Property-IDs führt eine View im Speicher voll qualifiziert (`note.Titel`), in der Datei dagegen verkürzt (`Titel`) – `serializeId()` macht aus der einen Form die andere. Die Spaltenliste entsteht über `plugin.collectBlocks()` (main.js) und erbt damit dessen Regeln zu doppelten Keys und Floating-Markierungen, statt sie ein zweites Mal zu formulieren
 - **Link-Einfärbung** (`src/link-colors.js`): überschreibt je Link nur `--link-color`/`--link-color-hover`. Im Lese-Modus per Markdown-Post-Processor, in Live Preview per CodeMirror-ViewPlugin, der nur den sichtbaren Bereich betrachtet (Links in Code-Blöcken werden über den Syntaxbaum ausgeschlossen). `@codemirror/*` ist deshalb in `esbuild.config.mjs` als extern markiert
 - **Shortcuts** (`src/shortcuts.js`, `src/shortcut-scripts.js`, `src/shortcut-picker.js`): Das Datenmodell liegt bewusst neben dem Frontmatter-Wert statt darin – siehe den Abschnitt *Shortcuts* oben für die Begründung. Weil dadurch kein Fremdkörper in einem typisierten Wert landet, braucht die Anzeige **keinen Eingriff in Obsidians Zeilen-Rendering**: Knopf und Chip hängen am `containerEl` der Zeile, das `renderProperty()` im Gegensatz zum `valueEl` nie leert, und das Ausblenden des Wertfelds macht allein CSS. Setzen und Entfernen sind deshalb ein reiner Klassen-Umschalter ohne `renderProperty()`/`synchronize()`. Die Liste markierter Skripte wird vorab aus Templaters Skript-Ordner gelesen und bei Dateiänderungen darin nachgeführt, damit das Modal ohne Dateizugriff auskommt
 - Der TYP-Frontmatter-Editor je Typ nutzt Obsidians eigenes (undokumentiertes) Property-Editor-Widget, gebunden an ein Plain-Object statt an eine echte Datei. Die globale Property-Reihenfolge baut dagegen bewusst eine eigene, schlichte Liste statt desselben Widgets – für die nicht entfernbaren, aber verschiebbaren Platzhalter-Zeilen wäre ein erneutes `synchronize()` aus dessen `saveFrontmatter`-Callback heraus nötig, was nachweislich zu einem Stack Overflow führen kann

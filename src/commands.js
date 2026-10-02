@@ -1,5 +1,6 @@
 const { Notice } = require("obsidian");
 const { sortAllFrontmatter, sortSingleFileFrontmatter } = require("./frontmatter-sort");
+const { createBaseCommand, activeBaseView, updateActiveView } = require("./bases");
 
 function registerCommands(plugin) {
 
@@ -69,6 +70,32 @@ function registerCommands(plugin) {
         const changed = await sortSingleFileFrontmatter(plugin.app, plugin, file);
         new Notice(changed ? `Frontmatter von "${file.basename}" sortiert.` : `Frontmatter von "${file.basename}" war bereits sortiert.`);
       })();
+      return true;
+    },
+  });
+
+  // Legt für den gewählten TYP (bzw. Subtyp) eine .base im Vault-Root an -
+  // siehe bases.js. Läuft über denselben runOrReportError-Wrapper wie oben:
+  // der Befehl schreibt eine Datei, ein stiller Fehlschlag wäre hier besonders
+  // irritierend.
+  plugin.addCommand({
+    id: "base-fuer-typ-anlegen",
+    name: "Base für TYP anlegen",
+    callback: runOrReportError("Base anlegen", () => createBaseCommand(plugin)),
+  });
+
+  // Bringt die Spalten der gerade sichtbaren View auf den Stand ihres TYPs.
+  // checkCallback statt callback: ohne offene Base hat der Befehl kein Ziel
+  // und taucht in der Befehlsliste gar nicht erst auf.
+  plugin.addCommand({
+    id: "base-view-spalten-aktualisieren",
+    name: "Spalten der Base-View aktualisieren",
+    checkCallback: (checking) => {
+      const view = activeBaseView(plugin);
+      if (!view) return false;
+      if (checking) return true;
+
+      runOrReportError("Base aktualisieren", () => updateActiveView(plugin, view))();
       return true;
     },
   });

@@ -1305,3 +1305,53 @@ input[type="range"].fred-typ-subtype-color-slider {
 .cm-hmd-internal-link:hover .fred-typ-link {
   color: var(--link-color-hover);
 }
+
+/* ============================================================
+   Base-Dialoge (siehe base-dialogs.js)
+   ============================================================ */
+
+/* Vorschau der Spaltenliste unter den drei Schaltern: die Spalten als Chips
+   in genau der Reihenfolge, in der sie in der View stehen werden. Eigener
+   Rahmen nach oben, damit die Liste nicht als vierte Einstellungszeile
+   missverstanden wird. */
+.fred-base-preview {
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: var(--size-4-3);
+  padding-top: var(--size-4-3);
+}
+
+.fred-base-preview-title {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: var(--size-4-2);
+}
+
+.fred-base-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  /* Ein TYP mit vielen Subtyp-Properties käme sonst über die Modalhöhe
+     hinaus und schöbe die Knopfzeile aus dem Blick. */
+  max-height: 12em;
+  overflow-y: auto;
+}
+
+.fred-base-preview-column {
+  background-color: var(--background-modifier-hover);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  padding: 0 var(--size-2-2);
+}
+
+/* Die Zeilen des Entfernen-Dialogs sind reine Ja/Nein-Fragen ohne
+   Beschreibung - Obsidians Standardabstand je Setting-Zeile ist dafür zu
+   luftig, sobald eine View ein Dutzend fremder Spalten führt. */
+.fred-base-removal-modal .setting-item {
+  padding: var(--size-2-2) 0;
+}
+
+.fred-base-removal-intro {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: 0;
+}

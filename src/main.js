@@ -398,4 +398,14 @@ module.exports = class TypSystemPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
   }
+
+  // Ruft Obsidian auf, wenn data.json von außen geändert wurde - in der Praxis
+  // durch Obsidian Sync von einem anderen Gerät. Ohne das behielte dieses Gerät
+  // seine alten Settings im Speicher und überschriebe die neuen beim nächsten
+  // saveSettings(). Einen offenen Settings-Tab baut Obsidian danach selbst neu
+  // auf (settingTab.update()); Einfärbungen und TYP-View hier.
+  async onExternalSettingsChange() {
+    await this.loadSettings();
+    this.refreshTypColors();
+  }
 };

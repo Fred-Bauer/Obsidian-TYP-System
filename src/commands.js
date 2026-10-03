@@ -1,101 +1,82 @@
 const { Notice } = require("obsidian");
-const { sortAllFrontmatter, sortSingleFileFrontmatter } = require("./frontmatter-sort");
+const { sortAllFrontmatter, sortSingleFileFrontmatter, sortSummary } = require("./frontmatter-sort");
 const { createBaseCommand, activeBaseView, updateActiveView } = require("./bases");
 
 function registerCommands(plugin) {
 
-  // Obsidian awaited den callback einer Befehlsdefinition nicht und fängt auch
-  // keine Fehler ab - eine Exception darin würde sonst lautlos verschwinden
-  // (nur ein Eintrag in der Entwicklerkonsole, keine sichtbare Rückmeldung).
-  // Diese drei Sortierbefehle laufen deshalb über runOrReportError(), damit
-  // im Fehlerfall trotzdem immer eine Notice erscheint statt gar keine.
+  // Obsidian neither awaits a command callback nor catches its errors, so an
+  // exception would vanish into the console. These commands always end in a
+  // notice instead.
   const runOrReportError = (label, fn) => async () => {
     try {
       await fn();
     } catch (error) {
       console.error(`[${label}]`, error);
-      new Notice(`${label} fehlgeschlagen: ${error.message}`);
+      new Notice(`${label} failed: ${error.message}`);
     }
   };
 
   plugin.addCommand({
-    id: "frontmatter-sortierung-alle",
-    name: "Frontmatter Sortierung GLOBAL aktualisieren",
-    callback: runOrReportError("Frontmatter Sortierung", async () => {
+    id: "sort-frontmatter-all",
+    name: "Sort frontmatter in all notes",
+    callback: runOrReportError("Frontmatter sorting", async () => {
       const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
-      new Notice(
-        changed > 0
-          ? `Frontmatter Sortierung: ${checked} Notizen geprüft, ${changed} sortiert.`
-          : `Frontmatter Sortierung: ${checked} Notizen geprüft, bereits alle sortiert.`
-      );
+      new Notice(sortSummary("Frontmatter sorting", checked, changed));
     }),
   });
 
   plugin.addCommand({
-    id: "frontmatter-sortierung-typ",
-    name: "Frontmatter Sortierung für TYP aktualisieren",
-    callback: runOrReportError("Frontmatter Sortierung", async () => {
-      // Derselbe TYP-Picker wie überall sonst im Plugin (siehe type-picker.js) -
-      // zeigt Farbe, Beschreibung und Notiz-Anzahl statt einer reinen Namensliste
-      // (und meldet selbst, falls es gar keine TYPen gibt). includeManualOff und
-      // includeUnregistered: true, da die Sortierung unabhängig davon sinnvoll
-      // ist, ob ein TYP manuell vergeben werden darf (z. B. KONTAKT, EXTERN)
-      // oder überhaupt in der TYP-Liste registriert ist.
-      const type = await plugin.pickType({ includeManualOff: true, includeUnregistered: true });
-      if (!type) return;
-      const { checked, changed, hasTypeDefaults } = await sortAllFrontmatter(plugin.app, plugin, type);
-      let message =
-        changed > 0
-          ? `Frontmatter Sortierung ${type}: ${checked} Notizen geprüft, ${changed} sortiert.`
-          : `Frontmatter Sortierung ${type}: ${checked} Notizen geprüft, bereits alle sortiert.`;
-      // Kein Fehler, aber ohne TYP-Frontmatter greift für diesen Typ nur
-      // die globale Reihenfolge (TYP selbst, fest positionierte Properties) -
-      // ohne diesen Hinweis wäre unklar, warum sich ggf. nichts geändert hat.
-      if (hasTypeDefaults === false) {
-        message += ` Hinweis: Für ${type} ist kein TYP-Frontmatter hinterlegt - nur die globale Reihenfolge wurde angewendet.`;
+    id: "sort-frontmatter-typ",
+    name: "Sort frontmatter for one TYP",
+    callback: runOrReportError("Frontmatter sorting", async () => {
+      // Sorting makes sense for any TYP, manually creatable or not, registered
+      // or not.
+      const typ = await plugin.pickTyp({ includeManualOff: true, includeUnregistered: true });
+      if (!typ) return;
+      const { checked, changed, hasTypDefaults } = await sortAllFrontmatter(plugin.app, plugin, typ);
+      let message = sortSummary(`Frontmatter sorting ${typ}`, checked, changed);
+      // Not an error, but explains why nothing may have changed.
+      if (hasTypDefaults === false) {
+        message += ` Note: ${typ} has no TYP-Frontmatter, so only the global order was applied.`;
       }
       new Notice(message);
     }),
   });
 
   plugin.addCommand({
-    id: "frontmatter-sortierung-aktive-notiz",
-    name: "Frontmatter Sortierung der aktiven Notiz aktualisieren",
+    id: "sort-frontmatter-active-note",
+    name: "Sort frontmatter of active note",
     checkCallback: (checking) => {
       const file = plugin.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") return false;
       if (checking) return true;
 
-      runOrReportError("Frontmatter Sortierung", async () => {
+      runOrReportError("Frontmatter sorting", async () => {
         const changed = await sortSingleFileFrontmatter(plugin.app, plugin, file);
-        new Notice(changed ? `Frontmatter von "${file.basename}" sortiert.` : `Frontmatter von "${file.basename}" war bereits sortiert.`);
+        new Notice(changed ? `Sorted frontmatter of "${file.basename}".` : `Frontmatter of "${file.basename}" was already sorted.`);
       })();
       return true;
     },
   });
 
-  // Legt für den gewählten TYP (bzw. Subtyp) eine .base im Vault-Root an -
-  // siehe bases.js. Läuft über denselben runOrReportError-Wrapper wie oben:
-  // der Befehl schreibt eine Datei, ein stiller Fehlschlag wäre hier besonders
-  // irritierend.
+  // Creates a .base for the chosen TYP or Subtyp in the vault root, see bases.js.
   plugin.addCommand({
-    id: "base-fuer-typ-anlegen",
-    name: "Base für TYP anlegen",
-    callback: runOrReportError("Base anlegen", () => createBaseCommand(plugin)),
+    id: "create-base-for-typ",
+    name: "Create Base for TYP",
+    callback: runOrReportError("Create Base", () => createBaseCommand(plugin)),
   });
 
-  // Bringt die Spalten der gerade sichtbaren View auf den Stand ihres TYPs.
-  // checkCallback statt callback: ohne offene Base hat der Befehl kein Ziel
-  // und taucht in der Befehlsliste gar nicht erst auf.
+  // Brings the columns of the visible Base view in line with its TYP. Without
+  // an open Base the command has no target and is hidden.
   plugin.addCommand({
-    id: "base-view-spalten-aktualisieren",
-    name: "Spalten der Base-View aktualisieren",
+    id: "update-base-view-columns",
+    name: "Update columns of Base view",
     checkCallback: (checking) => {
       const view = activeBaseView(plugin);
       if (!view) return false;
       if (checking) return true;
 
-      runOrReportError("Base aktualisieren", () => updateActiveView(plugin, view))();
+      runOrReportError("Update Base", () => updateActiveView(plugin, view))();
       return true;
     },
   });

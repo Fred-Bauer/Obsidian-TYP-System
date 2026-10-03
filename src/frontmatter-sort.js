@@ -1,26 +1,17 @@
-const { getSubtype } = require("./subtypes");
-const { typeKeyOf, propertyValue } = require("./typ-index");
+const { getSubtyp } = require("./subtyps");
+const { typKeyOf, propertyValue, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
+const { plural } = require("./typ-utils");
 
-const TYP_PROPERTY = "TYP";
-const SUBTYP_PROPERTY = "SUBTYP";
-
-// Wird auch von settings.js (Default für globalPropertyOrder) sowie vom
-// Order-Editor benutzt - alle vier Platzhalter-Blöcke sind dort per UI nicht
-// entfernbar, nur verschiebbar (siehe frontmatter-order-editor.js).
-// "typValue" ist die TYP-Property selbst, "subtypValue" analog die SUBTYP-
-// Property, "typ" die TYP-Frontmatter-Liste des TYPs (siehe
-// type-frontmatter-editor.js), "other" alles Übrige.
+// The four placeholders of the global order; the order editor lets you move
+// them but not remove them. "typValue" is the TYP property itself,
+// "subtypValue" the SUBTYP property, "typ" the TYP-Frontmatter list,
+// "other" everything else.
 const DEFAULT_GLOBAL_ORDER = [{ kind: "typValue" }, { kind: "subtypValue" }, { kind: "typ" }, { kind: "other" }];
 
-// Stellt sicher, dass genau je ein Eintrag pro Platzhalter-Art vorhanden ist -
-// nötig für Bestandsinstallationen, deren gespeicherte globalPropertyOrder
-// noch aus der Zeit vor "TYP als Listeneintrag" bzw. vor SUBTYP stammt (TYP
-// war davor hart-codiert immer an erster Stelle, kam in der Liste selbst
-// nicht vor). Fehlende Einträge werden an sinnvoller Default-Position ergänzt,
-// statt die bestehende, vom Nutzer per Drag & Drop einsortierte Reihenfolge
-// anzutasten. "subtypValue" landet dabei direkt hinter "typValue" (garantiert
-// zu diesem Zeitpunkt schon vorhanden), statt wie die übrigen Platzhalter
-// pauschal an den Rand.
+// Ensures exactly one entry per placeholder. Older saved orders predate some
+// of them; missing ones are added at a sensible spot ("subtypValue" right
+// after "typValue", the others at the edges) without touching the order the
+// user arranged.
 function normalizeGlobalOrder(order) {
   const result = Array.isArray(order) ? order.filter((entry) => entry && typeof entry === "object") : [];
   const hasKind = (kind) => result.some((entry) => entry.kind === kind);
@@ -35,42 +26,27 @@ function normalizeGlobalOrder(order) {
 }
 
 /* ============================================================
- * Frontmatter-Sortierung
- * Bringt die in einer Notiz VORHANDENEN Properties in eine feste
- * Reihenfolge - zusammengesetzt aus (siehe globalPropertyOrder):
- *  - global fest positionierten Einzel-Properties (z. B. cssclasses,
- *    aliases; Einstellungen -> TYP -> Globale Property-Reihenfolge),
- *  - der TYP-Property selbst,
- *  - der SUBTYP-Property selbst,
- *  - dem Block "TYP-Frontmatter" (TYP-Frontmatter-Liste des
- *    jeweiligen Typs, siehe type-frontmatter-editor.js, gefolgt vom
- *    Frontmatter-Block seines SUBTYPs), und
- *  - dem Block "Sonstige Properties" (alles Übrige, in bisheriger
- *    Reihenfolge).
- * Ergänzt dabei keine fehlenden Standard-Properties und ändert keine
- * Werte - reine Umsortierung der bereits vorhandenen Zeilen.
+ * Frontmatter sorting
+ * Puts the properties a note HAS into a fixed order built from
+ * globalPropertyOrder: pinned single properties, the TYP and
+ * SUBTYP properties, the "TYP-Frontmatter" block (the TYP's list
+ * followed by its Subtyp block) and "Other properties". Never adds
+ * properties or changes values.
  * ============================================================ */
 
-// Standard-Property-Reihenfolge eines Typs, inkl. der darin als "Floating
-// Property" markierten Keys (siehe typeFloatingKeys in settings.js) an genau
-// der Stelle, an der sie in der Liste stehen - ohne TYP selbst (das ist dort
-// nur aus historischen Gründen evtl. noch enthalten, siehe stripTypProperty)
-// und ohne die leere Platzhalter-Zeile des Editors ("Property hinzufügen").
-// Floating Properties werden nur nicht automatisch von getTypeDefaults()
-// (main.js) an Templater ausgeliefert, sollen aber trotzdem an ihrer
-// Listenposition landen, sobald eine Notiz sie doch trägt. null, wenn kein
-// Typ übergeben wurde oder für den Typ keine Standardliste gepflegt ist.
+// Key order of a TYP's frontmatter, floating keys included at their list
+// position (getTypDefaults leaves them out, but a note that has one should
+// still get it in place). Without TYP/SUBTYP and the editor's blank row.
+// null if there is no TYP or no list.
 //
-// Mit subtype zusätzlich die Keys aus dessen Frontmatter-Block (siehe
-// subtypes.js) - dahinter, da das TYP-Frontmatter immer oben steht. Ein Key,
-// der in BEIDEN Blöcken vorkommt, behält die Position des TYP-Frontmatters
-// (der Subtyp steuert dort nur Wert und Floating-Markierung bei, siehe
-// getTypeDefaults in main.js) - deshalb hier bewusst "erste Position zählt".
-function orderedDefaultKeys(plugin, type, subtype = null) {
-  if (!type) return null;
+// With subtyp, the keys of its block follow. A key in BOTH blocks keeps the
+// TYP-Frontmatter position - the same rule as collectBlocks in main.js, or a
+// freshly created note would be re-sorted right away.
+function orderedDefaultKeys(plugin, typ, subtyp = null) {
+  if (!typ) return null;
   const isSystemKey = (key) => key === "" || [TYP_PROPERTY, SUBTYP_PROPERTY].some((p) => key.toLowerCase() === p.toLowerCase());
-  const subtypeData = subtype ? getSubtype(plugin.settings, type, subtype) : null;
-  const blocks = [plugin.settings.typeDefaultFrontmatter[type], subtypeData?.frontmatter];
+  const subtypData = subtyp ? getSubtyp(plugin.settings, typ, subtyp) : null;
+  const blocks = [plugin.settings.typDefaultFrontmatter[typ], subtypData?.frontmatter];
   const keys = [];
   const seen = new Set();
   for (const block of blocks) {
@@ -83,22 +59,13 @@ function orderedDefaultKeys(plugin, type, subtype = null) {
   return keys.length > 0 ? keys : null;
 }
 
-// Reihenfolge, in der die vorhandenen Properties einer Notiz stehen sollen -
-// bestimmt komplett durch globalOrder: einzelne Properties an fester
-// Position, sowie die Platzhalter "typValue" (die TYP-Property selbst),
-// "subtypValue" (die SUBTYP-Property selbst), "typ" (Standardliste des Typs)
-// und "other" (alles Übrige).
+// Target order of a note's existing properties, fully defined by globalOrder.
 //
-// Welcher Block eine Property beansprucht, wird VOR dem eigentlichen Aufbau
-// der Reihenfolge feststehend bestimmt (pinned/typBlock/Rest sind disjunkt) -
-// nicht erst beim linearen Durchlauf von globalOrder. Das macht die
-// Block-Zuordnung unabhängig davon, in welcher Reihenfolge die Blöcke in
-// globalOrder stehen: eine global fest positionierte Property gehört immer zu
-// ihrem eigenen Eintrag (nie zusätzlich zum Typ-Block, selbst wenn "TYP
-// Properties" vorher in der Liste steht), und "Sonstige Properties" enthält
-// immer nur echte Restbestände (nie versehentlich Properties, die eigentlich
-// einem später in der Liste stehenden Block gehören).
-function computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys) {
+// Which block claims a property is decided BEFORE the order is built (pinned,
+// TYP block and rest are disjoint), so the result doesn't depend on where the
+// blocks sit in globalOrder: a pinned property never also lands in the TYP
+// block, and "other" only ever holds true leftovers.
+function computeSortedKeys(existingKeys, globalOrder, typDefaultKeys) {
   const lowerToActual = new Map(existingKeys.map((key) => [key.toLowerCase(), key]));
   const resolve = (name) => lowerToActual.get(name.toLowerCase());
 
@@ -111,7 +78,7 @@ function computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys) {
   const typKey = resolve(TYP_PROPERTY);
   const subtypKey = resolve(SUBTYP_PROPERTY);
   const typBlockKeys = new Set(
-    (typeDefaultKeys ?? []).map(resolve).filter((key) => key && key !== typKey && !pinned.has(key))
+    (typDefaultKeys ?? []).map(resolve).filter((key) => key && key !== typKey && !pinned.has(key))
   );
   const claimed = new Set(pinned);
   for (const key of typBlockKeys) claimed.add(key);
@@ -132,7 +99,7 @@ function computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys) {
     else if (entry.kind === "typValue") push(typKey);
     else if (entry.kind === "subtypValue") push(subtypKey);
     else if (entry.kind === "typ") {
-      for (const name of typeDefaultKeys ?? []) {
+      for (const name of typDefaultKeys ?? []) {
         const key = resolve(name);
         if (key && typBlockKeys.has(key)) push(key);
       }
@@ -143,52 +110,43 @@ function computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys) {
     }
   }
 
-  // Sicherheitsnetz, falls globalOrder unvollständig ist (z. B. korrupte
-  // Einstellungen) - die UI verhindert das eigentlich (siehe normalizeGlobalOrder).
+  // Safety net for an incomplete globalOrder (corrupt settings).
   for (const key of existingKeys) push(key);
   return sortedKeys;
 }
 
-// "position" ist kein echtes Property, sondern Obsidians eigene Angabe zur
-// Lage des Frontmatter-Blocks innerhalb der Datei (nur im Cache-Objekt
-// vorhanden, nicht im von processFrontMatter gelieferten Objekt).
+// "position" is Obsidian's location of the frontmatter block, present only in
+// the cache object, not a property.
 function cachedFrontmatterKeys(app, file) {
   const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
   if (!frontmatter) return null;
   return Object.keys(frontmatter).filter((key) => key !== "position");
 }
 
-async function sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys) {
-  // Günstiger Vorab-Check über den bereits im Speicher vorhandenen Metadata-
-  // Cache (kein Datei-Zugriff): der Normalfall - eine Notiz ist schon korrekt
-  // sortiert - lässt sich so erkennen, ohne die Datei über processFrontMatter
-  // überhaupt zu öffnen. Das ist bei wiederholten Läufen über den ganzen
-  // Vault der Löwenanteil der Notizen und damit der eigentliche Geschwindig-
-  // keitsgewinn. processFrontMatter bleibt trotzdem die alleinige Quelle der
-  // Wahrheit für den tatsächlichen Schreibvorgang (Cache kann kurzzeitig
-  // veraltet sein) - der Vorab-Check überspringt nur sicher unveränderte Fälle.
+async function sortFileFrontmatter(app, file, globalOrder, typDefaultKeys) {
+  // Cheap pre-check against the in-memory cache: most notes are already
+  // sorted, and this skips opening them at all - that is where repeated vault
+  // runs get their speed. processFrontMatter stays the source of truth for the
+  // actual write, since the cache can lag behind.
   const cachedKeys = cachedFrontmatterKeys(app, file);
   if (!cachedKeys || cachedKeys.length <= 1) return false;
-  const cachedSorted = computeSortedKeys(cachedKeys, globalOrder, typeDefaultKeys);
+  const cachedSorted = computeSortedKeys(cachedKeys, globalOrder, typDefaultKeys);
   if (cachedSorted.every((key, i) => key === cachedKeys[i])) return false;
 
   let changed = false;
   await app.fileManager.processFrontMatter(file, (frontmatter) => {
-    changed = sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys);
+    changed = sortFrontmatterObject(frontmatter, globalOrder, typDefaultKeys);
   });
   return changed;
 }
 
-// Sortiert das von processFrontMatter gelieferte Objekt in-place (siehe
-// Kommentar in type-frontmatter-editor.js zu saveFrontmatter/stripTypProperty):
-// Objekt-Insertion-Order bestimmt die spätere YAML-Reihenfolge, daher alle
-// Keys löschen und in neuer Reihenfolge wieder einfügen, statt ein neues
-// Objekt zurückzugeben. Liefert true bei einer Änderung.
-function sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys) {
+// Sorts the processFrontMatter object in place: insertion order becomes the
+// YAML order, so all keys are deleted and re-added. Returns true on a change.
+function sortFrontmatterObject(frontmatter, globalOrder, typDefaultKeys) {
   const existingKeys = Object.keys(frontmatter);
   if (existingKeys.length <= 1) return false;
 
-  const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys);
+  const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typDefaultKeys);
   if (sortedKeys.every((key, i) => key === existingKeys[i])) return false;
 
   const snapshot = { ...frontmatter };
@@ -197,36 +155,30 @@ function sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys) {
   return true;
 }
 
-// Für Aufrufer, die ohnehin gerade in processFrontMatter schreiben (z. B.
-// applyTypeProperties/_obsidian/templater-scripts/TYP.js): sortiert das
-// Objekt direkt mit ausdrücklich übergebenem TYP/Subtyp - der Index bzw.
-// Metadata-Cache kennt die gerade geschriebenen Werte zu diesem Zeitpunkt
-// noch nicht.
-function sortFrontmatterFor(plugin, frontmatter, type, subtype) {
+// For callers already inside processFrontMatter (TYP.js): TYP and Subtyp are
+// passed explicitly, because index and cache don't know the values just
+// written yet.
+function sortFrontmatterFor(plugin, frontmatter, typ, subtyp) {
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
-  return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, type, subtype));
+  return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, typ, subtyp));
 }
 
-// Setzt nur die eine Property key an ihren Platz laut Frontmatter-Sortierung,
-// alle übrigen bleiben in ihrer bisherigen Reihenfolge - für Aufrufer, die
-// gerade eine Property neu angelegt haben (z. B. Freds Property-Backlinking),
-// die sonst am Ende landen würde, ohne dafür gleich das ganze, evtl. bewusst
-// anders sortierte Frontmatter umzustellen. TYP/SUBTYP werden aus dem
-// übergebenen Objekt gelesen, nicht aus Index/Cache (die kennen innerhalb von
-// processFrontMatter evtl. noch einen älteren Stand).
+// Moves only `key` to its sorted place and leaves every other key where it is
+// - for callers that just added a property (Fred's property backlinking) and
+// shouldn't reshuffle a deliberately different order. TYP/SUBTYP are read from
+// the object itself; index and cache may still be behind.
 //
-// Platz = direkt hinter dem nächsten Vorgänger, den key in der vollständig
-// sortierten Reihenfolge hätte (ganz nach vorn, wenn es keinen gibt). Liefert
-// true bei einer Änderung.
+// The place is right after key's nearest predecessor in the fully sorted
+// order (first if there is none). Returns true on a change.
 function placePropertyFor(plugin, frontmatter, key) {
   const existingKeys = Object.keys(frontmatter);
   const actualKey = existingKeys.find((k) => k.toLowerCase() === key.toLowerCase());
   if (!actualKey || existingKeys.length <= 1) return false;
 
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
-  const type = typeKeyOf(propertyValue(frontmatter, TYP_PROPERTY));
-  const subtype = typeKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY));
-  const sortedKeys = computeSortedKeys(existingKeys, globalOrder, orderedDefaultKeys(plugin, type, subtype));
+  const typ = typKeyOf(propertyValue(frontmatter, TYP_PROPERTY));
+  const subtyp = typKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY));
+  const sortedKeys = computeSortedKeys(existingKeys, globalOrder, orderedDefaultKeys(plugin, typ, subtyp));
 
   const rest = existingKeys.filter((k) => k !== actualKey);
   const predecessor = sortedKeys.slice(0, sortedKeys.indexOf(actualKey)).pop();
@@ -240,44 +192,46 @@ function placePropertyFor(plugin, frontmatter, key) {
   return true;
 }
 
-// Sortiert eine einzelne, bereits bekannte Notiz (z. B. die aktive Datei).
 async function sortSingleFileFrontmatter(app, plugin, file) {
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
-  // Unsaubere TYP-Werte (Liste, Randleerzeichen) haben keine Standardliste -
-  // dann greift nur die globale Reihenfolge (siehe typeKeyOf in typ-index.js).
-  const type = plugin.typIndex.typeOf(file);
-  const typeDefaultKeys = orderedDefaultKeys(plugin, type, plugin.typIndex.subtypeOf(file));
-  return sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys);
+  // An unclean TYP value (list, padded) has no TYP-Frontmatter; only the global
+  // order applies then (see typKeyOf in typ-index.js).
+  const typ = plugin.typIndex.typOf(file);
+  const typDefaultKeys = orderedDefaultKeys(plugin, typ, plugin.typIndex.subtypOf(file));
+  return sortFileFrontmatter(app, file, globalOrder, typDefaultKeys);
 }
 
-// onlyType: optional - beschränkt den Lauf auf Notizen genau dieses Typs.
-// Ohne onlyType werden alle Notizen geprüft, auch ohne TYP oder mit einem Typ
-// ohne gepflegte Standardliste - die global fest positionierten Properties
-// (z. B. cssclasses) sollen unabhängig vom Typ wirken können. Für Notizen, bei
-// denen weder ein passender Typ-Block noch eine der konfigurierten
-// Einzel-Properties greift, bleibt die bisherige Reihenfolge unverändert.
-async function sortAllFrontmatter(app, plugin, onlyType) {
+// onlyTyp (optional) limits the run to notes of that TYP. Without it every
+// note is checked, including notes without a TYP: pinned properties such as
+// cssclasses apply regardless of TYP.
+async function sortAllFrontmatter(app, plugin, onlyTyp) {
   let checked = 0;
   let changed = 0;
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
-  // Nur aussagekräftig, wenn ein einzelner Typ eingegrenzt wurde (sonst
-  // wechselt der Typ von Datei zu Datei) - für die Rückmeldung des Befehls
-  // "TYP Frontmatter Sortierung aktualisieren", falls für den gewählten Typ
-  // gar keine TYP-Frontmatter-Liste gepflegt ist.
-  const hasTypeDefaults = onlyType ? orderedDefaultKeys(plugin, onlyType) !== null : null;
+  // Only meaningful for a single TYP: lets the command explain a run that
+  // changed nothing because the TYP has no TYP-Frontmatter.
+  const hasTypDefaults = onlyTyp ? orderedDefaultKeys(plugin, onlyTyp) !== null : null;
 
   for (const file of app.vault.getMarkdownFiles()) {
     if (!plugin.settings.includeIgnoredFiles && app.metadataCache.isUserIgnored(file.path)) continue;
 
-    const type = plugin.typIndex.typeOf(file);
-    if (onlyType && type !== onlyType) continue;
+    const typ = plugin.typIndex.typOf(file);
+    if (onlyTyp && typ !== onlyTyp) continue;
 
-    const typeDefaultKeys = orderedDefaultKeys(plugin, type, plugin.typIndex.subtypeOf(file));
+    const typDefaultKeys = orderedDefaultKeys(plugin, typ, plugin.typIndex.subtypOf(file));
     checked++;
-    if (await sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys)) changed++;
+    if (await sortFileFrontmatter(app, file, globalOrder, typDefaultKeys)) changed++;
   }
 
-  return { checked, changed, hasTypeDefaults };
+  return { checked, changed, hasTypDefaults };
+}
+
+// Result notice of a sorting run, shared by the commands and the play button
+// of the global order.
+function sortSummary(label, checked, changed) {
+  return changed > 0
+    ? `${label}: checked ${plural(checked, "note")}, sorted ${changed}.`
+    : `${label}: checked ${plural(checked, "note")}, all already sorted.`;
 }
 
 module.exports = {
@@ -286,6 +240,7 @@ module.exports = {
   sortFrontmatterFor,
   placePropertyFor,
   normalizeGlobalOrder,
+  sortSummary,
   DEFAULT_GLOBAL_ORDER,
   TYP_PROPERTY,
   SUBTYP_PROPERTY,

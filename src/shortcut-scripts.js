@@ -1,58 +1,40 @@
 const { TFile, Vault, debounce, normalizePath } = require("obsidian");
 
-// Nur Templater-Skripte mit diesem Marker in einem Kommentar werden im
-// Shortcut-Modal (shortcut-picker.js) angeboten - reine Hilfsskripte (z. B.
-// toListIfMultiple, TYP selbst) ergeben als Shortcut keinen Sinn. Der Text
-// hinter dem Marker bis zum Zeilenende dient als Beschreibung in der Liste;
-// fehlt er, steht dort nur der Skriptname. Ein abschließendes "*/" eines
-// Blockkommentars gehört nicht zur Beschreibung.
+// Only Templater scripts with this marker in a comment are offered in the
+// shortcut picker; helper scripts make no sense as shortcuts. The text after
+// the marker up to the line end is the description (a closing "*/" is not
+// part of it).
 //
-// Optional folgt direkt auf den Marker eine Parameterliste in Klammern. Sie
-// beschreibt die VOLLSTÄNDIGE Argumentliste des Aufrufs nach "tp" - also nicht
-// nur die abgefragten Werte, sondern auch, an welcher Stelle das Skript die
-// Datei bzw. den Kontext haben will (siehe RESERVED_PARAMS in shortcuts.js):
-//   // @typ-shortcut(ordner, jahr)       -> f(tp, "Literatur", 2024)
-//   // @typ-shortcut(newFile, jahr)      -> f(tp, newFile, 2024)
-//   // @typ-shortcut(property)           -> f(tp, "Familie")
-//   // @typ-shortcut                     -> f(tp, newFile, ctx)
-// Dadurch bekommt jedes Skript seine eigenen Parameter in seiner eigenen
-// Reihenfolge, statt sich einer festen Konvention beugen zu müssen.
+// An optional parameter list in parentheses right after the marker describes
+// the COMPLETE argument list after "tp", including where the script wants the
+// file or context (see RESERVED_PARAMS in shortcuts.js):
+//   // @typ-shortcut(folder, year)      -> f(tp, "Literatur", 2024)
+//   // @typ-shortcut(newFile, year)     -> f(tp, newFile, 2024)
+//   // @typ-shortcut(property)          -> f(tp, "Familie")
+//   // @typ-shortcut                    -> f(tp, newFile, ctx)
+// No parentheses (params === null) is the classic call f(tp, newFile, ctx);
+// empty parentheses (params === []) pass only tp.
 //
-// Unterschieden wird zwischen "gar keine Klammern" (params === null, der
-// herkömmliche Aufruf f(tp, newFile, ctx) - so verhalten sich alle bisher
-// markierten Skripte unverändert) und "leere Klammern" (params === [], ein
-// Aufruf ganz ohne Argumente außer tp).
-//
-// Der Marker muss unmittelbar auf den Kommentarbeginn folgen. Eine frühere
-// Fassung erlaubte beliebigen Text davor - damit genügte aber schon eine
-// Erwähnung in Fließtext ("... in seinem @typ-shortcut-Marker deklariert"),
-// um ein Skript ungewollt als Shortcut anzubieten. Genau das ist TYP.js
-// passiert, dessen Kopfkommentar die Konvention beschreibt. Alle tatsächlich
-// markierten Skripte schreiben den Marker ohnehin an den Zeilenanfang.
-//
-// "\b" hinter dem Markernamen verhindert, dass "@typ-shortcutXYZ" anschlägt,
-// und stört die direkt folgende Klammer nicht (t -> ( ist eine Wortgrenze).
+// The marker must start the comment. Allowing text before it once turned
+// TYP.js into a shortcut, just because its header comment mentions the marker.
+// "\b" after the name rejects "@typ-shortcutXYZ" but allows the "(".
 const SHORTCUT_MARKER = /^[ \t]*(?:\/\/+|\/\*+|\*)[ \t]*@typ-shortcut\b(?:\(([^)]*)\))?[ \t]*(.*?)[ \t]*(?:\*\/)?[ \t]*$/m;
 
-// Parameternamen aus der Klammer des Markers, in Deklarationsreihenfolge.
-// Leere Einträge (z. B. bei "()" oder einem überzähligen Komma) fallen weg;
-// ein versehentlich doppelt genannter Name ergäbe zwei Eingabefelder, die
-// beide denselben Eintrag schreiben, und bleibt deshalb nur einmal stehen.
+// Parameter names from the marker, in declared order. Empty entries ("()", a
+// stray comma) are dropped, duplicates kept once - two fields writing the same
+// entry would only confuse.
 function parseParams(raw) {
-  const namen = (raw ?? "")
+  const names = (raw ?? "")
     .split(",")
     .map((name) => name.trim())
     .filter((name) => name !== "");
-  return [...new Set(namen)];
+  return [...new Set(names)];
 }
 
-// Hält die Liste der als Shortcut markierten Templater-Skripte aktuell.
-//
-// Die Liste wird vorab (asynchron) aus Templaters Skript-Ordner gelesen und bei
-// Änderungen darin nachgeführt, statt sie erst beim Öffnen des Modals zu
-// ermitteln - so ist sie dort ohne Wartezeit da, und das Modal bleibt frei von
-// Dateizugriffen. Liefert einen Accessor auf die jeweils aktuelle Liste
-// ([{ name, params, description }], nach Namen sortiert).
+// Keeps the list of marked Templater scripts current. It is read ahead of time
+// and updated on changes, so the picker opens without waiting and without file
+// access. Returns an accessor for the list ([{ name, params, description }],
+// sorted by name).
 function registerShortcutScripts(plugin) {
   const { app } = plugin;
 
@@ -66,8 +48,8 @@ function registerShortcutScripts(plugin) {
 
   const isInScriptFolder = (path) => !!scriptFolder && !!path && path.startsWith(scriptFolder + "/");
 
-  // Wie Templater selbst: alle .js-Dateien im Skript-Ordner inkl.
-  // Unterordnern, Skriptname = Dateiname ohne Endung.
+  // Like Templater: every .js in the script folder including subfolders,
+  // script name = file name without extension.
   async function refreshScripts() {
     const folderPath = currentScriptFolder();
     scriptFolder = folderPath;
@@ -82,8 +64,8 @@ function registerShortcutScripts(plugin) {
     for (const file of files) {
       try {
         const match = (await app.vault.cachedRead(file)).match(SHORTCUT_MARKER);
-        // match[1] ist undefined, wenn gar keine Klammern dastehen, und "" bei
-        // leeren Klammern - der Unterschied entscheidet über die Aufrufform.
+        // match[1] is undefined without parentheses and "" with empty ones;
+        // that difference decides the call form.
         if (match) {
           found.push({
             name: file.basename,
@@ -92,11 +74,11 @@ function registerShortcutScripts(plugin) {
           });
         }
       } catch (e) {
-        console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
+        console.error(`TYP-System: can't read Templater script ${file.path}`, e);
       }
     }
-    // Ordner zwischenzeitlich in Templater umgestellt: Ergebnis verwerfen,
-    // der Lauf für den neuen Ordner ist bereits angestoßen.
+    // Folder changed in Templater meanwhile: drop this result, the run for the
+    // new folder is already scheduled.
     if (folderPath !== scriptFolder) return;
     scripts = found.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -112,8 +94,8 @@ function registerShortcutScripts(plugin) {
   app.workspace.onLayoutReady(refreshScripts);
 
   return () => {
-    // Templater-Ordner inzwischen umgestellt: für den nächsten Aufruf
-    // nachladen, jetzt noch mit der bisherigen Liste antworten.
+    // Templater folder changed: reload for the next call, answer with the
+    // current list for now.
     if (currentScriptFolder() !== scriptFolder) scheduleRefresh();
     return scripts;
   };

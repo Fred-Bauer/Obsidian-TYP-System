@@ -1,68 +1,51 @@
 const { setIcon, Notice } = require("obsidian");
-const { TYP_PROPERTY, SUBTYP_PROPERTY, sortAllFrontmatter } = require("./frontmatter-sort");
+const { TYP_PROPERTY, SUBTYP_PROPERTY, sortAllFrontmatter, sortSummary } = require("./frontmatter-sort");
 
-// Anzeigetext der vier nicht entfernbaren Platzhalter-Zeilen - "typValue" ist
-// die TYP-Property selbst, "subtypValue" analog die SUBTYP-Property, "typ"
-// die TYP-Frontmatter-Liste des TYPs (siehe
-// type-frontmatter-editor.js), "other" alle Properties, die weder dort noch
-// in dieser Liste namentlich geführt werden. Siehe computeSortedKeys in
-// frontmatter-sort.js für die tatsächliche Auflösung dieser Blöcke.
+// Labels of the four placeholder rows; computeSortedKeys in frontmatter-sort.js
+// resolves what each one stands for.
 const PLACEHOLDER_LABELS = {
   typValue: "TYP",
   subtypValue: "SUBTYP",
   typ: "TYP-Frontmatter",
-  other: "Sonstige Properties",
+  other: "Other properties",
 };
 
-// Editor für plugin.settings.globalPropertyOrder: eine reine Namensliste
-// (keine Werte, daher kein eigener private-API-Umweg über Obsidians
-// Metadata-Editor-Widget wie in type-frontmatter-editor.js nötig) mit
-// Drag-and-drop-Sortierung. Die drei Platzhalter-Zeilen sind Teil derselben
-// Liste, lassen sich verschieben, aber nicht per UI entfernen.
+// Editor for settings.globalPropertyOrder: a plain list of names with drag &
+// drop. It holds no values, so unlike typ-frontmatter-editor.js it needs no
+// detour through Obsidian's private property widget. The placeholder rows can
+// be moved but not removed.
 function mountGlobalOrderEditor(containerEl, plugin) {
-  const header = containerEl.createDiv({ cls: "fred-typ-frontmatter-header" });
+  const header = containerEl.createDiv({ cls: "typ-frontmatter-header" });
 
-  // Eigene Gruppe für Button + Überschrift, statt beide als getrennte Kinder
-  // von header direkt: bei justify-content: space-between (siehe CSS) würde
-  // ein drittes Kind zwischen Überschrift und "+"-Button sonst mittig im
-  // verbleibenden Platz landen, statt direkt neben der Überschrift zu sitzen.
-  const titleGroup = header.createDiv({ cls: "fred-typ-frontmatter-title-group" });
+  // Button and title share a group: the header uses space-between, so a third
+  // direct child would float in the middle instead of next to the title.
+  const titleGroup = header.createDiv({ cls: "typ-frontmatter-title-group" });
 
-  // Wendet die aktuelle Reihenfolge sofort auf den gesamten Vault an - derselbe
-  // Lauf wie der Befehl "Frontmatter Sortierung GLOBAL aktualisieren"
-  // (sortAllFrontmatter mit onlyType null), nur direkt neben der Liste
-  // erreichbar statt über die Befehlspalette.
-  const applyBtn = titleGroup.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Auf alle Notizen anwenden" } });
+  // Same run as the "Sort frontmatter in all notes" command.
+  const applyBtn = titleGroup.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Apply to all notes" } });
   setIcon(applyBtn, "play");
   applyBtn.addEventListener("click", async () => {
     try {
       const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
-      new Notice(
-        changed > 0
-          ? `Frontmatter Sortierung: ${checked} Notizen geprüft, ${changed} sortiert.`
-          : `Frontmatter Sortierung: ${checked} Notizen geprüft, bereits alle sortiert.`
-      );
+      new Notice(sortSummary("Frontmatter sorting", checked, changed));
     } catch (error) {
-      console.error("[Frontmatter Sortierung]", error);
-      new Notice(`Frontmatter Sortierung fehlgeschlagen: ${error.message}`);
+      console.error("[Frontmatter sorting]", error);
+      new Notice(`Frontmatter sorting failed: ${error.message}`);
     }
   });
 
-  titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: "Globale Property-Reihenfolge" });
+  titleGroup.createDiv({ cls: "typ-detail-section-title", text: "Global property order" });
 
-  const addBtn = header.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Property hinzufügen" } });
+  const addBtn = header.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Add property" } });
   setIcon(addBtn, "plus");
 
-  const listEl = containerEl.createDiv({ cls: "fred-order-list" });
+  const listEl = containerEl.createDiv({ cls: "typ-order-list" });
 
   const order = () => plugin.settings.globalPropertyOrder;
 
-  // Neue Zeile wird erst bei einem gültigen, nicht-leeren Namen tatsächlich in
-  // plugin.settings.globalPropertyOrder aufgenommen (und damit potenziell
-  // gespeichert) - bis dahin existiert sie nur als lokaler Entwurf, der beim
-  // Re-Render zusätzlich ans Ende der echten Liste gehängt wird. So landen
-  // leere Property-Felder nie in den Einstellungen, selbst wenn zwischendurch
-  // aus anderem Anlass (z. B. Verschieben einer anderen Zeile) gespeichert wird.
+  // A new row only joins globalPropertyOrder once it has a valid name. Until
+  // then it is a local draft appended on render, so an empty name never ends
+  // up in the settings, even if something else saves in between.
   let draftEntry = null;
 
   const isDuplicateName = (value, ownEntry) => {
@@ -79,26 +62,24 @@ function mountGlobalOrderEditor(containerEl, plugin) {
       const isDraft = entry === draftEntry;
       const isPlaceholder = entry.kind !== "property";
       const rowCls =
-        "fred-order-row" + (isPlaceholder ? " is-placeholder" : "") + (entry.kind === "typ" ? " is-typ-defaults" : "");
+        "typ-order-row" + (isPlaceholder ? " is-placeholder" : "") + (entry.kind === "typ" ? " is-typ-defaults" : "");
       const row = listEl.createDiv({ cls: rowCls });
 
-      const dragHandle = row.createDiv({ cls: "fred-order-drag", attr: { "aria-label": "Verschieben" } });
+      const dragHandle = row.createDiv({ cls: "typ-order-drag", attr: { "aria-label": "Drag to move" } });
       setIcon(dragHandle, "grip-vertical");
 
       if (isPlaceholder) {
-        row.createDiv({ cls: "fred-order-label", text: PLACEHOLDER_LABELS[entry.kind] });
+        row.createDiv({ cls: "typ-order-label", text: PLACEHOLDER_LABELS[entry.kind] });
       } else {
         const input = row.createEl("input", {
           type: "text",
-          cls: "fred-order-name-input",
-          attr: { placeholder: "Property-Name" },
+          cls: "typ-order-name-input",
+          attr: { placeholder: "Property name" },
         });
         input.value = entry.name;
 
-        // "blur" statt "change": Letzteres feuert bei einem leer gebliebenen
-        // Feld gar nicht erst (Browser sehen darin keine Wertänderung) - der
-        // Entwurf würde dann nie aufgeräumt. "blur" greift zuverlässig in
-        // beiden Fällen (umbenennen wie leer lassen).
+        // "blur", not "change": change doesn't fire for a field left empty, so
+        // the draft would never be cleaned up.
         input.addEventListener("blur", async () => {
           const value = input.value.trim();
 
@@ -114,7 +95,7 @@ function mountGlobalOrderEditor(containerEl, plugin) {
           }
 
           if (isDuplicateName(value, isDraft ? null : entry)) {
-            new Notice(`"${value}" ist bereits in der Liste.`);
+            new Notice(`"${value}" is already in the list.`);
             input.value = entry.name;
             return;
           }
@@ -128,7 +109,7 @@ function mountGlobalOrderEditor(containerEl, plugin) {
           render();
         });
 
-        const removeBtn = row.createDiv({ cls: "fred-order-remove clickable-icon", attr: { "aria-label": "Entfernen" } });
+        const removeBtn = row.createDiv({ cls: "typ-order-remove clickable-icon", attr: { "aria-label": "Remove" } });
         setIcon(removeBtn, "x");
         removeBtn.addEventListener("click", async () => {
           if (isDraft) {
@@ -141,8 +122,7 @@ function mountGlobalOrderEditor(containerEl, plugin) {
         });
       }
 
-      // Der Entwurf hat noch keinen Platz in der echten Liste - Verschieben
-      // ergibt für ihn keinen Sinn, bevor er überhaupt einen Namen hat.
+      // A draft has no place in the real list yet, so it can't be moved.
       if (isDraft) return;
 
       row.draggable = true;
@@ -154,10 +134,8 @@ function mountGlobalOrderEditor(containerEl, plugin) {
       row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
       row.addEventListener("dragover", (event) => {
         event.preventDefault();
-        // Obere oder untere Hälfte der Zeile entscheidet, ob die gezogene
-        // Zeile davor oder dahinter landet - sonst ließe sich nie "nach ganz
-        // unten" ablegen (Ablegen auf der letzten Zeile hätte immer nur vor
-        // ihr eingefügt).
+        // Upper or lower half decides before/after - otherwise nothing could
+        // be dropped below the last row.
         const rect = row.getBoundingClientRect();
         const isAfter = event.clientY - rect.top > rect.height / 2;
         row.classList.toggle("is-drop-before", !isAfter);
@@ -172,8 +150,7 @@ function mountGlobalOrderEditor(containerEl, plugin) {
         const fromIndex = Number(event.dataTransfer.getData("text/plain"));
         if (Number.isNaN(fromIndex)) return;
 
-        // Zielposition im Array VOR dem Entfernen von fromIndex gedacht -
-        // "nach dieser Zeile" heißt: direkt vor der jeweils nächsten.
+        // Target index counted before fromIndex is removed.
         let insertBefore = isAfter ? index + 1 : index;
         if (fromIndex < insertBefore) insertBefore -= 1;
 
@@ -190,7 +167,7 @@ function mountGlobalOrderEditor(containerEl, plugin) {
       draftEntry = { kind: "property", name: "" };
       render();
     }
-    const inputs = listEl.querySelectorAll(".fred-order-name-input");
+    const inputs = listEl.querySelectorAll(".typ-order-name-input");
     inputs[inputs.length - 1]?.focus();
   });
 

@@ -1,17 +1,9 @@
 const { Plugin } = require("obsidian");
 const { DEFAULT_SETTINGS, TypSystemSettingTab } = require("./settings");
 const { registerCommands } = require("./commands");
-const { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require("./typ-view");
+const { registerTypPane, sortTypsByMode, DEFAULT_SORT_ORDER } = require("./typ-pane");
 const { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
-const {
-  getSubtype,
-  getSubtypeNames,
-  isSubtypeManual,
-  migrateAboveStandard,
-  migrateSubtypeColorScale,
-  migrateSubtypeManual,
-} = require("./subtypes");
-const { DEFAULT_SUBTYPE_COLOR_RANGES } = require("./type-colors");
+const { getSubtyp, getSubtypNames, isSubtypManual } = require("./subtyps");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
 const { registerSearchColors } = require("./search-colors");
@@ -22,92 +14,43 @@ const { registerActiveTitleColors } = require("./active-title-colors");
 const { registerLinkColors } = require("./link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { registerPropertyRenameSync } = require("./property-rename-sync");
+const { removePropertyMenuPatch } = require("./typ-frontmatter-editor");
 const { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require("./frontmatter-sort");
 const { resolveShortcuts, scriptNameOf, resolveCallArgs } = require("./shortcuts");
 const {
-  pickType: pickTypeModal,
-  pickSubtype: pickSubtypeModal,
-  pickTypeAndSubtype: pickTypeAndSubtypeModal,
-} = require("./type-picker");
+  pickTyp: pickTypModal,
+  pickSubtyp: pickSubtypModal,
+  pickTypAndSubtyp: pickTypAndSubtypModal,
+} = require("./typ-picker");
 const { registerShortcutScripts } = require("./shortcut-scripts");
-
-// Migriert Bestandsinstallationen von der alten, separaten
-// typeFloatingFrontmatter-Liste (eigenes Dict je Typ, immer hinter der
-// Standardliste sortiert) auf die neue typeFloatingKeys-Markierung innerhalb
-// derselben typeDefaultFrontmatter-Liste (siehe Kommentar an typeFloatingKeys
-// in settings.js) - die Floating Properties landen dabei unverändert direkt
-// im Anschluss an die bisherige Standardliste, genau wie zuvor.
-function migrateFloatingFrontmatter(settings) {
-  if (!settings.typeFloatingFrontmatter) return;
-  for (const [type, floating] of Object.entries(settings.typeFloatingFrontmatter)) {
-    const keys = Object.keys(floating).filter((key) => key !== "");
-    if (keys.length === 0) continue;
-    settings.typeDefaultFrontmatter[type] = { ...(settings.typeDefaultFrontmatter[type] ?? {}), ...floating };
-    settings.typeFloatingKeys[type] = [...new Set([...(settings.typeFloatingKeys[type] ?? []), ...keys])];
-  }
-  delete settings.typeFloatingFrontmatter;
-}
-
-// Aus dem frueheren Schalter "Beschreibungs-Textfeld anzeigen" (Boolean) ist
-// der dreistufige Modus der zweiten Spalte geworden, umgeschaltet ueber den
-// Knopf im Listen-Header (siehe SECONDARY_MODES in typ-view.js). Der alte Wert
-// kennt nur zwei der drei Zustaende - true wird zur Beschreibung, false zu
-// "nichts"; "subtypes" gab es damals noch nicht. Liefert true bei einer
-// Aenderung, damit der Aufrufer sie gleich schreibt und der alte Schluessel
-// nicht in data.json liegen bleibt.
-//
-// Geprueft wird gegen stored (die rohen geladenen Daten), NICHT gegen settings:
-// dort hat Object.assign den neuen Schluessel laengst aus DEFAULT_SETTINGS
-// gefuellt, "noch nicht gesetzt" waere daran also nie zu erkennen und der alte
-// Wert bliebe stillschweigend liegen.
-function migrateTypListSecondary(settings, stored) {
-  if (stored?.typListDescriptionEnabled === undefined) return false;
-  if (stored.typListSecondary === undefined) {
-    settings.typListSecondary = stored.typListDescriptionEnabled ? "description" : "none";
-  }
-  delete settings.typListDescriptionEnabled;
-  return true;
-}
-
-// Die Ausrichtung der Subtyp-Vorschau war kurzzeitig eine eigene Einstellung
-// und ist jetzt ein Style Setting (body-Klasse, siehe den @settings-Block in
-// styles.css) - das Plugin liest den Schluessel nicht mehr. Ohne dieses
-// Aufraeumen bliebe er ueber Object.assign in loadSettings dauerhaft in
-// data.json stehen.
-function dropTypListSubtypesAlign(settings) {
-  if (settings.typListSubtypesRightAligned === undefined) return false;
-  delete settings.typListSubtypesRightAligned;
-  return true;
-}
 
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
-    // Vor allen übrigen Modulen: die registrieren sich auf dessen "change"-
-    // Event und lesen TYP/SUBTYP ausschließlich darüber (siehe typ-index.js).
+    // Before all other modules: they listen to its "change" event and read
+    // TYP/SUBTYP only through it (see typ-index.js).
     this.typIndex = new TypIndex(this);
     this.typIndex.register();
 
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
-    // Umbenennungen über "All properties"/Bases auch ins TYP-Frontmatter
-    // der Typen übernehmen (siehe property-rename-sync.js).
+    // Carries renames from "All properties"/Bases into the TYP-Frontmatter.
     registerPropertyRenameSync(this);
-    // Accessor auf die als "@typ-shortcut" markierten Templater-Skripte, für
-    // das Auswahl-Modal der Property-Zeilen (siehe shortcut-picker.js).
+    // The TYP-Pane patches the property menu lazily (ensurePropertyMenuPatch).
+    this.register(removePropertyMenuPatch);
+    // Accessor for the Templater scripts marked "@typ-shortcut", used by the
+    // shortcut picker of the property rows.
     this.getShortcutScripts = registerShortcutScripts(this);
 
-    // Separat gehalten (nicht nur Teil von refreshFns): die TYP-Detailansicht
-    // braucht nach dem Mounten ihres TYP-Frontmatter-Editors gezielt nur
-    // diesen einen Refresh (Fett-Markierung der Property-Zeilen) - das ganze
-    // refreshTypColors()-Bündel würde dort auch unnötig registerTypView's
-    // eigenen Render-Refresh mitanstoßen und sich damit selbst rekursiv
-    // erneut rendern (führte zu einem Stack Overflow bei jedem TYP-Öffnen).
+    // Kept separate from refreshFns: after mounting its editors the TYP-Pane
+    // needs only this refresh (bold property names). The whole
+    // refreshTypColors() bundle would also trigger the view's own re-render and
+    // recurse into a stack overflow on every TYP opened.
     this.refreshFrontmatterHighlight = registerFrontmatterDefaultHighlight(this);
 
     const refreshFns = [
-      registerTypView(this),
+      registerTypPane(this),
       registerFileExplorerColors(this),
       registerGraphColors(this),
       registerSearchColors(this),
@@ -120,71 +63,51 @@ module.exports = class TypSystemPlugin extends Plugin {
     ];
     this.refreshTypColors = () => refreshFns.forEach((fn) => fn());
 
-    // Der @settings-Block in styles.css (Style Settings, siehe dort) wird sonst
-    // je nach Ladereihenfolge uebersehen: Style Settings liest die Stylesheets
-    // beim eigenen Laden und danach nur noch bei "css-change" - das feuert aber
-    // ausschliesslich fuer Themes und Snippets, nicht fuer das styles.css eines
-    // Plugins. Wer spaeter geladen wird als Style Settings (oder per Hot-Reload
-    // neu geladen wird), taucht dort also gar nicht auf. "parse-style-settings"
-    // ist der dafuer vorgesehene Hook; ohne installiertes Style Settings hoert
-    // niemand zu und der Aufruf verpufft folgenlos.
+    // Style Settings reads stylesheets when it loads and afterwards only on
+    // "css-change", which fires for themes and snippets but not for a plugin's
+    // styles.css. A plugin loaded later (or hot-reloaded) would be missing
+    // there; "parse-style-settings" is the intended hook. Without Style
+    // Settings nobody listens and nothing happens.
     //
-    // Erst im naechsten Tick: Obsidian haengt das styles.css eines Plugins erst
-    // NACH dessen onload() in den DOM - synchron hier gerufen fuende Style
-    // Settings das Stylesheet noch gar nicht und liesse den Abschnitt aus.
-    // onLayoutReady taugt dafuer nicht: beim Hot-Reload ist das Layout laengst
-    // fertig, der Rueckruf liefe also sofort und damit genauso zu frueh.
+    // Next tick, because Obsidian adds a plugin's styles.css only AFTER
+    // onload(). onLayoutReady doesn't help: on hot reload the layout is long
+    // ready and the callback would run at once, just as early.
     const parseStyleSettings = window.setTimeout(() => this.app.workspace.trigger("parse-style-settings"), 0);
     this.register(() => window.clearTimeout(parseStyleSettings));
   }
 
   onunload() {}
 
-  // Für _obsidian/templater-scripts/TYP.js: liefert die im TYP-View unter
-  // "TYP-Frontmatter" hinterlegten Properties für den gegebenen TYP, damit
-  // Templater sie beim Anlegen einer neuen Notiz übernehmen kann, statt sie dort
-  // ein zweites Mal zu pflegen. Kopie statt direkter Referenz, damit ein
-  // Aufrufer die zurückgegebenen Werte gefahrlos mutieren kann, ohne die
-  // Plugin-Settings zu verändern.
+  // For _obsidian/templater-scripts/TYP.js: the TYP-Frontmatter of a TYP, so
+  // Templater can apply it to a new note instead of keeping a second copy. A
+  // copy, so callers may change it freely.
   //
-  // Properties mit einem festen Shortcut (today/now/created, siehe
-  // shortcuts.js) tragen dessen erst hier aufgelösten Wert - nicht den beim
-  // Setzen gültigen, es kommt also bei jedem Aufruf frisch Berechnetes heraus.
-  // Properties mit einem Skript-Shortcut tragen null: die kann nur Templater
-  // auflösen, TYP.js holt sie sich über getTypeShortcuts() (unten) und setzt
-  // sie selbst ein. Key und Position bleiben in beiden Fällen erhalten.
+  // Properties with a fixed shortcut (today/now/created, see shortcuts.js)
+  // carry its value, computed fresh on each call. Properties with a script
+  // shortcut carry null: only Templater can resolve them, TYP.js gets them via
+  // getTypShortcuts() and fills them in. Key and position stay either way.
   //
-  // includeFloating (Standard: false) lässt die als "Floating Property"
-  // markierten Keys (typeFloatingKeys) in der Liste - anders als die übrigen
-  // Standard-Properties werden diese NICHT automatisch bei jeder neuen Notiz
-  // angelegt (sie zählen zwar für die Frontmatter-Sortierung mit, siehe
-  // orderedDefaultKeys in frontmatter-sort.js, sollen aber nur bei Bedarf
-  // explizit von einem Templater-Skript abgegriffen werden).
+  // includeFloating (default false) keeps floating keys in the result; they
+  // are not created for every new note, only when a script asks for them.
   //
-  // file (optional) wird an resolveShortcuts() durchgereicht - nur für den
-  // "created"-Shortcut relevant, der das Erstellungsdatum der Ziel-Datei statt
-  // des Aufrufzeitpunkts liefert.
+  // file (optional) goes to resolveShortcuts() for "created", which returns
+  // the file's creation date instead of the call time.
   //
-  // subtype (optional): ergänzt das TYP-Frontmatter um den Block dieses
-  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter (wichtig für die
-  // Reihenfolge der Skript-Shortcuts). Steht ein Key in BEIDEN Blöcken, behält
-  // er die Position des TYP-Frontmatters, Wert, Floating-Markierung und
-  // Shortcut kommen aber vom Subtyp - eine Zuweisung auf einen bereits vorhandenen
-  // Objektschlüssel überschreibt ihn, ohne ihn zu verschieben. Die
-  // Frontmatter-Sortierung muss dieselbe Regel verwenden, sonst würde sie
-  // eine gerade angelegte Notiz sofort wieder umsortieren (siehe
-  // orderedDefaultKeys in frontmatter-sort.js).
-  getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
-    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+  // subtyp (optional) appends that Subtyp's block. A key in BOTH blocks keeps
+  // the TYP-Frontmatter position, but value, floating flag and shortcut come
+  // from the Subtyp. Frontmatter sorting must use the same rule (see
+  // orderedDefaultKeys in frontmatter-sort.js), or it would re-sort a new note
+  // right away.
+  getTypDefaults(typ, { includeFloating = false, file, subtyp = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(typ, subtyp, includeFloating);
     return resolveShortcuts(defaults, shortcuts, { file, app: this.app });
   }
 
-  // Gemeinsame Grundlage von getTypeDefaults() und getTypeShortcuts(): das
-  // TYP-Frontmatter des Typs, ergänzt um den Block des Subtyps. Ein Key, der in
-  // BEIDEN Blöcken steht, behält die Position des TYP-Frontmatters; Wert,
-  // Floating-Markierung UND Shortcut kommen dann vom Subtyp - auch "kein
-  // Shortcut" gilt dabei als Angabe des Subtyps und hebt den des TYPs auf.
-  collectBlocks(type, subtype, includeFloating) {
+  // Shared base of getTypDefaults() and getTypShortcuts(): the TYP-Frontmatter
+  // plus the Subtyp's block. A key in BOTH keeps the TYP-Frontmatter position;
+  // value, floating flag AND shortcut come from the Subtyp - "no shortcut"
+  // counts as the Subtyp's choice too and cancels the TYP's.
+  collectBlocks(typ, subtyp, includeFloating) {
     const defaults = {};
     const shortcuts = {};
     const isFloating = new Map();
@@ -200,13 +123,13 @@ module.exports = class TypSystemPlugin extends Plugin {
         else delete shortcuts[target];
       }
     };
-    const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
+    const subtypData = subtyp ? getSubtyp(this.settings, typ, subtyp) : null;
     addBlock(
-      this.settings.typeDefaultFrontmatter[type],
-      this.settings.typeFloatingKeys[type],
-      this.settings.typeShortcuts[type]
+      this.settings.typDefaultFrontmatter[typ],
+      this.settings.typFloatingKeys[typ],
+      this.settings.typShortcuts[typ]
     );
-    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys, subtypeData.shortcuts);
+    if (subtypData) addBlock(subtypData.frontmatter, subtypData.floatingKeys, subtypData.shortcuts);
 
     if (!includeFloating) {
       for (const [key, floating] of isFloating) {
@@ -218,47 +141,38 @@ module.exports = class TypSystemPlugin extends Plugin {
     return { defaults, shortcuts };
   }
 
-  // Für _obsidian/templater-scripts/TYP.js: die Properties dieses TYPs, deren
-  // Wert beim Anlegen einer Notiz von einem Templater-Skript kommt -
-  // { [Property]: { name, args, fallback } }, in der Reihenfolge des
-  // TYP-Frontmatters (die Skripte laufen nacheinander und sehen die Ergebnisse
-  // der jeweils früheren).
+  // For TYP.js: the properties of this TYP whose value comes from a Templater
+  // script, as { [property]: { name, params, args, fallback } } in
+  // TYP-Frontmatter order (the scripts run in turn and see earlier results).
   //
-  //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
-  //   params   die im @typ-shortcut-Marker deklarierte Parameterliste des
-  //            Skripts (siehe shortcut-scripts.js), oder null bei einem Marker
-  //            ohne Klammern. Sie stammt aus dem aktuellen Scan, nicht aus dem
-  //            gespeicherten Record - eine geänderte Deklaration wirkt also
-  //            sofort. TYP.js macht daraus mit resolveShortcutArgs() unten die
-  //            Argumentliste des Aufrufs
-  //   args     die eingetippten Argumente, benannt nach den nicht reservierten
-  //            Parametern. Leeres Objekt, wenn keine gesetzt sind; ein leer
-  //            gelassenes Feld fehlt darin ganz, damit "args.x ?? fallback"
-  //            im Skript trägt
-  //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
-  //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
-  //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
-  //            Skript, das bewusst null/"" liefert (z. B. ESC im Picker), ist
-  //            kein Fehlschlag - dort bleibt die Property leer.
+  //   name      script name without "tp.", i.e. tp.user.<name>
+  //   params    the parameter list declared in the @typ-shortcut marker, or
+  //             null without parentheses. Taken from the current scan, so a
+  //             changed declaration applies at once. TYP.js turns it into the
+  //             call's arguments with resolveShortcutArgs()
+  //   args      the typed arguments, named after the non-reserved parameters;
+  //             an empty field is missing so "args.x ?? fallback" works
+  //   fallback  the fixed value stored for the property. Only a FALLBACK:
+  //             TYP.js writes it if the script is missing or throws. A script
+  //             that deliberately returns null/"" (ESC in a picker) has not
+  //             failed - the property stays empty then.
   //
-  // Die festen Shortcuts (today/now/created) tauchen hier NICHT auf: die löst
-  // das Plugin selbst auf und liefert sie fertig über getTypeDefaults(). Dessen
-  // Rückgabe führt die Skript-Keys mit dem Wert null - Key und Position bleiben
-  // also erhalten, nur der Wert kommt von hier.
+  // Fixed shortcuts (today/now/created) don't appear here; getTypDefaults()
+  // already resolves them and returns the script keys as null.
   //
-  // Optionen wie bei getTypeDefaults(); includeFloating standardmäßig false,
-  // damit für eine Floating Property nicht ungefragt ein Skript läuft.
-  getTypeShortcuts(type, { includeFloating = false, subtype = null } = {}) {
-    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
-    const skripte = this.getShortcutScripts?.() ?? [];
+  // Options as in getTypDefaults(); includeFloating defaults to false so no
+  // script runs unasked for a floating property.
+  getTypShortcuts(typ, { includeFloating = false, subtyp = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(typ, subtyp, includeFloating);
+    const scripts = this.getShortcutScripts?.() ?? [];
     const result = {};
     for (const [key, record] of Object.entries(shortcuts)) {
       const name = scriptNameOf(record.name);
       if (name === null) continue;
-      const skript = skripte.find((s) => s.name === name);
+      const script = scripts.find((s) => s.name === name);
       result[key] = {
         name,
-        params: skript?.params ?? null,
+        params: script?.params ?? null,
         args: { ...(record.args ?? {}) },
         fallback: defaults[key] ?? null,
       };
@@ -266,144 +180,101 @@ module.exports = class TypSystemPlugin extends Plugin {
     return result;
   }
 
-  // Für _obsidian/templater-scripts/TYP.js: macht aus der Parameterliste eines
-  // Shortcuts die Argumente für den Aufruf tp.user.<name>(tp, ...) - siehe
-  // resolveCallArgs in shortcuts.js. Die Auflösung lebt hier statt in TYP.js,
-  // damit die Regeln (reservierte Namen, Punkt-Namen für Objekt-Argumente) nur
-  // an einer Stelle stehen; newFile und ctx kennt allerdings nur TYP.js und
-  // reicht sie deshalb herein.
+  // For TYP.js: turns a shortcut's parameter list into the arguments of
+  // tp.user.<name>(tp, ...) - see resolveCallArgs in shortcuts.js. Lives here
+  // so the rules (reserved names, dotted names) exist in one place; only
+  // TYP.js knows newFile and ctx, so it passes them in.
   resolveShortcutArgs(params, args, { newFile = null, ctx = null, key = null } = {}) {
     return resolveCallArgs(params, args, { newFile, ctx, key });
   }
 
-  // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
-  // der Reihenfolge ihrer Blöcke, samt Notiz-Anzahl.
-  //
-  // Subtypen mit abgeschaltetem "Manuell erstellbar" (Icon links neben dem
-  // Namen ihres Blocks, siehe renderSubtypeManualToggle in typ-view.js) bleiben
-  // wie die so abgeschalteten TYPen in getTypes() außen vor - außer
-  // includeManualOff ist gesetzt.
-  getSubtypes(type, { includeManualOff = false } = {}) {
-    const { counts } = this.typIndex.subtypeBucket(type);
-    return getSubtypeNames(this.settings, type)
-      .filter((subtype) => includeManualOff || isSubtypeManual(this.settings, type, subtype))
-      .map((subtype) => ({ subtype, count: counts.get(subtype) ?? 0 }));
+  // For TYP.js: registered Subtyps of a TYP in block order, with note counts.
+  // Subtyps that aren't manually creatable are left out unless
+  // includeManualOff is set, like such TYP entries in getTyps().
+  getSubtyps(typ, { includeManualOff = false } = {}) {
+    const { counts } = this.typIndex.subtypBucket(typ);
+    return getSubtypNames(this.settings, typ)
+      .filter((subtyp) => includeManualOff || isSubtypManual(this.settings, typ, subtyp))
+      .map((subtyp) => ({ subtyp, count: counts.get(subtyp) ?? 0 }));
   }
 
-  // Für _obsidian/templater-scripts/TYP.js: Subtyp-Picker (siehe
-  // type-picker.js). Löst mit dem gewählten Subtyp auf, mit "" für "Kein
-  // Subtyp" (bzw. ohne Picker, wenn der TYP keine Subtypen hat), oder mit
-  // null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück). query (optional):
-  // eine schon getippte Suchanfrage, nach der die Liste vorsortiert steht.
-  // options wie bei getSubtypes (includeManualOff).
-  pickSubtype(type, query = "", options = {}) {
-    return pickSubtypeModal(this.app, this, type, query, options);
+  // For TYP.js: the Subtyp-Picker (see typ-picker.js). Resolves with the
+  // Subtyp, "" for "no Subtyp" (or without a picker if the TYP has none), or
+  // null on ESC (TYP.js then goes back to the TYP choice). query (optional):
+  // an already typed search that pre-sorts the list. options as in getSubtyps.
+  pickSubtyp(typ, query = "", options = {}) {
+    return pickSubtypModal(this.app, this, typ, query, options);
   }
 
-  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter:
-  // setzt TYP und SUBTYP in einheitlicher Schreibweise - eine abweichend
-  // geschriebene Property ("typ", "Subtyp") wird an ihrer Stelle umbenannt
-  // statt verdoppelt. subtype null entfernt einen vorhandenen SUBTYP.
-  applyTypeProperties(frontmatter, type, subtype) {
-    setCanonicalProperty(frontmatter, TYP_PROPERTY, type);
-    if (subtype) setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, subtype);
+  // For TYP.js, inside processFrontMatter: sets TYP and SUBTYP in canonical
+  // spelling - a variant like "typ" or "Subtyp" is renamed in place rather than
+  // duplicated. subtyp null removes an existing SUBTYP.
+  applyTypProperties(frontmatter, typ, subtyp) {
+    setCanonicalProperty(frontmatter, TYP_PROPERTY, typ);
+    if (subtyp) setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, subtyp);
     else deleteProperty(frontmatter, SUBTYP_PROPERTY);
   }
 
-  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter
-  // und nach allen übrigen Änderungen: bringt das Frontmatter in die
-  // Reihenfolge der Frontmatter-Sortierung (globale Reihenfolge, TYP-
-  // Frontmatter samt Subtyp-Block) - sonst landen neu ergänzte Properties
-  // (z. B. SUBTYP in einer bestehenden Notiz) am Ende.
-  sortFrontmatter(frontmatter, type, subtype = null) {
-    return sortFrontmatterFor(this, frontmatter, type, subtype);
+  // For TYP.js, inside processFrontMatter and after all other changes: puts the
+  // frontmatter into sorting order, or newly added properties (SUBTYP in an
+  // existing note, say) would end up last.
+  sortFrontmatter(frontmatter, typ, subtyp = null) {
+    return sortFrontmatterFor(this, frontmatter, typ, subtyp);
   }
 
-  // Innerhalb von processFrontMatter: setzt nur die Property key an ihren
-  // Platz laut Frontmatter-Sortierung (TYP/SUBTYP aus dem Objekt selbst),
-  // alles Übrige bleibt, wie es ist - z. B. für Freds Property-Backlinking,
-  // damit eine neu angelegte Property nicht am Ende landet.
+  // Inside processFrontMatter: moves only property `key` to its sorted place
+  // (TYP/SUBTYP read from the object), everything else stays - for Fred's
+  // property backlinking, so a new property doesn't end up last.
   placeProperty(frontmatter, key) {
     return placePropertyFor(this, frontmatter, key);
   }
 
-  // Für _obsidian/templater-scripts/TYP.js: die im TYP-View registrierten TYPen
-  // samt ihrer dort gepflegten Beschreibung, statt sie aus _obsidian/Typen.md zu parsen -
-  // in derselben Reihenfolge, in der sie auch in der TYP-Liste selbst erscheinen
-  // (aktuelle Sortiereinstellung dort, z. B. Häufigkeit oder Name).
-  //
-  // TYPen mit abgeschaltetem "Manuell erstellbar" (Icon in der TYP-Detailansicht)
-  // sind nicht für die manuelle Auswahl gedacht (z. B. beim Anlegen einer neuen
-  // Notiz) und werden deshalb standardmäßig ausgeklammert - Aufrufer, die
-  // trotzdem alle TYPen brauchen, übergeben includeManualOff: true.
-  getTypes({ includeManualOff = false } = {}) {
-    const { counts } = this.typIndex.typeCounts();
+  // For TYP.js: the registered TYP entries with their descriptions, in the
+  // order of the TYP-List (its current sort setting). TYP entries that aren't
+  // manually creatable are left out unless includeManualOff is true.
+  getTyps({ includeManualOff = false } = {}) {
+    const { counts } = this.typIndex.typCounts();
     const sortOrder = this.settings.typSortOrder ?? DEFAULT_SORT_ORDER;
-    return sortTypesByMode(this.settings.types, sortOrder, counts, this.settings.typeColors)
-      .filter((type) => includeManualOff || (this.settings.typeManual ?? {})[type] !== false)
-      .map((type) => ({
-        type,
-        description: this.settings.typeDescriptions[type] ?? "",
-        count: counts.get(type) ?? 0,
+    return sortTypsByMode(this.settings.typs, sortOrder, counts, this.settings.typColors)
+      .filter((typ) => includeManualOff || (this.settings.typManual ?? {})[typ] !== false)
+      .map((typ) => ({
+        typ,
+        description: this.settings.typDescriptions[typ] ?? "",
+        count: counts.get(typ) ?? 0,
       }));
   }
 
-  // Für _obsidian/templater-scripts/TYP.js: nativer TYP-Picker (siehe
-  // type-picker.js) statt der reinen Text-Liste aus getTypes() +
-  // tp.system.suggester - mit TYP-Farbe/-Punkt, Beschreibung und Notiz-Anzahl
-  // je Zeile. includeManualOff wie bei getTypes(). Löst mit dem gewählten TYP
-  // auf, oder mit null bei Abbruch (ESC).
-  pickType(options) {
-    return pickTypeModal(this.app, this, options);
+  // For TYP.js: the native TYP-Picker (see typ-picker.js) with color,
+  // description and note count. includeManualOff as in getTyps(). Resolves
+  // with the TYP, or null on ESC.
+  pickTyp(options) {
+    return pickTypModal(this.app, this, options);
   }
 
-  // Für _obsidian/templater-scripts/TYP.js: TYP und Subtyp in einem Zug (siehe
-  // type-picker.js) - je nach Einstellung "Subtyp-Picker separat" ein einziger
-  // Picker mit eingerückten Subtypen oder beide Picker nacheinander. Optionen
-  // wie bei pickType(). Löst mit { type, subtype } auf (subtype null für "ohne
-  // Subtyp"), oder mit null bei Abbruch (ESC).
-  pickTypeAndSubtype(options) {
-    return pickTypeAndSubtypeModal(this.app, this, options);
+  // For TYP.js: TYP and Subtyp in one go (see typ-picker.js) - one picker with
+  // indented Subtyps or both pickers in turn, per "Separate Subtyp-Picker".
+  // Resolves with { typ, subtyp } (subtyp null for "no Subtyp"), or null on
+  // ESC.
+  pickTypAndSubtyp(options) {
+    return pickTypAndSubtypModal(this.app, this, options);
   }
 
   async loadSettings() {
-    const stored = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
-    // Object.assign ersetzt verschachtelte Objekte als Ganzes - später
-    // hinzugekommene Ansichten (z. B. colorViews.links) fehlten in bereits
-    // gespeicherten Einstellungen sonst und wären stillschweigend aus.
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Object.assign replaces nested objects whole; views added later (e.g.
+    // colorViews.links) would otherwise be silently off in older settings.
     this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };
-    // Migriert Bestandsinstallationen, deren globalPropertyOrder noch aus der
-    // Zeit vor "TYP als Listeneintrag" stammt (siehe frontmatter-sort.js).
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
-    migrateFloatingFrontmatter(this.settings);
-    // Subtyp-Blöcke lagen früher wahlweise über dem TYP-Frontmatter; das steht
-    // jetzt fest ganz oben (siehe getSectionOrder in subtypes.js).
-    migrateAboveStandard(this.settings);
-    // Anders als die übrigen Migrationen gleich schreiben: die eine rechnet
-    // gespeicherte Zahlen um und darf das beim nächsten Start nicht erneut tun,
-    // die andere entfernt einen Schlüssel, der sonst bei jedem Start wieder
-    // gelesen würde - und die letzte ergänzt Schalter, die der Nutzer von da an
-    // selbst umstellen kann und die ihm beim nächsten Start nicht erneut
-    // überschrieben werden dürfen.
-    const migrated = [
-      migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES),
-      migrateTypListSecondary(this.settings, stored),
-      dropTypListSubtypesAlign(this.settings),
-      migrateSubtypeManual(this.settings),
-    ];
-    if (migrated.some(Boolean)) await this.saveSettings();
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
   }
 
-  // Ruft Obsidian auf, wenn data.json von außen geändert wurde - in der Praxis
-  // durch Obsidian Sync von einem anderen Gerät. Ohne das behielte dieses Gerät
-  // seine alten Settings im Speicher und überschriebe die neuen beim nächsten
-  // saveSettings(). Einen offenen Settings-Tab baut Obsidian danach selbst neu
-  // auf (settingTab.update()); Einfärbungen und TYP-View hier.
+  // Called when data.json changes from outside, in practice through Obsidian
+  // Sync. Without it this device would keep its old settings in memory and
+  // overwrite the new ones on the next save. Obsidian rebuilds an open
+  // settings tab itself; colors and the TYP-Pane are refreshed here.
   async onExternalSettingsChange() {
     await this.loadSettings();
     this.refreshTypColors();

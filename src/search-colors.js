@@ -1,10 +1,9 @@
-const { colorForFile } = require("./type-colors");
+const { colorForFile } = require("./typ-colors");
 
 const SEARCH_VIEW_TYPE = "search";
 
-// Ergebniszeilen im Search View tragen kein data-path-Attribut, aber die
-// SearchView pflegt intern eine Map von TFile -> Ergebnis-DOM-Objekt
-// (dom.resultDomLookup) - darüber lässt sich Datei und Zeile direkt verbinden.
+// Search result rows have no data-path, but the view keeps a TFile -> result
+// DOM map (dom.resultDomLookup) that links file and row directly.
 function applySearchColors(plugin) {
   for (const leaf of plugin.app.workspace.getLeavesOfType(SEARCH_VIEW_TYPE)) {
     const resultDomLookup = leaf.view?.dom?.resultDomLookup;
@@ -24,7 +23,7 @@ function applySearchColors(plugin) {
 function registerSearchColors(plugin) {
   const refresh = () => applySearchColors(plugin);
 
-  // Ergebnisse werden bei jeder Sucheingabe komplett neu aufgebaut.
+  // Results are rebuilt on every keystroke.
   const observer = new MutationObserver(refresh);
   const observeLeaves = () => {
     for (const leaf of plugin.app.workspace.getLeavesOfType(SEARCH_VIEW_TYPE)) {

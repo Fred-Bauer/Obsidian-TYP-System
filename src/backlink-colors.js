@@ -1,12 +1,11 @@
-const { colorForFile } = require("./type-colors");
+const { colorForFile } = require("./typ-colors");
 
 const BACKLINK_VIEW_TYPE = "backlink";
 
-// Das Backlinks-Pane (Seitenleiste) rendert Treffer intern über dieselbe
-// SearchResultDom-Klasse wie die Suche. Verlinkte und nicht verlinkte
-// Erwähnungen liegen als zwei resultDomLookup-Maps im BacklinkRenderer
-// (view.backlink) - Feldnamen sind nicht offiziell dokumentiert, daher
-// mehrere bekannte Pfade probieren statt einen fest anzunehmen.
+// The backlinks pane renders results with the same SearchResultDom class as
+// search. Linked and unlinked mentions are two resultDomLookup maps on the
+// renderer (view.backlink). The field names are undocumented, so several
+// known paths are tried.
 function getResultDomLookups(view) {
   const renderer = view?.backlink;
   const candidates = [renderer?.backlinkDom, renderer?.unlinkedDom, view?.backlinkDom, view?.unlinkedDom, view?.dom];
@@ -35,11 +34,9 @@ function applyBacklinkPaneColors(plugin) {
   }
 }
 
-// "Backlinks im Dokument" ist keine eigene Ansicht/kein eigener Leaf, sondern
-// unten in die MarkdownView eingebettet (.embedded-backlinks) - hier reicht
-// kein Leaf-Typ, stattdessen über offene Markdown-Leaves nach der DOM-Klasse
-// suchen. Ohne data-path je Zeile wird die Datei über den angezeigten
-// Dateinamen (Linktext) aufgelöst, wie Obsidian intern Links auflöst.
+// Backlinks in the document are not a leaf of their own but embedded at the
+// bottom of the markdown view (.embedded-backlinks). Rows have no data-path,
+// so the file is resolved from the shown name, the way Obsidian resolves links.
 function applyEmbeddedBacklinkColors(plugin) {
   for (const leaf of plugin.app.workspace.getLeavesOfType("markdown")) {
     const paneEl = leaf.view.containerEl.querySelector(".embedded-backlinks .backlink-pane");
@@ -63,17 +60,10 @@ function applyBacklinkColors(plugin) {
 function registerBacklinkColors(plugin) {
   const refresh = () => applyBacklinkColors(plugin);
 
-  // Nur das (kleine) Backlinks-Pane in der Seitenleiste per MutationObserver
-  // beobachten - NICHT die MarkdownView-Container, da deren Editor-Subtree bei
-  // jedem Tastendruck viele Mutationen erzeugt (siehe Warnung in
-  // database-folders.js: ein subtree-Observer über einen Editor-nahen Container
-  // hat dieses Vault schon einmal komplett eingefroren). Die eingebetteten
-  // Backlinks im Dokument brauchen dafür keinen eigenen Observer: sie ändern
-  // sich nur, wenn irgendwo im Vault Links hinzukommen/wegfallen oder beim
-  // Öffnen/Wechseln einer Notiz - beides ist über die Events unten bereits
-  // abgedeckt ("resolved" nach jeder Link-Auflösung, layout-change/
-  // active-leaf-change lösen ohnehin applyBacklinkColors() und damit auch
-  // applyEmbeddedBacklinkColors() aus).
+  // Only the small sidebar pane is observed, never a markdown view: a subtree
+  // observer near the editor fires on every keystroke and once froze this
+  // vault. The embedded backlinks only change when links change ("resolved")
+  // or the note changes (layout-change/active-leaf-change), both covered below.
   const observer = new MutationObserver(refresh);
   const observeLeaves = () => {
     for (const leaf of plugin.app.workspace.getLeavesOfType(BACKLINK_VIEW_TYPE)) {
@@ -83,8 +73,6 @@ function registerBacklinkColors(plugin) {
   plugin.register(() => observer.disconnect());
 
   plugin.registerEvent(plugin.typIndex.on("change", refresh));
-  // Nur der eingebettete Teil hängt (mangels eigenem Observer, siehe oben)
-  // weiterhin an der Link-Auflösung - die Seitenleiste deckt ihr Observer ab.
   plugin.registerEvent(plugin.app.metadataCache.on("resolved", () => applyEmbeddedBacklinkColors(plugin)));
   plugin.registerEvent(
     plugin.app.workspace.on("layout-change", () => {

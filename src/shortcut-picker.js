@@ -1,22 +1,16 @@
 const { FuzzySuggestModal, Modal, Setting } = require("obsidian");
 const { FIXED_SHORTCUTS, SCRIPT_PREFIX, buildArgs, inputParams } = require("./shortcuts");
 
-// Anzeigeform eines Listeneintrags: der Name, bei einem Skript mit deklarierten
-// Parametern zusätzlich deren Namen in Klammern - so ist schon in der Auswahl
-// zu sehen, dass (und womit) ein Skript parametrisiert wird.
+// List label: the name, plus the declared parameter names for a script, so
+// the picker already shows that (and how) it takes arguments.
 function itemLabel(item) {
   return item.params ? `${item.name}(${item.params.join(", ")})` : item.name;
 }
 
-// Auswahl eines Shortcuts für eine Property des TYP-Frontmatters (Knopf bzw.
-// Chip in der Property-Zeile, siehe type-frontmatter-editor.js). Ersetzt die
-// frühere Legende unterhalb der Frontmatter-Blöcke: dieselben Token, aber am
-// Ort der Verwendung, durchsuchbar - und bei Skripten zusätzlich mit der
-// Beschreibung aus deren @typ-shortcut-Marker, die eine feste Legende gar nicht
-// kennen konnte.
-//
-// Gewählt wird nie freier Text: die Liste ist die maßgebliche Quelle, ein
-// Tippfehler im Skriptnamen ist damit ausgeschlossen.
+// Picks a shortcut for a TYP-Frontmatter property (button or chip in the row,
+// see typ-frontmatter-editor.js). Searchable, and scripts show the description
+// from their @typ-shortcut marker. Never free text: the list is the source of
+// truth, so a typo in a script name is impossible.
 class ShortcutPickerModal extends FuzzySuggestModal {
   constructor(app, key, items, resolve) {
     super(app);
@@ -30,8 +24,7 @@ class ShortcutPickerModal extends FuzzySuggestModal {
     return this.items;
   }
 
-  // Fuzzy-Suche greift auch auf die Beschreibung, nicht nur auf den Namen -
-  // "Erstellungsdatum" findet so auch "created".
+  // Fuzzy search also covers the description: "Erstellungsdatum" finds "created".
   getItemText(item) {
     const label = itemLabel(item);
     return item.description ? `${label} ${item.description}` : label;
@@ -39,15 +32,14 @@ class ShortcutPickerModal extends FuzzySuggestModal {
 
   renderSuggestion(match, el) {
     const item = match.item;
-    el.addClass("fred-typ-shortcut-suggestion");
-    el.createEl("code", { cls: "fred-typ-shortcut-suggestion-name", text: itemLabel(item) });
-    if (item.description) el.createSpan({ cls: "fred-typ-shortcut-suggestion-desc", text: item.description });
+    el.addClass("typ-shortcut-suggestion");
+    el.createEl("code", { cls: "typ-shortcut-suggestion-name", text: itemLabel(item) });
+    if (item.description) el.createSpan({ cls: "typ-shortcut-suggestion-desc", text: item.description });
   }
 
-  // Siehe TypPickerModal in type-picker.js: Obsidians selectSuggestion() ruft
-  // erst close() und danach erst onChooseItem() - "chosen" muss deshalb schon
-  // hier gesetzt werden, sonst löst das von close() ausgelöste onClose() das
-  // Promise vorzeitig mit null auf und die eigentliche Auswahl geht verloren.
+  // Obsidian's selectSuggestion() calls close() BEFORE onChooseItem(), so
+  // "chosen" must be set here - otherwise onClose() resolves with null first
+  // and the choice is lost. Same as in TypPickerModal (typ-picker.js).
   selectSuggestion(item, evt) {
     this.chosen = true;
     super.selectSuggestion(item, evt);
@@ -63,49 +55,42 @@ class ShortcutPickerModal extends FuzzySuggestModal {
   }
 }
 
-// Abfrage der Argumente eines Skripts, das welche deklariert hat - ein Dialog
-// mit allen Feldern untereinander statt einer Kette von Einzelabfragen, damit
-// man sie gemeinsam sieht und korrigieren kann. Die Felder sind nach den
-// Parameternamen des Skripts benannt; vorbelegt werden sie mit den bereits
-// gespeicherten Werten (vorhandene Argumente), sodass ein erneutes Wählen
-// desselben Skripts zum Korrigieren einzelner Werte taugt.
-//
-// Ein leer gelassenes Feld gilt als "nicht gesetzt" und fällt aus dem Ergebnis
-// heraus (siehe buildArgs in shortcuts.js) - deshalb gibt es hier keine
-// Pflichtfelder und keine Validierung: was das Skript braucht, weiß nur das
-// Skript selbst.
+// Asks for the arguments of a script that declares some: one dialog with all
+// fields, named after the script's parameters and prefilled with the stored
+// values, so picking the same script again is how single values get fixed.
+// An empty field means "not set" (see buildArgs); there is no validation,
+// since only the script knows what it needs.
 class ShortcutArgsModal extends Modal {
-  constructor(app, item, vorhandene, resolve) {
+  constructor(app, item, existing, resolve) {
     super(app);
     this.item = item;
     this.resolve = resolve;
-    this.felder = inputParams(item.params);
-    this.eingaben = {};
-    for (const name of this.felder) {
-      const wert = vorhandene?.[name];
-      this.eingaben[name] = wert === undefined || wert === null ? "" : String(wert);
+    this.fields = inputParams(item.params);
+    this.inputs = {};
+    for (const name of this.fields) {
+      const value = existing?.[name];
+      this.inputs[name] = value === undefined || value === null ? "" : String(value);
     }
-    this.bestaetigt = false;
+    this.confirmed = false;
   }
 
   onOpen() {
     this.titleEl.setText(`Argumente für ${this.item.name}`);
     if (this.item.description) {
-      this.contentEl.createDiv({ cls: "fred-typ-shortcut-args-desc", text: this.item.description });
+      this.contentEl.createDiv({ cls: "typ-shortcut-args-desc", text: this.item.description });
     }
-    for (const name of this.felder) {
+    for (const name of this.fields) {
       new Setting(this.contentEl).setName(name).addText((text) =>
         text
-          .setValue(this.eingaben[name])
+          .setValue(this.inputs[name])
           .onChange((value) => {
-            this.eingaben[name] = value;
+            this.inputs[name] = value;
           })
-          // Enter in einem Feld schließt den Dialog ab, wie in Obsidians
-          // eigenen Umbenennen-Dialogen.
+          // Enter submits, like Obsidian's own rename dialogs.
           .inputEl.addEventListener("keydown", (event) => {
             if (event.key === "Enter" && !event.isComposing) {
               event.preventDefault();
-              this.uebernehmen();
+              this.submit();
             }
           })
       );
@@ -114,31 +99,29 @@ class ShortcutArgsModal extends Modal {
       button
         .setButtonText("Übernehmen")
         .setCta()
-        .onClick(() => this.uebernehmen())
+        .onClick(() => this.submit())
     );
   }
 
-  uebernehmen() {
-    this.bestaetigt = true;
+  submit() {
+    this.confirmed = true;
     this.close();
   }
 
   onClose() {
     this.contentEl.empty();
-    // ESC bzw. Klick daneben: kein Shortcut gesetzt, der bisherige bleibt
-    // unangetastet - sonst wäre ein versehentliches Schließen ein stiller
-    // Datenverlust.
-    this.resolve(this.bestaetigt ? buildArgs(this.felder, this.eingaben) : null);
+    // ESC or a click outside keeps the current shortcut - an accidental close
+    // must not silently lose data.
+    this.resolve(this.confirmed ? buildArgs(this.fields, this.inputs) : null);
   }
 }
 
-// Öffnet die Auswahl für die Property key. getScripts ist der Accessor aus
-// registerShortcutScripts() (shortcut-scripts.js), vorhanden der aktuell
-// gesetzte Shortcut-Record (für die Vorbelegung der Argumente). Löst mit dem
-// neuen Record ({ name } bzw. { name, args }) auf, oder mit null bei Abbruch -
-// auch dann, wenn zwar ein Skript gewählt, der Argument-Dialog danach aber
-// abgebrochen wurde.
-async function pickShortcut(app, key, getScripts, vorhanden = null) {
+// Opens the picker for property `key`. getScripts is the accessor from
+// registerShortcutScripts(); current is the shortcut set now (to prefill the
+// arguments). Resolves with the new record ({ name } or { name, args }), or
+// null on cancel - also when a script was picked but its argument dialog was
+// cancelled.
+async function pickShortcut(app, key, getScripts, current = null) {
   const items = [
     ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description, params: null })),
     ...getScripts().map(({ name, params, description }) => ({ name: SCRIPT_PREFIX + name, params, description })),
@@ -146,15 +129,13 @@ async function pickShortcut(app, key, getScripts, vorhanden = null) {
 
   const item = await new Promise((resolve) => new ShortcutPickerModal(app, key, items, resolve).open());
   if (!item) return null;
-  // Ohne abzufragende Felder entfällt der zweite Schritt ganz - das gilt für
-  // die festen Shortcuts ebenso wie für ein Skript, dessen Parameterliste nur
-  // reservierte Namen enthält (etwa "(newFile)").
+  // No fields to ask for (fixed tokens, or only reserved names like
+  // "(newFile)"): no second step.
   if (inputParams(item.params).length === 0) return { name: item.name };
 
-  // Vorbelegung nur, wenn dasselbe Skript schon gesetzt war - bei einem
-  // Wechsel wären die alten Werte für andere Parameternamen bedeutungslos.
-  const vorbelegung = vorhanden?.name === item.name ? vorhanden.args : null;
-  const args = await new Promise((resolve) => new ShortcutArgsModal(app, item, vorbelegung, resolve).open());
+  // Prefill only for the same script; old values mean nothing to another one.
+  const prefill = current?.name === item.name ? current.args : null;
+  const args = await new Promise((resolve) => new ShortcutArgsModal(app, item, prefill, resolve).open());
   if (args === null) return null;
   return Object.keys(args).length > 0 ? { name: item.name, args } : { name: item.name };
 }

@@ -2,34 +2,28 @@ const { editorInfoField, getLinkpath } = require("obsidian");
 const { ViewPlugin, Decoration } = require("@codemirror/view");
 const { Prec, RangeSetBuilder, StateEffect } = require("@codemirror/state");
 const { syntaxTree } = require("@codemirror/language");
-const { colorForFile } = require("./type-colors");
+const { colorForFile } = require("./typ-colors");
 
-// Links im Notiztext nach dem TYP ihres Ziels einfärben. Obsidian färbt
-// interne Links in beiden Darstellungen über var(--link-color) bzw.
-// var(--link-color-hover) (siehe app.css: ".markdown-rendered .internal-link"
-// und ".cm-s-obsidian span.cm-hmd-internal-link") - statt eigener Farbregeln
-// wird daher nur --link-color je Link überschrieben. --link-color-hover bleibt
-// bewusst unangetastet: beim Überfahren erscheint wieder die normale
-// Link-Farbe. Unterstreichung und Theme-Anpassungen bleiben ebenso erhalten.
+// Colors links in note text by the TYP of their target. Obsidian colors
+// internal links through var(--link-color), so only that variable is set per
+// link. --link-color-hover stays untouched (hover shows the normal link color),
+// and underline and theme tweaks keep working.
 //
-// Zwei getrennte Wege, da sich die Darstellungen grundlegend unterscheiden:
-//  - Lese-Modus, Hover-Vorschau, gerenderte Blöcke in Live Preview (Tabellen,
-//    Callouts): echte <a class="internal-link" data-href="…">-Elemente aus
-//    Obsidians Markdown-Renderer -> MarkdownPostProcessor, je Link einmalig
-//    beim Rendern.
-//  - Live Preview/Quelltext-Modus: dort gibt es keine Link-Elemente mit
-//    Zielattribut, nur CodeMirror-Spans (".cm-hmd-internal-link") über dem
-//    Rohtext -> eigener ViewPlugin, der nur den sichtbaren Bereich betrachtet.
+// Two separate paths, because the two renderings have nothing in common:
+//  - Reading view, hover preview and rendered blocks in Live Preview (tables,
+//    callouts): real <a class="internal-link" data-href> elements ->
+//    markdown post-processor, once per link when rendered.
+//  - Live Preview/source mode: only CodeMirror spans over the raw text ->
+//    a ViewPlugin that looks at the visible range only.
 //
-// Neu eingefärbt wird darüber hinaus nur bei tatsächlich geändertem TYP
-// (typIndex "change") oder geänderter Einstellung - nicht bei jedem Speichern.
+// Recoloring otherwise only happens on a real TYP change (typIndex "change")
+// or a settings change, not on every save.
 
 const COLOR_VAR = "--link-color";
-const SOURCE_ATTR = "data-fred-typ-src";
+const SOURCE_ATTR = "data-typ-src";
 
-// [[Ziel]], [[Ziel|Alias]], [[Ziel#Überschrift]] - Einbettungen (![[…]])
-// bleiben außen vor, die sind keine Links im eigentlichen Sinn. In Tabellen
-// steht die Alias-Pipe escaped ("\|").
+// [[target]], [[target|alias]], [[target#heading]]. Embeds (![[…]]) are not
+// links. Inside tables the alias pipe is escaped ("\|").
 const WIKILINK_PATTERN = /(?<!!)\[\[([^[\]]+?)\]\]/g;
 
 function colorForLinktext(plugin, linktext, sourcePath) {
@@ -40,7 +34,7 @@ function colorForLinktext(plugin, linktext, sourcePath) {
   return colorForFile(plugin, file, "links");
 }
 
-// --- Lese-Modus ---------------------------------------------------------
+// --- Reading view -------------------------------------------------------
 
 function applyToAnchor(plugin, anchorEl) {
   const href = anchorEl.getAttribute("data-href");
@@ -52,10 +46,9 @@ function applyToAnchor(plugin, anchorEl) {
   else anchorEl.style.removeProperty(COLOR_VAR);
 }
 
-// Bereits gerenderte Links neu einfärben (TYP- oder Einstellungsänderung). Der
-// Post-Processor merkt sich dafür an jedem Link dessen Quellnotiz, da die zur
-// Auflösung mehrdeutiger Linktexte gebraucht wird. Alle Fenster (Pop-outs)
-// über ihre Leaves eingesammelt.
+// Recolors links that are already rendered. The post-processor stores each
+// link's source note on it, which ambiguous link text needs to resolve.
+// Collects all windows (pop-outs included) through their leaves.
 function refreshRenderedLinks(plugin) {
   const docs = new Set();
   plugin.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.view.containerEl.ownerDocument));
@@ -74,7 +67,7 @@ function buildLinkViewPlugin(plugin) {
     let decoration = decorationsByColor.get(color);
     if (!decoration) {
       decoration = Decoration.mark({
-        class: "fred-typ-link",
+        class: "typ-link",
         attributes: { style: `${COLOR_VAR}: ${color};` },
       });
       decorationsByColor.set(color, decoration);
@@ -93,8 +86,8 @@ function buildLinkViewPlugin(plugin) {
       WIKILINK_PATTERN.lastIndex = 0;
       for (let match; (match = WIKILINK_PATTERN.exec(text)); ) {
         const start = from + match.index;
-        // Nur, was Obsidians Markdown-Parser selbst als internen Link erkennt -
-        // schließt z. B. [[…]] in Code-Blöcken oder Inline-Code aus.
+        // Only what Obsidian's parser treats as an internal link, which rules
+        // out [[…]] in code blocks and inline code.
         if (!tree.resolveInner(start + 2, 1).name.includes("hmd-internal-link")) continue;
         const color = colorForLinktext(plugin, match[1], sourcePath);
         if (color) builder.add(start, start + match[0].length, decorationFor(color));
@@ -109,8 +102,8 @@ function buildLinkViewPlugin(plugin) {
         this.decorations = build(view);
       }
 
-      // Der Parser arbeitet den sichtbaren Bereich ggf. erst nach und nach ab -
-      // ein neuer Syntaxbaum zählt daher ebenfalls als Anlass zum Neuaufbau.
+      // The parser may work through the visible range bit by bit, so a new
+      // syntax tree also triggers a rebuild.
       update(update) {
         if (
           update.docChanged ||
@@ -136,17 +129,16 @@ function refreshEditors(plugin) {
 
 function registerLinkColors(plugin) {
   plugin.registerMarkdownPostProcessor((el, ctx) => {
-    // Quelle immer vermerken, auch bei ausgeschalteter Einfärbung - so greift
-    // ein späteres Einschalten auch für bereits gerenderte Links.
+    // Store the source even while coloring is off, so turning it on later
+    // also covers links that are already rendered.
     for (const anchorEl of el.querySelectorAll("a.internal-link")) {
       anchorEl.setAttribute(SOURCE_ATTR, ctx.sourcePath);
       applyToAnchor(plugin, anchorEl);
     }
   });
-  // Obsidians Syntax-Span ".cm-hmd-internal-link" liegt unabhängig von der
-  // Priorität immer außen, die Markierung also darin - die Farbe setzt daher
-  // eine eigene Regel in styles.css (.fred-typ-link). Niedrigste Priorität legt
-  // sie immerhin um ".cm-underline" herum, damit der ganze Linktext erfasst ist.
+  // Obsidian's ".cm-hmd-internal-link" span always ends up outside our mark,
+  // whatever the priority, so a rule in styles.css (.typ-link) sets the color.
+  // Lowest priority at least wraps ".cm-underline", covering the whole text.
   plugin.registerEditorExtension(Prec.lowest(buildLinkViewPlugin(plugin)));
 
   const refresh = () => {
@@ -154,8 +146,8 @@ function registerLinkColors(plugin) {
     refreshEditors(plugin);
   };
   plugin.registerEvent(plugin.typIndex.on("change", refresh));
-  // Die Editor-Dekorationen verschwinden beim Entladen mit der Erweiterung von
-  // selbst, die Inline-Variablen an gerenderten Links nicht.
+  // Editor decorations go away with the extension on unload, the inline
+  // variables on rendered links don't.
   plugin.register(() => {
     plugin.app.workspace.iterateAllLeaves((leaf) => {
       for (const anchorEl of leaf.view.containerEl.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) {

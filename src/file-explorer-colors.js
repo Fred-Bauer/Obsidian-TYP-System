@@ -1,12 +1,11 @@
 const { TFile, TFolder } = require("obsidian");
-const { colorForFile } = require("./type-colors");
+const { colorForFile } = require("./typ-colors");
 
 const FILE_EXPLORER_VIEW_TYPE = "file-explorer";
 const FOLDER_NOTES_PLUGIN_ID = "folder-notes";
 
-// Das "Folder Notes"-Plugin zeigt eine Notiz statt als eigene Zeile als Ordner an.
-// Es hat keine öffentliche API dafür, daher den Dateinamen aus seinen eigenen
-// (Live-)Einstellungen nachbauen, statt seine internen Funktionen anzuzapfen.
+// Folder Notes shows a note as its folder instead of as its own row. It has no
+// public API for this, so the file name is rebuilt from its live settings.
 function getFolderNoteFile(plugin, folder) {
   const folderNotes = plugin.app.plugins.plugins[FOLDER_NOTES_PLUGIN_ID];
   const settings = folderNotes?.settings;
@@ -51,9 +50,7 @@ function applyFileExplorerColors(plugin) {
 function registerFileExplorerColors(plugin) {
   const refresh = () => applyFileExplorerColors(plugin);
 
-  // Der File-Explorer rendert Einträge beim Auf-/Zuklappen von Ordnern dynamisch
-  // neu - per MutationObserver auf neu eingefügte Elemente reagieren, statt nur
-  // einmalig beim Start einzufärben.
+  // The explorer re-renders rows when folders expand or collapse.
   const observer = new MutationObserver(refresh);
   const observeExplorerLeaves = () => {
     for (const leaf of plugin.app.workspace.getLeavesOfType(FILE_EXPLORER_VIEW_TYPE)) {

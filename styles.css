@@ -4,15 +4,15 @@ name: TYP-System
 id: typ-system
 settings:
     -
-        id: typ-system-subtypes-right
-        title: Subtypen rechtsbündig
-        description: "Stellt die Subtyp-Liste der TYP-Liste rechtsbündig direkt vor die Notiz-Anzahl, statt sie links hinter dem TYP-Namen beginnen zu lassen. Betrifft nur die Subtyp-Anzeige (umschaltbar über den Button im Listen-Header), nicht das Beschreibungs-Textfeld."
+        id: typ-system-subtyps-right
+        title: Right-align Subtyp list
+        description: "Align the Subtyp list in the TYP-List to the right, just before the note count."
         type: class-toggle
         default: false
     -
-        id: typ-system-unregistered-subtype-opacity
-        title: Farbe erfasster TYPen bei nicht erfassten Subtypen
-        description: "Wie kräftig der TYP-Teil einer Zeile \"TYP / Subtyp\" unten in der TYP-Liste dargestellt wird, wenn der TYP selbst bereits erfasst ist. Niedriger heißt blasser, also weiter hinter die erfassten TYPen oben zurücktretend. 1 zeigt die volle TYP-Farbe."
+        id: typ-system-unregistered-subtyp-opacity
+        title: Color in unregistered Subtyp rows
+        description: "Strength of the TYP part in \"TYP / Subtyp\" rows at the bottom of the TYP-List. 1 = full TYP color."
         type: variable-number-slider
         default: 0.7
         min: 0.2
@@ -21,88 +21,78 @@ settings:
 
 */
 
-/* Core-Views wie der File Explorer hängen nav-header/nav-files-container an einer
-   ungepolsterten Stelle ein und umgehen damit das Standard-Padding von view-content.
-   Als Plugin-View können wir das nur nachbilden, indem wir es hier zurücknehmen. */
-.workspace-leaf-content .view-content.fred-typ-view {
+/* Core views like the file explorer mount nav-header/nav-files-container
+   outside view-content's padding. A plugin view can only mimic that by taking
+   the padding back here. */
+.workspace-leaf-content .view-content.typ-system-pane {
   padding: 0;
 }
 
-/* Blendet TYP und SUBTYP als eigene Zeile im Property-Block der Notiz aus -
-   ihr Wert ist ohnehin immer der (SUB-)TYP-Name selbst (siehe stripTypProperty
-   in type-frontmatter-editor.js). Betrifft nicht die "Properties"-
-   Seitenleiste (data-type="file-properties") oder die TYP-Detailansicht
-   dieses Plugins (data-type="fred-typ-view") - dort bleiben beide normale,
-   editierbare Zeilen. Case-insensitiv, da Obsidian den data-property-key
-   intern klein schreibt. War zuvor Teil des CSS-Snippets "Property-Block.css"
-   - hierher verschoben, da TYP/SUBTYP Konzepte dieses Plugins sind, kein
-   allgemeines Property-Block-Styling. */
-.workspace-leaf-content:not([data-type="file-properties"]):not([data-type="fred-typ-view"]) .metadata-property[data-property-key="TYP" i],
-.workspace-leaf-content:not([data-type="file-properties"]):not([data-type="fred-typ-view"]) .metadata-property[data-property-key="SUBTYP" i] {
+/* Hides TYP and SUBTYP as rows in a note's property block - their value is
+   always the (SUB)TYP name anyway (see stripTypProperty in
+   typ-frontmatter-editor.js). Not in the properties sidebar
+   (data-type="file-properties") or this plugin's TYP-Pane
+   (data-type="typ-system-pane"), where both stay normal editable rows.
+   Case-insensitive, since Obsidian lowercases data-property-key. */
+.workspace-leaf-content:not([data-type="file-properties"]):not([data-type="typ-system-pane"]) .metadata-property[data-property-key="TYP" i],
+.workspace-leaf-content:not([data-type="file-properties"]):not([data-type="typ-system-pane"]) .metadata-property[data-property-key="SUBTYP" i] {
   display: none !important;
 }
 
-/* Lässt die bei "Box mit TYP-Namen" zusätzlich angehängten Schalter (siehe
-   displayTypTab in settings.js) untereinander statt nebeneinander stehen -
-   Obsidians Standard-Layout für mehrere Controls in einer Setting-Zeile ist
-   eine Flex-Row. */
-.fred-note-title-setting .setting-item-control {
+/* Stacks the extra badge toggles (see display in settings.js) instead of
+   Obsidian's side-by-side flex row for several controls in one setting. */
+.typ-note-title-setting .setting-item-control {
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
 }
 
-/* Label + ToggleComponent je Zeile (siehe addLabeledToggle in settings.js) -
-   Obsidians addToggle() allein liefert nur den nackten Schalter ohne
-   Beschriftung. */
-.fred-note-title-toggle-row {
+/* Label + toggle per row (see addLabeledToggle in settings.js) - addToggle()
+   alone gives a bare switch. */
+.typ-note-title-toggle-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.fred-note-title-toggle-label {
+.typ-note-title-toggle-label {
   font-size: var(--font-ui-small);
   color: var(--text-muted);
 }
 
-/* Eintrag mit dem globalen Order-Editor in der Gruppe "TYP-Frontmatter"
-   (siehe settings.js) - hat kein Control, infoEl soll daher die volle Breite
-   nutzen statt Obsidians Abstand zum (hier leeren) Control-Bereich. */
-.fred-order-setting > .setting-item-info {
+/* The global order editor in the "TYP-Frontmatter" group has no control, so
+   infoEl takes the full width instead of leaving room for one. */
+.typ-order-setting > .setting-item-info {
   margin-inline-end: 0;
 }
 
-.fred-order-setting .setting-item-info > .setting-item-description {
+.typ-order-setting .setting-item-info > .setting-item-description {
   margin-top: var(--size-4-2);
 }
 
-.fred-typ-separator {
+.typ-separator {
   border-top: 1px solid var(--background-modifier-border);
   margin: 8px var(--size-4-3);
 }
 
-.fred-typ-unregistered .tree-item-inner {
+.typ-unregistered .tree-item-inner {
   color: var(--text-faint);
 }
 
-/* Der Name (tree-item-inner) soll nicht mehr den ganzen restlichen Platz der
-   Zeile einnehmen (Obsidians Core-Stil dafür: flex-grow: 1) - die zweite Spalte
-   daneben (Beschreibungs-Input bzw. Subtyp-Vorschau, siehe SECONDARY_MODES in
-   typ-view.js) braucht den Platz stattdessen. Nur, wenn es sie überhaupt gibt -
-   im Modus "Nichts" soll der Name wie gewohnt den ganzen Rest der Zeile
-   einnehmen. Scoped auf die TYP-Liste, damit andere Tree-Views (Datei-Explorer
-   etc.) unberührt bleiben. */
-.fred-typ-list:not(.fred-typ-list-no-secondary) .tree-item-inner {
+/* The name (tree-item-inner) no longer takes the whole rest of the row
+   (Obsidian's flex-grow: 1) - the second column (description input or Subtyp
+   list, see SECONDARY_MODES in typ-pane.js) needs the space. Only when that
+   column exists; in mode "Nothing" the name fills the row as usual. Scoped to
+   the TYP-List so other tree views stay untouched. */
+.typ-list:not(.typ-list-no-secondary) .tree-item-inner {
   flex: 0 1 auto;
 }
 
-/* "(Subtyp 1, Subtyp 2)" neben dem TYP-Namen - Klammern und Kommas muted, die
-   Namen in ihrer Farbe (siehe renderSubtypePreview in typ-view.js). Gleiche
-   Darstellung wie die Vorschau im TYP-Picker (.fred-typ-picker-subtypes), hier
-   aber mit flex-grow, damit der Zähler rechts wie beim Beschreibungsfeld an
-   derselben Stelle steht statt direkt hinter der Klammer. */
-.fred-typ-list-subtypes {
+/* "(Subtyp 1, Subtyp 2)" next to the TYP name - brackets and commas muted,
+   names in their color (see renderSubtypPreview in typ-pane.js). Same look as
+   the TYP-Picker preview (.typ-picker-subtyps), but with flex-grow so the
+   count stays in the same spot as with the description field. */
+.typ-list-subtyps {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   overflow: hidden;
@@ -113,48 +103,37 @@ settings:
   margin-left: 0.4em;
 }
 
-/* Subtyp-Vorschau rechtsbündig: die Klammerlisten enden bündig direkt vor den
-   Zahlen und bilden so eine zweite rechte Kante, statt in jeder Zeile an
-   anderer Stelle hinter dem TYP-Namen zu beginnen; TYPen ohne Subtypen lassen
-   die Zeile einfach leer.
+/* Right-aligned Subtyp list: the bracket lists end right before the counts
+   and form a second right edge instead of starting at a different spot in
+   each row; a TYP without Subtyps leaves the row empty.
 
-   Bewusst NUR für die Subtypen und nicht für das Beschreibungsfeld: ein input
-   scrollt seinen Inhalt selbst und zeigt rechtsbündig bei zu langem Text
-   dessen ENDE, schneidet den Anfang also links ab ("…planung" statt
-   "Projektplanung …") - bei einer Beschreibung ist aber gerade der Anfang das
-   Aussagekräftige.
+   Deliberately ONLY for the Subtyps, not the description field: an input
+   scrolls its own content, and right-aligned it would show the END of a long
+   text and cut off the start - the meaningful part of a description.
 
-   Geschaltet wird das nicht über eine eigene Plugin-Einstellung, sondern über
-   den @settings-Block ganz oben: es ist eine reine Darstellungsfrage, und Style
-   Settings setzt dafür die Klasse "typ-system-subtypes-right" auf den body -
-   das Plugin selbst muss davon nichts wissen und rendert in beiden Fällen
-   dasselbe Markup. Ohne Style Settings fehlt die Klasse und die Liste steht
-   linksbündig; der im @settings-Block angegebene Standard (an) greift nur,
-   solange das Plugin installiert ist. */
-body.typ-system-subtypes-right .fred-typ-list-subtypes {
+   Switched by the @settings block at the top, not a plugin setting: purely
+   presentational. Style Settings puts "typ-system-subtyps-right" on body; the
+   plugin renders the same markup either way. Without Style Settings the class
+   is missing and the list is left-aligned. */
+body.typ-system-subtyps-right .typ-list-subtyps {
   text-align: right;
 }
 
-/* Feste Breite für die Zähler-Flair, statt sich an deren Ziffernanzahl anzupassen
-   (1 vs. 100 wären sonst unterschiedlich breit) - bei angezeigtem Beschreibungs-
-   feld schneidet es links davon so bei jeder Zeile an derselben Stelle ab,
-   unabhängig vom Wert der Zahl. tree-item-flair-outer ist selbst ein Flex-
-   Container - text-align wirkt darin nicht, erst justify-content: flex-end
-   schiebt die Zahl tatsächlich an den rechten Rand der festen Breite. Immer
-   rechtsbündig, unabhängig davon, ob das Beschreibungsfeld an- oder
-   ausgestellt ist. */
-.fred-typ-list .tree-item-flair-outer {
+/* Fixed width for the count flair instead of fitting its digits (1 and 100
+   would differ), so the description field ends at the same spot in every row.
+   tree-item-flair-outer is a flex container, so text-align does nothing there;
+   justify-content: flex-end moves the number to the right edge. */
+.typ-list .tree-item-flair-outer {
   flex: 0 0 auto;
   min-width: 1.8em;
   display: flex;
   justify-content: flex-end;
 }
 
-/* Obsidians eigene input[type="text"]-Regel bringt sowohl eine feste (deutlich
-   größere) Höhe als auch eine eigene Textfarbe mit, die unsere sonst auch im
-   fokussierten Zustand schlägt - hier bewusst mit !important dagegengehalten,
-   damit das Feld dauerhaft klein und ausgegraut bleibt, unabhängig vom Fokus. */
-.fred-typ-list-description-input {
+/* Obsidian's input[type="text"] rule brings a larger fixed height and its own
+   text color, which would win even when focused - held back with !important
+   so the field stays small and muted regardless of focus. */
+.typ-list-description-input {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -170,38 +149,35 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   margin: 0 10px;
 }
 
-.fred-typ-list-description-input:hover {
+.typ-list-description-input:hover {
   background: var(--background-modifier-hover);
 }
 
-.fred-typ-list-description-input:focus {
+.typ-list-description-input:focus {
   background: var(--background-modifier-form-field);
   box-shadow: none !important;
 }
 
-/* Nicht erfasste Subtypen unten in der Liste: "NOTIZ / Kurz Geschichte" (siehe
-   renderUnregisteredSubtypeItem in typ-view.js). Der Schrägstrich steht noch
-   blasser als die Namen, damit die Zeile als ein Eintrag liest und nicht als
-   zwei nebeneinandergestellte Werte. */
-.fred-typ-unregistered-subtype-slash {
+/* Unregistered Subtyps at the bottom of the list: "NOTIZ / Kurz Geschichte"
+   (see renderUnregisteredSubtypItem in typ-pane.js). The slash is paler than
+   the names so the row reads as one entry, not two values side by side. */
+.typ-unregistered-subtyp-slash {
   color: var(--text-faint);
   opacity: 0.6;
 }
 
-/* Trägt der TYP-Teil eine Farbe (weil der TYP schon erfasst ist), wird sie
-   abgeschwächt - sonst zöge die Farbe den Blick stärker auf diese Zeilen als
-   auf die erfassten TYPen oben, obwohl hier nur Aufräumbedarf steht. Bewusst
-   opacity und nicht filter: brightness(): opacity blendet zum jeweiligen
-   Hintergrund hin aus und nimmt damit in hell wie dunkel zugleich Buntheit und
-   Kontrast, während Abdunkeln im Light Mode den Kontrast sogar erhöhen würde.
-   Die Stärke ist über Style Settings einstellbar (siehe @settings oben), der
-   Fallback hier gilt ohne dieses Plugin. Sitzt je nach Einstellung "TYP View
-   einfärben" auf dem Namen oder auf dem Farbpunkt. */
-.fred-typ-unregistered-subtype-color {
-  opacity: var(--typ-system-unregistered-subtype-opacity, 0.7);
+/* If the TYP part has a color (the TYP is registered), it is toned down -
+   otherwise these cleanup rows would draw more attention than the registered
+   TYP entries above. opacity rather than brightness(): it fades toward the
+   background, taking color and contrast in light and dark alike, whereas
+   darkening would even raise contrast in light mode. The strength is a Style
+   Setting (see @settings); the fallback applies without that plugin. Sits on
+   the name or the dot, depending on "TYP-Pane" coloring. */
+.typ-unregistered-subtyp-color {
+  opacity: var(--typ-system-unregistered-subtyp-opacity, 0.7);
 }
 
-.fred-typ-color-wrap {
+.typ-color-wrap {
   position: relative;
   display: inline-block;
   width: 0.6em;
@@ -210,35 +186,23 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   flex-shrink: 0;
 }
 
-/* TYP-Markierung links neben dem Inline-Titel der Notiz (.inline-title,
-   sofern Obsidians Einstellung "Inline-Titel anzeigen" aktiv ist) - siehe
-   active-title-colors.js. Vier sich gegenseitig ausschließende Varianten
-   (Einstellung "TYP-Markierung neben dem Titel"), alle als ::before
-   realisiert statt als eingefügtes Geschwister-/Wrapper-Element:
-   .inline-title hängt in mehreren Themes (u. a. Minimal, dort per
-   ">"-Kind-Selektor) direkt an seinem Eltern-Container für max-width/margin -
-   ein zusätzliches Element davor oder ein Wrapper darum würde diese Regeln
-   unterwandern. Farbe (und beim Badge der TYP-Name) kommen über eine
-   CSS-Variable bzw. ein data-Attribut, die active-title-colors.js direkt auf
-   .inline-title setzt (einem ::before lässt sich beides nicht per Klasse
-   zuweisen). */
+/* TYP marker left of the note's inline title (see active-title-colors.js).
+   All variants are ::before rather than an inserted sibling or wrapper:
+   several themes (Minimal among them) style .inline-title with child
+   selectors, which an extra element would break. Color (and the badge's TYP
+   name) come from a CSS variable and a data attribute that
+   active-title-colors.js sets on .inline-title. */
 
-/* Punkt: position:absolute mit right:100% platziert ihn komplett links
-   außerhalb von .inline-title (rechter Rand des Punkts = linker Rand des
-   Titels) - der Titeltext bleibt dadurch unverändert an seiner gewohnten
-   Stelle stehen, unabhängig von der (hier zwar festen, aber so einheitlich
-   zur Box gehandhabten) Breite. top:calc(50% + 8px) statt top:50% gleicht
-   .inline-title's eigenes padding-top (16px im Minimal-Theme) aus: ohne
-   diese Korrektur würde top:50% sich auf die volle Box-Höhe inklusive
-   Padding beziehen und den Punkt zu weit oben zentrieren (das Padding zählt
-   nur oben, nicht unten, und verschiebt die reine Prozent-Mitte damit nach
-   oben relativ zur tatsächlichen Textmitte - der Korrekturwert ist exakt
-   die Hälfte des Padding-Werts). */
-.inline-title.fred-typ-title-dot {
+/* Dot: position:absolute with right:100% places it fully left of
+   .inline-title, so the title text stays where it is. top:calc(50% + 8px)
+   instead of 50% offsets .inline-title's padding-top (16px in Minimal),
+   which only adds at the top and would otherwise center the dot too high -
+   the correction is exactly half the padding. */
+.inline-title.typ-title-dot {
   position: relative;
 }
 
-.inline-title.fred-typ-title-dot::before {
+.inline-title.typ-title-dot::before {
   content: "";
   position: absolute;
   right: 100%;
@@ -248,37 +212,31 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   width: 0.6em;
   height: 0.6em;
   border-radius: 50%;
-  background-color: var(--fred-typ-title-color);
+  background-color: var(--typ-title-color);
 }
 
-/* Standardwert als hohler Ring, wie die Farbpunkte der TYP-View (siehe
+/* Default value as a hollow ring, like the dots in the TYP-Pane (see
    resolveDot in active-title-colors.js). */
-.inline-title.fred-typ-title-dot-hollow::before {
+.inline-title.typ-title-dot-hollow::before {
   background-color: transparent;
-  box-shadow: inset 0 0 0 max(1.5px, 0.08em) var(--fred-typ-title-color);
+  box-shadow: inset 0 0 0 max(1.5px, 0.08em) var(--typ-title-color);
 }
 
-/* Box (eingefärbt/ungefärbt): ebenfalls position:absolute mit right:100%
-   (Breite hängt vom TYP-Namen ab, content: attr()), aber am Boden der
-   Titel-Höhe statt zentriert - bottom:0 bezieht sich zwar ebenfalls auf die
-   volle Box-Höhe inklusive padding-top, das wirkt aber nur oben und lässt
-   die untere Kante deshalb unverändert, anders als bei top:50% ist hier also
-   keine Korrektur dafür nötig. ABER: Obsidians eigenes Core-CSS (siehe
-   .inline-title in app.css) setzt kein Padding, dafür aber line-height -
-   dessen "Leading" erzeugt unterhalb der eigentlichen Buchstaben-Grundlinie
-   einen kleinen Leerraum, den bottom:0 mit einrechnet. bottom:4px (bewusst
-   px, nicht em - em bezöge sich hier auf die eigene, kleine Schriftgröße der
-   Box statt auf die des riesigen Titels) schiebt die Box um diesen Betrag
-   nach oben, damit sie optisch an der Grundlinie der Buchstaben sitzt statt
-   sichtbar darunter. */
-.inline-title.fred-typ-title-badge,
-.inline-title.fred-typ-title-badge-plain {
+/* Badge (colored or plain): also position:absolute with right:100% (width
+   depends on the TYP name, content: attr()), but at the bottom of the title
+   instead of centered - padding-top only affects the top, so bottom needs no
+   correction. But Obsidian's line-height leaves some leading below the
+   baseline, which bottom:0 includes; bottom:4px (px, since em would refer to
+   the badge's small font, not the huge title) lifts the badge onto the
+   baseline. */
+.inline-title.typ-title-badge,
+.inline-title.typ-title-badge-plain {
   position: relative;
 }
 
-.inline-title.fred-typ-title-badge::before,
-.inline-title.fred-typ-title-badge-plain::before {
-  content: attr(data-fred-typ);
+.inline-title.typ-title-badge::before,
+.inline-title.typ-title-badge-plain::before {
+  content: attr(data-typ);
   position: absolute;
   right: 100%;
   margin-right: 10px;
@@ -291,33 +249,31 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   white-space: nowrap;
 }
 
-.inline-title.fred-typ-title-badge::before {
-  border: 1px solid var(--fred-typ-title-color);
-  color: var(--fred-typ-title-color);
+.inline-title.typ-title-badge::before {
+  border: 1px solid var(--typ-title-color);
+  color: var(--typ-title-color);
 }
 
-.inline-title.fred-typ-title-badge-plain::before {
+.inline-title.typ-title-badge-plain::before {
   background: var(--background-modifier-border);
   color: var(--text-muted);
 }
 
-/* Gedrehte Box (eingefärbt/ungefärbt) am Property-Block (.metadata-container)
-   statt am Titel - siehe applyStyleToBlock in active-title-colors.js.
-   writing-mode:vertical-rl statt transform:rotate(): die Box wächst dadurch
-   von selbst in der richtigen (vertikalen) Richtung mit der Textlänge, ohne
-   dass die right:100%-Positionierung per transform-origin von Hand
-   nachgerechnet werden müsste - eine 180°-Drehung bildet ein Rechteck exakt
-   auf sich selbst ab, right:100%/top:0/bottom:0 bleiben also unverändert
-   gültig, nur die Leserichtung des Texts dreht sich damit von oben-nach-unten
-   (vertical-rl pur) auf unten-nach-oben (wie im Screenshot der Anfrage). */
-.metadata-container.fred-typ-block-badge,
-.metadata-container.fred-typ-block-badge-plain {
+/* Rotated badge (colored or plain) at the property block
+   (.metadata-container) instead of the title - see applyStyleToBlock in
+   active-title-colors.js. writing-mode:vertical-rl instead of rotate(): the
+   badge grows vertically with the text by itself, no transform-origin math
+   for the right:100% placement. A 180° turn maps the box onto itself, so
+   right/top/bottom stay valid; only the reading direction flips to
+   bottom-to-top. */
+.metadata-container.typ-block-badge,
+.metadata-container.typ-block-badge-plain {
   position: relative;
 }
 
-.metadata-container.fred-typ-block-badge::before,
-.metadata-container.fred-typ-block-badge-plain::before {
-  content: attr(data-fred-typ);
+.metadata-container.typ-block-badge::before,
+.metadata-container.typ-block-badge-plain::before {
+  content: attr(data-typ);
   position: absolute;
   right: 100%;
   margin-right: 10px;
@@ -331,28 +287,28 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   white-space: nowrap;
 }
 
-.metadata-container.fred-typ-block-badge-top::before {
+.metadata-container.typ-block-badge-top::before {
   top: 0;
 }
 
-.metadata-container.fred-typ-block-badge-bottom::before {
+.metadata-container.typ-block-badge-bottom::before {
   bottom: 0;
 }
 
-.metadata-container.fred-typ-block-badge::before {
-  border: 1px solid var(--fred-typ-block-color);
-  color: var(--fred-typ-block-color);
+.metadata-container.typ-block-badge::before {
+  border: 1px solid var(--typ-block-color);
+  color: var(--typ-block-color);
 }
 
-.metadata-container.fred-typ-block-badge-plain::before {
+.metadata-container.typ-block-badge-plain::before {
   background: var(--background-modifier-border);
   color: var(--text-muted);
 }
 
-/* In der Liste wie Obsidians eigene tree-item-icon (z. B. Aufklapp-Pfeil) in die
-   padding-left-Gutter der Zeile hineinziehen, statt regulär Platz wegzunehmen -
-   so landet der Zeilentext immer an derselben Stelle wie in Tags/File-Explorer. */
-.fred-typ-list .fred-typ-color-wrap {
+/* Pulled into the row's padding-left gutter like Obsidian's own
+   tree-item-icon, instead of taking space - so the text sits where it does in
+   the tags view or file explorer. */
+.typ-list .typ-color-wrap {
   position: absolute;
   margin-inline-start: calc(-1 * var(--size-4-5));
   width: var(--size-4-4);
@@ -363,19 +319,19 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   justify-content: center;
 }
 
-.fred-typ-list .fred-typ-color-dot {
+.typ-list .typ-color-dot {
   width: 0.6em;
   height: 0.6em;
 }
 
-.fred-typ-color-dot {
+.typ-color-dot {
   width: 100%;
   height: 100%;
   border-radius: 50%;
   cursor: pointer;
 }
 
-.fred-typ-color-input {
+.typ-color-input {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -386,50 +342,48 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   cursor: pointer;
 }
 
-/* Manuell-Sortiermodus (siehe SORT_OPTIONS/renderRegisteredItem in
-   typ-view.js) - kein eigenes Griff-Icon, die ganze Zeile ist per Drag & Drop
-   verschiebbar (self.draggable). */
-.fred-typ-list .tree-item-self.is-dragging {
+/* Manual sort mode (see SORT_OPTIONS/renderRegisteredItem in typ-pane.js) -
+   no grip icon, the whole row is draggable. */
+.typ-list .tree-item-self.is-dragging {
   opacity: 0.4;
 }
 
-/* Zeigt an, auf welcher Seite der Zeile eine gerade gezogene Zeile landen
-   würde - siehe dragover-Handler in renderRegisteredItem() (typ-view.js) bzw.
-   dieselbe Technik in .fred-order-row.is-drop-before/-after. */
-.fred-typ-list .tree-item-self.is-drop-before {
+/* Shows on which side of the row a dragged row would land - see the dragover
+   handler in renderRegisteredItem() and the same technique in
+   .typ-order-row.is-drop-before/-after. */
+.typ-list .tree-item-self.is-drop-before {
   box-shadow: inset 0 2px 0 var(--interactive-accent);
 }
 
-.fred-typ-list .tree-item-self.is-drop-after {
+.typ-list .tree-item-self.is-drop-after {
   box-shadow: inset 0 -2px 0 var(--interactive-accent);
 }
 
-.fred-typ-detail-header {
+.typ-detail-header {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: var(--size-4-2) var(--size-4-3);
 }
 
-/* Auf Höhe des "Beschreibung"-Labels links davor statt im (beengten) Header -
-   dort darf der Farbpunkt deutlich größer als in der TYP-Liste sein. */
-.fred-typ-detail-color-row {
+/* In the options row instead of the cramped header - the dot may be much
+   larger here than in the TYP-List. */
+.typ-detail-color-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.fred-typ-detail-color-row .fred-typ-color-wrap {
+.typ-detail-color-row .typ-color-wrap {
   width: 1em;
   height: 1em;
   margin-right: 0;
 }
 
-/* Kein flex-grow (mehr) - sonst würde der Titel immer die ganze verbleibende
-   Headerzeile füllen und die Zähler-Zahl (siehe .fred-typ-detail-count) an
-   deren rechten Rand statt direkt hinter den Namen schieben. */
-.fred-typ-detail-title {
-  color: var(--fred-typ-name-color, inherit);
+/* No flex-grow - otherwise the title would fill the header and push the count
+   (.typ-detail-count) to the right edge instead of right after the name. */
+.typ-detail-title {
+  color: var(--typ-name-color, inherit);
   flex: 0 1 auto;
   margin-left: 0;
   font-weight: 600;
@@ -438,7 +392,7 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   white-space: nowrap;
 }
 
-.fred-typ-detail-title.is-being-renamed {
+.typ-detail-title.is-being-renamed {
   overflow: visible;
   white-space: normal;
   padding: 0 4px;
@@ -447,22 +401,19 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   background-color: var(--background-modifier-form-field);
 }
 
-/* Rein visuell: TYPen werden ohnehin beim Speichern in Großbuchstaben
-   normalisiert (siehe normalizeTypeName() in typ-view.js) - hier bereits
-   während der Eingabe, damit keine Überraschung beim Verlassen des Feldes
-   entsteht. Ändert nicht den tatsächlichen (evtl. noch klein geschriebenen)
-   textContent, nur seine Darstellung. */
-.fred-typ-detail-title.is-being-renamed,
-.fred-typ-list .tree-item-self.is-being-renamed .tree-item-inner {
+/* Visual only: TYP names are uppercased on save anyway (see normalizeTypName),
+   this does it while typing so leaving the field brings no surprise. The
+   actual textContent stays as typed. */
+.typ-detail-title.is-being-renamed,
+.typ-list .tree-item-self.is-being-renamed .tree-item-inner {
   text-transform: uppercase;
 }
 
-/* Übernimmt das flex-grow, das vorher auf .fred-typ-detail-title lag - der
-   verbleibende Platz in der Headerzeile landet so hinter der Zahl statt
-   hinter dem Namen, wodurch diese direkt hinter dem Namen erscheint.
-   margin-left zusätzlich zum header-eigenen gap (4px), damit der Abstand zum
-   Namen größer ausfällt als der knappe Abstand der Icon-Buttons untereinander. */
-.fred-typ-detail-count {
+/* Takes the flex-grow instead of .typ-detail-title, so the free space
+   lands after the count and the count sits right after the name. margin-left
+   on top of the header gap makes that distance larger than the tight spacing
+   between the icon buttons. */
+.typ-detail-count {
   flex: 1 1 auto;
   margin-left: 6px;
   color: var(--text-muted);
@@ -470,22 +421,22 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   white-space: nowrap;
 }
 
-.fred-confirm-delete-modal {
+.typ-confirm-modal {
   width: auto;
   max-width: 22em;
 }
 
-.fred-confirm-delete-modal .modal-content p {
+.typ-confirm-modal .modal-content p {
   text-align: center;
 }
 
-.fred-confirm-delete-modal .modal-button-container {
+.typ-confirm-modal .modal-button-container {
   justify-content: center;
 }
 
-/* TYP-Name in Fließtext der Bestätigungs-Modale (siehe appendTypeName in
-   typ-view.js) - Farbpunkt-Variante analog zu .fred-typ-picker-dot. */
-.fred-typ-inline-dot {
+/* A TYP name in dialog text (see appendTypName in typ-pane.js) - dot variant
+   like .typ-picker-dot. */
+.typ-inline-dot {
   display: inline-block;
   width: 0.6em;
   height: 0.6em;
@@ -494,86 +445,79 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   vertical-align: middle;
 }
 
-.fred-typ-inline-name {
+.typ-inline-name {
   font-weight: 600;
 }
 
-.fred-typ-color-reset,
-.fred-typ-detail-rename,
-.fred-typ-detail-rename-notes,
-.fred-typ-detail-delete {
+.typ-color-reset,
+.typ-detail-rename,
+.typ-detail-rename-notes,
+.typ-detail-delete {
   flex-shrink: 0;
 }
 
-/* Nichts zurückzusetzen - die Farbe ist bereits der Standardwert (hohler
-   Ring, siehe paintColorDot in type-colors.js). */
-.fred-typ-color-reset.is-disabled {
+/* Nothing to reset - the color already is the default (hollow ring, see
+   paintColorDot in typ-colors.js). */
+.typ-color-reset.is-disabled {
   opacity: 0.35;
   pointer-events: none;
 }
 
-/* Hervorgehoben (Akzentfarbe) statt wie die übrigen Header-Icons neutral -
-   markiert den folgenreicheren zweiten Umbenennen-Button, der zusätzlich
-   Notizen umschreibt (siehe startDetailRename in typ-view.js). */
-.fred-typ-detail-rename-notes {
+/* Accent color instead of neutral like the other header icons - marks the
+   more consequential rename button that also rewrites notes (see
+   startDetailRename in typ-pane.js). */
+.typ-detail-rename-notes {
   color: var(--interactive-accent);
 }
 
-.fred-typ-detail-rename-notes:hover {
+.typ-detail-rename-notes:hover {
   color: var(--interactive-accent-hover);
 }
 
-.fred-typ-detail-body {
+.typ-detail-body {
   padding: 0 var(--size-4-3) var(--size-4-3);
 }
 
-/* Eine Zeile aus zwei Teilen: links die TYP-Farbe, rechts daneben das
-   Beschreibungsfeld. Das space-between der gemeinsamen Header-Klasse läuft
-   dabei ins Leere - den Platz verteilt das flex-grow des Feldes; der gap hält
-   es von der Farbwahl ab. */
-.fred-typ-options-header {
+/* One row of two parts: the TYP color on the left, the description field
+   next to it. The shared header's space-between has no effect here; the
+   field's flex-grow distributes the space, the gap keeps it off the color. */
+.typ-options-header {
   align-items: center;
   gap: var(--size-4-2);
-  /* Überschreibt den knapperen Abstand der gemeinsamen Header-Klasse: die
-     Zeile schliesst den Kopfteil des TYPs ab, darunter beginnen die
-     Frontmatter-Blöcke. */
+  /* Overrides the shared header's tighter spacing: this row closes the TYP's
+     head, the frontmatter blocks start below. */
   margin-bottom: var(--size-4-3);
 }
 
-/* "Manuell erstellbar" (siehe renderManualIcon in typ-view.js): bewusst nur
-   ein Icon-Knopf wie Umbenennen/Löschen daneben, kein beschrifteter Schalter -
-   die Einstellung ist zu klein, um eine eigene Zeile mit Label zu
-   rechtfertigen. An sieht aus wie jeder andere Icon-Knopf (der Normalfall,
-   siehe getTypes() in main.js), aus ist abgeblendet; beim Hovern wird auch der
-   abgeblendete Zustand voll sichtbar, damit er nicht mit einem deaktivierten
-   Knopf verwechselt wird (vgl. .fred-typ-color-reset.is-disabled, der
-   zusätzlich pointer-events abschaltet).
+/* "Manually creatable" (see renderManualIcon in typ-pane.js): just an icon
+   button like rename/delete next to it, no labeled toggle - too small a
+   setting for its own row. On looks like any icon button (the normal case),
+   off is dimmed; on hover the dimmed state shows fully so it isn't mistaken
+   for a disabled button (unlike .typ-color-reset.is-disabled, which also
+   turns off pointer-events).
 
-   Der Knopf steht zwischen Umbenennen und Löschen: beim TYP in der Kopfzeile
-   der Detailansicht, bei jedem Subtyp in den Aktionen im Abschluss seines
-   Blocks (.fred-typ-subtype-action-group, siehe renderSectionFooter) - gleiche
-   Einstellung, gleiche Optik, nur eine Ebene tiefer; die Icongröße kommt dort
-   aus dem Abschluss selbst. */
-.fred-typ-manual-icon {
+   It sits between rename and delete: for a TYP in the detail header, for
+   each Subtyp in its block footer (.typ-subtyp-action-group, see
+   renderSectionFooter) - same setting, same look, one level down; the icon
+   size there comes from the footer. */
+.typ-manual-icon {
   flex-shrink: 0;
 }
 
-.fred-typ-manual-icon:not(.is-active) {
+.typ-manual-icon:not(.is-active) {
   opacity: 0.35;
 }
 
-.fred-typ-manual-icon:not(.is-active):hover {
+.typ-manual-icon:not(.is-active):hover {
   opacity: 1;
 }
 
-/* Füllt die Mitte der Optionszeile. min-width: 0 ist nötig, damit das Feld
-   als Flex-Kind unter seine Standard-Inhaltsbreite schrumpfen darf, statt die
-   Zeile bei schmaler Seitenleiste aufzudehnen und die Icons hinauszudrücken.
-   Die Höhe kommt bewusst aus Obsidians eigener input-Regel (--input-height):
-   deren Selektor input[type="text"] ist spezifischer als diese Klasse, eine
-   Angabe hier würde also ohnehin verlieren - und die Standardhöhe passt zu
-   den Icons links und rechts. */
-.fred-typ-description-input {
+/* Fills the middle of the options row. min-width: 0 lets the field shrink
+   below its content width as a flex child instead of widening the row and
+   pushing the icons out in a narrow sidebar. The height comes from Obsidian's
+   input rule (--input-height): its input[type="text"] selector is more
+   specific and would win anyway, and the default fits the icons. */
+.typ-description-input {
   flex: 1 1 auto;
   min-width: 0;
   font-family: inherit;
@@ -581,152 +525,134 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   padding: var(--size-4-1) var(--size-4-2);
 }
 
-/* Hier stand das Style Setting "Beschreibungsfeld hoch", das die Optionszeile
-   auf Grid umstellte und "manuell erstellbar" über der Farbwahl stapelte,
-   damit das Beschreibungsfeld daneben zwei Zeilen hoch werden konnte. Der
-   Knopf steht jetzt oben in der Kopfzeile bei den übrigen Icon-Knöpfen (siehe
-   renderManualToggle), in der Zeile bleiben nur Farbwahl und Feld - es gibt
-   also nichts mehr zu stapeln. */
-
-/* Deutlich blasser als eingetragener Text (--text-faint statt --text-muted):
-   der Platzhalter ist nur eine Beschriftung des leeren Feldes und soll nicht
-   wie eine bereits hinterlegte Beschreibung aussehen. */
-.fred-typ-description-input::placeholder {
+/* Much paler than entered text (--text-faint, not --text-muted): the
+   placeholder only labels the empty field and must not look like a stored
+   description. */
+.typ-description-input::placeholder {
   color: var(--text-faint);
 }
 
-.fred-typ-frontmatter-header {
+.typ-frontmatter-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--size-4-2);
 }
 
-/* Ein Name, dessen Klick die Suche öffnet (siehe makeSearchable in
-   typ-view.js): der Titel der Detailansicht und jede Block-Überschrift. Die
-   Akzentfarbe beim Hovern ist das einzige Signal dafür, dass hier überhaupt
-   etwas passiert - vorher lag die Suche auf dem Rechtsklick und war damit
-   unsichtbar. Schlägt auch die TYP-Farbe des Titels, weil die als Custom
-   Property statt inline gesetzt wird. Während einer Umbenennung ist dasselbe
-   Element ein Eingabefeld (is-being-renamed), dann bleibt beides aus. */
-.fred-typ-searchable:not(.is-being-renamed) {
+/* A name whose click opens the search (see makeSearchable in typ-pane.js):
+   the detail title and every block heading. The accent color on hover is the
+   only sign that something happens here. It also beats the title's TYP color,
+   which is set as a custom property rather than inline. While renaming, the
+   element is an input (is-being-renamed) and both stay off. */
+.typ-searchable:not(.is-being-renamed) {
   cursor: var(--cursor-link);
 }
 
-.fred-typ-searchable:not(.is-being-renamed):hover {
+.typ-searchable:not(.is-being-renamed):hover {
   color: var(--text-accent);
 }
 
-.fred-typ-detail-section-title {
+.typ-detail-section-title {
   font-size: var(--font-ui-small);
   font-weight: 600;
   color: var(--text-muted);
 }
 
-/* In der TYP-Detailansicht stehen die Abschnitts-Überschriften auf --text-normal
-   statt auf dem gedämpften Grau darüber: sie standen damit blasser da als
-   Obsidians eigene "Properties"-Überschrift direkt daneben und waren schlecht
-   zu lesen. Bewusst auf .fred-typ-view eingegrenzt - dieselbe Klasse trägt auch
-   die Überschrift "Globale Property-Reihenfolge" in den Plugin-Einstellungen
-   (siehe mountGlobalOrderEditor in frontmatter-order-editor.js), und dort ist
-   eine gedämpfte Abschnitts-Überschrift Obsidians eigene Optik. */
-.fred-typ-view .fred-typ-detail-section-title {
+/* In the TYP-Pane the section headings use --text-normal instead of the
+   muted gray: they looked paler than Obsidian's own "Properties" heading next
+   to them. Scoped to .typ-system-pane - the same class is on the "Global
+   property order" heading in the settings, where muted section headings are
+   Obsidian's own look. */
+.typ-system-pane .typ-detail-section-title {
   color: var(--text-normal);
 }
 
-.fred-typ-frontmatter-header .fred-typ-detail-section-title {
+.typ-frontmatter-header .typ-detail-section-title {
   margin-bottom: 0;
 }
 
-/* Gruppiert einen Button mit der Überschrift links im Header (siehe
-   mountGlobalOrderEditor in frontmatter-order-editor.js) - nötig, weil der
-   Header selbst justify-content: space-between nutzt und ein drittes
-   direktes Kind sonst mittig im verbleibenden Platz landen würde, statt
-   direkt neben der Überschrift zu sitzen. */
-.fred-typ-frontmatter-title-group {
+/* Groups a button with the heading on the left of the header (see
+   mountGlobalOrderEditor) - the header uses space-between, so a third direct
+   child would float in the middle instead of next to the heading. */
+.typ-frontmatter-title-group {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-/* Gruppiert die beiden "Property hinzufügen"-Buttons (normal + Floating,
-   siehe renderTypeSettings in typ-view.js) rechts im Header - aus demselben
-   Grund wie .fred-typ-frontmatter-title-group oben. */
-.fred-typ-frontmatter-add-group {
+/* Groups the two add buttons (normal + floating, see renderSectionHeader in
+   typ-pane.js) on the right of the header, for the same reason as
+   .typ-frontmatter-title-group above. */
+.typ-frontmatter-add-group {
   display: flex;
   align-items: center;
 }
 
-/* Hervorgehoben (Akzentfarbe), analog zu .fred-typ-detail-rename-notes -
-   fügt statt einer normalen eine Floating Property hinzu (siehe
-   fredPendingFloatingAdd in type-frontmatter-editor.js). */
-.fred-typ-frontmatter-add-floating {
+/* Accent color like .typ-detail-rename-notes - adds a floating property
+   instead of a normal one (see typPendingFloatingAdd). */
+.typ-frontmatter-add-floating {
   color: var(--interactive-accent);
 }
 
-.fred-typ-frontmatter-add-floating:hover {
+.typ-frontmatter-add-floating:hover {
   color: var(--interactive-accent-hover);
 }
 
-/* Subtyp-Blöcke ohne eigenen Property-Editor (nicht erfasste Subtypen, neu
-   angelegter Subtyp während der Namenseingabe) - im
-   Stil der Gruppen in Obsidians eigenen Einstellungen (.setting-group
-   .setting-items): Rundung und Rahmen von dort. Die Fläche aber nicht
-   --setting-items-background - das entspricht z. B. im Minimal-Theme genau
-   dem Seitenleisten-Hintergrund und wäre hier unsichtbar -, sondern
-   --background-primary, das sich in praktisch jedem Theme von der
-   Seitenleiste (--background-secondary) abhebt. Seitlicher Innenabstand
-   bewusst knapp: unter 250px Breite bricht Obsidians Property-Widget Name
-   und Wert auf zwei Zeilen um (@container metadata). Die Blöcke im
-   registrierten Blöcke (.fred-typ-block unten) nutzen dieselben Maße. */
-.fred-typ-frontmatter-block {
+/* Subtyp blocks without a property editor (unregistered Subtyps, a new one
+   while its name is typed) - styled like the groups in Obsidian's settings
+   (.setting-group .setting-items): radius and border from there. But the
+   surface is --background-primary, not --setting-items-background, which in
+   Minimal equals the sidebar background and would be invisible here. Tight
+   side padding: below 250px Obsidian's property widget wraps name and value
+   onto two lines (@container metadata). The registered blocks (.typ-block
+   below) use the same measures. */
+.typ-frontmatter-block {
   background-color: var(--background-primary);
   border-radius: var(--setting-items-radius);
   border: var(--setting-items-border-width) solid var(--setting-items-border-color);
   padding: var(--size-4-2) var(--size-4-2);
 }
 
-.fred-typ-frontmatter-block + .fred-typ-frontmatter-block {
+.typ-frontmatter-block + .typ-frontmatter-block {
   margin-top: var(--size-4-3);
 }
 
-/* Trennt in der Detailansicht die Frontmatter-Blöcke von den übrigen
-   Einstellungen bzw. von der Platzhalter-Legende. */
-.fred-typ-detail-separator {
+/* Separates the frontmatter blocks from the other settings in the detail
+   view. */
+.typ-detail-separator {
   border-top: 1px solid var(--background-modifier-border);
   margin: var(--size-4-4) 0;
 }
 
-.fred-typ-subtype-count {
+.typ-subtyp-count {
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
   margin-left: var(--size-4-1);
 }
 
-/* Neu angelegter Subtyp während der Namenseingabe (siehe startAddSubtype) -
-   steht außerhalb der Blockliste, übernimmt aber exakt deren Maße
-   (Abstand, Überschrift, Abschluss, siehe .fred-typ-block unten), damit
-   beim Abschließen nichts springt. */
-.fred-typ-subtype-pending {
+/* A new Subtyp while its name is typed (see startAddSubtyp) - outside the
+   block list but with exactly its measures (spacing, heading, footer, see
+   .typ-block below), so nothing jumps when done. */
+.typ-subtyp-pending {
   margin-top: var(--size-4-3);
   padding: 0 var(--size-4-2);
 }
 
-.fred-typ-subtype-pending .fred-typ-frontmatter-header {
+.typ-subtyp-pending .typ-frontmatter-header {
   margin: 0;
   padding: var(--size-4-2) 0 var(--size-4-1);
 }
 
-.fred-typ-subtype-pending .fred-typ-section-footer {
+.typ-subtyp-pending .typ-section-footer {
   height: var(--size-4-1);
 }
 
-.fred-typ-subtype-pending .fred-typ-frontmatter-add-group {
+.typ-subtyp-pending .typ-frontmatter-add-group {
   pointer-events: none;
 }
 
-/* Name eines gerade neu angelegten Subtyps (siehe startAddSubtype). */
-.fred-typ-subtype-name-input {
+/* Name of a Subtyp being created (see startAddSubtyp). */
+.typ-subtyp-name-input {
   min-width: 8em;
   padding: 0 var(--size-4-1);
   border-radius: var(--radius-s);
@@ -735,53 +661,51 @@ body.typ-system-subtypes-right .fred-typ-list-subtypes {
   outline: none;
 }
 
-/* Frontmatter-Blöcke eines TYPs (siehe frontmatter-blocks.js): je Block ein
-   eigener Container mit Überschrift (.fred-typ-section-header), Obsidians
-   Property-Editor und Abschluss (.fred-typ-section-footer). Seitlicher
-   Innenabstand am Block, die vertikalen Abstände liefern Überschrift und
-   Abschluss - dieselben Maße wie der noch unbenannte Block während der
-   Namenseingabe (.fred-typ-subtype-pending oben). */
-.fred-typ-blocks {
+/* A TYP's frontmatter blocks (see frontmatter-blocks.js): each block has its
+   own container with heading (.typ-section-header), Obsidian's property
+   editor and footer (.typ-section-footer). Side padding on the block, vertical
+   spacing from heading and footer - the same measures as the unnamed block
+   while typing (.typ-subtyp-pending above). */
+.typ-blocks {
   position: relative;
 }
 
-.fred-typ-block {
+.typ-block {
   padding: 0 var(--size-4-2);
 }
 
-.fred-typ-block + .fred-typ-block {
+.typ-block + .typ-block {
   margin-top: var(--size-4-3);
 }
 
-/* Kartenfläche nur für die Subtyp-Blöcke - das TYP-Frontmatter bleibt
-   transparent. Rundung und Rahmen wie .fred-typ-frontmatter-block oben. */
-.fred-typ-block.fred-typ-subtype-block {
+/* Card surface only for Subtyp blocks - the TYP-Frontmatter stays
+   transparent. Radius and border like .typ-frontmatter-block above. */
+.typ-block.typ-subtyp-block {
   background-color: var(--background-primary);
   border-radius: var(--setting-items-radius);
   border: var(--setting-items-border-width) solid var(--setting-items-border-color);
 }
 
-/* Hover: Blockfläche leicht aufgehellt - Obsidians Hover-Hintergrund über der
-   Kartenfarbe. Gilt ebenso für die nicht erfassten Subtypen, nicht aber für
-   das (transparente) TYP-Frontmatter. Während ein Block gezogen wird, bleibt
-   das Aufleuchten aus. */
-body:not(.fred-typ-block-dragging) .fred-typ-block.fred-typ-subtype-block:hover,
-.fred-typ-subtype-unregistered:hover {
+/* Hover: the block surface lightens slightly (Obsidian's hover background
+   over the card color). Also for unregistered Subtyps, not for the
+   transparent TYP-Frontmatter. Off while a block is being dragged. */
+body:not(.typ-block-dragging) .typ-block.typ-subtyp-block:hover,
+.typ-subtyp-unregistered:hover {
   background-image: linear-gradient(var(--background-modifier-hover), var(--background-modifier-hover));
 }
 
-/* Block-Drag (siehe frontmatter-blocks.js): keine Textauswahl während des
-   Ziehens, der Cursor bleibt bewusst unverändert. */
-body.fred-typ-block-dragging,
-body.fred-typ-block-dragging * {
+/* Block drag (see frontmatter-blocks.js): no text selection while dragging;
+   the cursor deliberately stays as it is. */
+body.typ-block-dragging,
+body.typ-block-dragging * {
   user-select: none;
 }
 
-.fred-typ-block.is-dragging {
+.typ-block.is-dragging {
   opacity: 0.4;
 }
 
-.fred-typ-block-drop-indicator {
+.typ-block-drop-indicator {
   position: absolute;
   left: 0;
   right: 0;
@@ -791,47 +715,45 @@ body.fred-typ-block-dragging * {
   pointer-events: none;
 }
 
-.fred-typ-block > .metadata-container {
+.typ-block > .metadata-container {
   margin-bottom: 0;
 }
 
-/* Beide nur während eines Zeilen-Drags (siehe registerPropertyDrag in
-   frontmatter-blocks.js). Der Abstandhalter ist ein leeres Zusatzkind der
-   Zeilenliste: Obsidian startet seinen Drag sonst gar nicht, wenn ein Block
-   nur eine einzige Zeile hat. Der Platzhalter zeigt im Zielblock die
-   Einfügestelle - die Darstellung selbst kommt aus Obsidians eigener Klasse
-   .drag-ghost-hidden, hier fehlt nur die Höhe, da er keinen Inhalt hat. */
-.fred-typ-drag-spacer {
+/* Both only during a row drag (see registerPropertyDrag in
+   frontmatter-blocks.js). The spacer is an empty extra child: Obsidian won't
+   start its drag in a block with a single row otherwise. The placeholder
+   marks the drop spot in the target block; its look comes from Obsidian's
+   .drag-ghost-hidden, only the height is missing since it has no content. */
+.typ-drag-spacer {
   height: 0;
 }
 
-.fred-typ-drag-placeholder {
+.typ-drag-placeholder {
   box-sizing: border-box;
 }
 
-.fred-typ-block .metadata-properties {
+.typ-block .metadata-properties {
   padding: 0;
 }
 
-/* Obsidians Property-Editor verkleinert in seinem Bereich die Icons - die
-   Überschriften sollen aber wie die übrige Detailansicht aussehen (normale
-   Icongröße der "+"-Buttons). */
-.fred-typ-block .fred-typ-section-header {
+/* Obsidian's property editor shrinks icons within its area - the headings
+   should look like the rest of the detail view (normal "+" icon size). */
+.typ-block .typ-section-header {
   margin: 0;
   padding: var(--size-4-2) 0 var(--size-4-1);
   --icon-size: var(--icon-m);
   --icon-stroke: var(--icon-m-stroke-width);
 }
 
-.fred-typ-block .fred-typ-section-footer {
+.typ-block .typ-section-footer {
   height: var(--size-4-1);
 }
 
-/* Abschluss eines Subtyp-Blocks (siehe renderSectionFooter in typ-view.js):
-   links Farbpunkt und Zurücksetzen, rechts die Aktionen samt "manuell
-   erstellbar" - Icongröße wie in den Überschriften. */
-.fred-typ-block .fred-typ-section-footer.fred-typ-subtype-actions,
-.fred-typ-subtype-pending .fred-typ-section-footer.fred-typ-subtype-actions {
+/* Footer of a Subtyp block (see renderSectionFooter in typ-pane.js): dot and
+   reset on the left, the actions including "manually creatable" on the right
+   - icon size as in the headings. */
+.typ-block .typ-section-footer.typ-subtyp-actions,
+.typ-subtyp-pending .typ-section-footer.typ-subtyp-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -841,15 +763,15 @@ body.fred-typ-block-dragging * {
   --icon-stroke: var(--icon-m-stroke-width);
 }
 
-.fred-typ-subtype-color-group,
-.fred-typ-subtype-action-group {
+.typ-subtyp-color-group,
+.typ-subtyp-action-group {
   display: flex;
   align-items: center;
   gap: var(--size-4-1);
 }
 
-/* Gleich groß wie der Farbpunkt im Kopf der TYP-Detailansicht. */
-.fred-typ-subtype-color-dot {
+/* Same size as the dot in the TYP-Pane detail header. */
+.typ-subtyp-color-dot {
   width: 1em;
   height: 1em;
   margin: 0 var(--size-4-1);
@@ -858,15 +780,14 @@ body.fred-typ-block-dragging * {
   flex-shrink: 0;
 }
 
-.fred-typ-subtype-pending .fred-typ-subtype-actions {
+.typ-subtyp-pending .typ-subtyp-actions {
   pointer-events: none;
 }
 
-/* Regler für die Subtyp-Farbe (siehe openSubtypeColorPopover in
-   typ-view.js) - "menu" liefert Hintergrund, Rahmen und Schatten wie bei
-   Obsidians Kontextmenüs. Die Leiste jedes Reglers zeigt als Verlauf die
-   erreichbaren Farben (--fred-track). */
-.fred-typ-subtype-color-popover {
+/* Sliders for the Subtyp color (see openSubtypColorPopover in typ-pane.js) -
+   "menu" gives background, border and shadow like Obsidian's context menus.
+   Each track shows the reachable colors as a gradient (--typ-track). */
+.typ-subtyp-color-popover {
   position: fixed;
   z-index: var(--layer-menu);
   display: flex;
@@ -876,7 +797,7 @@ body.fred-typ-block-dragging * {
   min-width: 260px;
 }
 
-.fred-typ-subtype-color-row {
+.typ-subtyp-color-row {
   display: grid;
   grid-template-columns: 6.5em 1fr 3.5em;
   align-items: center;
@@ -884,20 +805,20 @@ body.fred-typ-block-dragging * {
   font-size: var(--font-ui-small);
 }
 
-.fred-typ-subtype-color-value {
+.typ-subtyp-color-value {
   text-align: right;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-input[type="range"].fred-typ-subtype-color-slider {
+input[type="range"].typ-subtyp-color-slider {
   width: 100%;
   height: 8px;
   border-radius: 4px;
-  background: var(--fred-track, var(--slider-track-background));
+  background: var(--typ-track, var(--slider-track-background));
 }
 
-.fred-typ-subtype-add {
+.typ-subtyp-add {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -906,95 +827,83 @@ input[type="range"].fred-typ-subtype-color-slider {
   margin-top: var(--size-4-4);
 }
 
-.fred-typ-subtype-add-icon {
+.typ-subtyp-add-icon {
   display: flex;
 }
 
-.fred-typ-subtype-add-icon svg {
+.typ-subtyp-add-icon svg {
   width: var(--icon-s);
   height: var(--icon-s);
 }
 
-/* Nicht erfasste Subtypen (siehe renderUnregisteredSubtypes) - Blöcke wie die
-   registrierten, nur ohne Inhalt und als Ganzes anklickbar. Die Überschrift
-   stand hier früher auf --text-faint; das war als "noch nicht erfasst"-Signal
-   gedacht, machte die Namen aber schlechter lesbar als alles andere in der
-   Detailansicht - ausgerechnet dort, wo man sie zum Beurteilen lesen muss. Sie
-   nutzt jetzt dieselbe Farbe wie jede andere Block-Überschrift; erkennbar
-   bleiben die Blöcke daran, dass ihnen Farbpunkt, Aktionen und Properties
-   fehlen. */
-.fred-typ-subtype-unregistered-list {
+/* Unregistered Subtyps (see renderUnregisteredSubtyps) - blocks like the
+   registered ones, just empty and clickable as a whole. The heading uses the
+   same color as every other block heading (--text-faint made the names hard
+   to read exactly where they need judging); they stand out by lacking dot,
+   actions and properties. */
+.typ-subtyp-unregistered-list {
   margin-top: var(--size-4-3);
 }
 
-.fred-typ-subtype-unregistered {
+.typ-subtyp-unregistered {
   cursor: var(--cursor);
 }
 
-.fred-typ-subtype-unregistered .fred-typ-frontmatter-header {
+.typ-subtyp-unregistered .typ-frontmatter-header {
   margin-bottom: 0;
 }
 
-.fred-typ-frontmatter-unavailable {
+.typ-frontmatter-unavailable {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
 
-.fred-typ-floating-hint-section {
+.typ-floating-hint-section {
   margin-top: var(--size-4-3);
 }
 
-.fred-typ-floating-hint {
+.typ-floating-hint {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   margin-bottom: var(--size-4-2);
 }
 
-/* Zeilen des Shortcut-Auswahl-Modals (shortcut-picker.js): Token vorn in der
-   Akzentfarbe wie der Chip in der Property-Zeile, Beschreibung gedämpft
-   dahinter. */
-.fred-typ-shortcut-suggestion {
+/* Rows of the shortcut picker (shortcut-picker.js): token first in accent
+   color like the chip in the property row, description muted after it. */
+.typ-shortcut-suggestion {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 
-.fred-typ-shortcut-suggestion-name {
+.typ-shortcut-suggestion-name {
   color: var(--text-accent);
 }
 
-.fred-typ-shortcut-suggestion-desc {
+.typ-shortcut-suggestion-desc {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
 
-/* Beschreibung des Skripts über den Argument-Feldern (shortcut-picker.js) -
-   dieselbe Zeile, die in der Auswahl hinter dem Namen stand, damit man beim
-   Ausfüllen noch weiß, worum es geht. */
-.fred-typ-shortcut-args-desc {
+/* The script's description above the argument fields (shortcut-picker.js) -
+   the same line the picker showed, so one still knows what it is about. */
+.typ-shortcut-args-desc {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   margin-bottom: var(--size-4-3);
 }
 
-/* Shortcut-Knopf und -Chip je Property-Zeile des TYP-Frontmatter-Editors
-   (siehe renderShortcutControls in type-frontmatter-editor.js). Beide sind
-   direkte Kinder von ".metadata-property" und stehen damit im selben
-   Flex-Kontext wie Obsidians eigene Zeilenteile (Name, Wert, Warnsymbol).
-
-   Früher stand der Platzhalter als Text IM Wert der Property. Das kollidierte
-   mit Obsidians typisierten Eingabefeldern (Datum/Zahl/Checkbox) und brauchte
-   hier eine !important-Regel, um dessen "Type mismatch"-Warnsymbol zu
-   unterdrücken. Seit der Shortcut neben dem Wert liegt (siehe shortcuts.js),
-   entsteht gar kein Mismatch mehr - beide Regeln sind damit entfallen. */
-/* Exakt der Platz von Obsidians eigenem Warndreieck: das ist kein Flex-Item,
-   sondern absolut am rechten Rand der Zeile verankert (".metadata-property"
-   ist position: relative). Ein Knopf IM Fluss landet optisch an derselben
-   Stelle und schiebt sich unter das Dreieck - daher hier dieselbe Verankerung
-   und dieselbe Icon-Größe, kopiert aus Obsidians
-   ".metadata-property-warning-icon". Beide tragen ohnehin ".clickable-icon",
-   sind damit also Pixel für Pixel gleich groß. */
-.fred-typ-frontmatter-editor .fred-typ-shortcut-button {
+/* Shortcut button and chip per property row of the TYP-Frontmatter editor
+   (see renderShortcutControls in typ-frontmatter-editor.js). Both are direct
+   children of ".metadata-property", in the same flex context as Obsidian's
+   own row parts (name, value, warning icon). */
+/* Exactly the spot of Obsidian's warning triangle, which isn't a flex item
+   but anchored absolutely at the row's right edge (".metadata-property" is
+   position: relative). A button in the flow would end up under the triangle,
+   so it uses the same anchoring and icon size, copied from
+   ".metadata-property-warning-icon"; both are ".clickable-icon" and so match
+   pixel for pixel. */
+.typ-frontmatter-editor .typ-shortcut-button {
   --icon-size: var(--icon-s);
   position: absolute;
   inset-inline-end: var(--size-2-1);
@@ -1005,62 +914,55 @@ input[type="range"].fred-typ-subtype-color-slider {
   opacity: 0;
 }
 
-/* Zeile mit Typ-Warnung und ohne Shortcut: das Warndreieck hat Vorrang, der
-   Knopf verschwindet ganz (siehe WARNING_CLASS in type-frontmatter-editor.js). */
-.fred-typ-frontmatter-editor .fred-typ-shortcut-blocked .fred-typ-shortcut-button {
+/* Row with a type warning and no shortcut: the triangle wins and the button
+   disappears (see WARNING_CLASS in typ-frontmatter-editor.js). */
+.typ-frontmatter-editor .typ-shortcut-blocked .typ-shortcut-button {
   display: none;
 }
 
-/* Umgekehrt bei gesetztem Shortcut: dort bleibt der Knopf (nur über ihn lässt
-   sich der Shortcut entfernen), und das Warndreieck weicht - es bezöge sich
-   auf den ausgeblendeten Rückfallwert, wäre dort also gar nicht zu beheben.
-   !important nötig, da Obsidian das Icon per Inline-style.display einblendet. */
-.fred-typ-frontmatter-editor .fred-typ-has-shortcut .metadata-property-warning-icon {
+/* The other way round with a shortcut set: the button stays (the only way to
+   remove the shortcut) and the triangle gives way - it would refer to the
+   hidden fallback value, which can't be fixed there. !important because
+   Obsidian shows the icon via inline style.display. */
+.typ-frontmatter-editor .typ-has-shortcut .metadata-property-warning-icon {
   display: none !important;
 }
 
-/* Nur bei Hover/Fokus der Zeile sichtbar - sonst stünde in jeder Property
-   dauerhaft ein Bedienelement, das die meisten nie brauchen. Bei gesetztem
-   Shortcut bleibt er dagegen immer sichtbar: dort ist er der einzige Weg,
-   ihn wieder zu entfernen. :focus-within deckt die Tastaturbedienung mit ab. */
-.fred-typ-frontmatter-editor .metadata-property:hover .fred-typ-shortcut-button,
-.fred-typ-frontmatter-editor .metadata-property:focus-within .fred-typ-shortcut-button,
-.fred-typ-frontmatter-editor .fred-typ-has-shortcut .fred-typ-shortcut-button {
+/* Visible only on row hover/focus - otherwise every property would carry a
+   control most never need. With a shortcut set it always stays visible: it is
+   the only way to remove it. :focus-within covers keyboard use. */
+.typ-frontmatter-editor .metadata-property:hover .typ-shortcut-button,
+.typ-frontmatter-editor .metadata-property:focus-within .typ-shortcut-button,
+.typ-frontmatter-editor .typ-has-shortcut .typ-shortcut-button {
   opacity: 1;
 }
 
-/* Der Chip tritt an die Stelle des Wertfelds und übernimmt dessen Platz in der
-   Zeile. Das native Widget rendert darunter unverändert weiter und wird nur
-   ausgeblendet - der dort eingetragene feste Wert bleibt damit als
-   Rückfallwert erhalten (siehe getTypeShortcuts in main.js). */
-.fred-typ-frontmatter-editor .fred-typ-has-shortcut .metadata-property-value {
+/* The chip takes the value field's place in the row. The native widget keeps
+   rendering underneath, only hidden - its fixed value stays as fallback (see
+   getTypShortcuts in main.js). */
+.typ-frontmatter-editor .typ-has-shortcut .metadata-property-value {
   display: none;
 }
 
-/* Der Chip tritt an die Stelle des Wertfelds und übernimmt deshalb dessen
-   Darstellung vollständig - über dieselben Variablen, die Obsidian bei
-   ".metadata-property-value" bzw. dessen Inputs selbst benutzt:
+/* The chip replaces the value field, so it copies its look through the
+   variables Obsidian uses on ".metadata-property-value" and its inputs:
 
-     - border-bottom: Die Trennlinie einer Property-Zeile wird zur Hälfte vom
-       Key-Element und zur Hälfte vom WERT-Element gezeichnet. Da der Chip das
-       Wertfeld ausblendet, verschwände sonst genau dessen Hälfte. Über die
-       Variablen gezeichnet folgt sie auch den Hover-/Fokus-Varianten, die
-       Obsidian auf --metadata-divider-color legt.
-     - min-height/align-self/padding: sonst stünde die Zeile mit Chip niedriger
-       als die übrigen und der Text säße nicht auf einer Linie mit dem Namen.
-     - font-size: Obsidian setzt sie INNERHALB des Wertfelds
-       (".metadata-property-value input"), was den Chip als dessen Geschwister
-       nie erreicht; als <code> läge er sonst bei --code-size. Über die
-       Variable folgt er auch der kleineren Schrift, die Obsidian für
-       Metadaten in der Seitenleiste einstellt.
-     - font-family: bewusst Monospace statt --metadata-input-font, anders als
-       beim echten Wertfeld. Ein Shortcut ist ein Bezeichner ("tp.quelle"),
-       kein Fließtext - das hebt ihn zusätzlich zur Akzentfarbe ab.
+     - border-bottom: a row's divider is drawn half by the key, half by the
+       VALUE element; with the value hidden that half would be missing. Drawn
+       via the variables, it also follows the hover/focus variants on
+       --metadata-divider-color.
+     - min-height/align-self/padding: otherwise the row would be shorter and
+       the text off the name's baseline.
+     - font-size: Obsidian sets it INSIDE the value field, which never reaches
+       the chip as a sibling; as <code> it would use --code-size. The variable
+       also follows the smaller metadata font in the sidebar.
+     - font-family: monospace on purpose, unlike the real value field. A
+       shortcut is an identifier ("tp.quelle"), not prose.
 
-   padding-inline-end hält den Text vom absolut verankerten Knopf frei (siehe
-   oben); der Platz wird dauerhaft reserviert, damit die Zeile beim Ein- und
-   Ausblenden des Knopfs nicht umbricht. */
-.fred-typ-frontmatter-editor .fred-typ-shortcut-chip {
+   padding-inline-end keeps the text clear of the absolutely placed button
+   (see above); the space is always reserved so the row doesn't reflow when
+   the button shows or hides. */
+.typ-frontmatter-editor .typ-shortcut-chip {
   display: flex;
   align-items: center;
   align-self: stretch;
@@ -1077,57 +979,47 @@ input[type="range"].fred-typ-subtype-color-slider {
   cursor: pointer;
 }
 
-.fred-typ-frontmatter-editor .fred-typ-shortcut-chip-text {
+.typ-frontmatter-editor .typ-shortcut-chip-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Property-Label (nicht der Wert) fett, wenn die Property Teil des
-   TYP-Frontmatters eines TYPs ist - im Frontmatter-Widget einer Notiz
-   (input.metadata-property-key-input) genauso wie in Obsidians "All
-   Properties"-Ansicht (div.tree-item-inner-text), daher bewusst nur die
-   Klasse als Selektor, ohne Element-Einschränkung. Dieselben Variablen wie
-   Obsidians echtes Fett (b/strong/.cm-strong: font-weight: var(--bold-weight)
-   = var(--font-weight) + var(--bold-modifier); color: var(--bold-color)),
-   statt eines festen font-weight - so passt es sich Theme/Schriftart an.
-   !important ist nötig, da Obsidians eigene Regel für das Property-Key-Input
-   sonst gewinnen würde - das schlägt aber jede nicht-!important-Regel
-   unabhängig von deren Spezifität, ganz gleich auf welchem Element. */
-.fred-typ-default-property {
+/* Property name (not the value) in bold if it belongs to a TYP's
+   TYP-Frontmatter - in a note's frontmatter widget
+   (input.metadata-property-key-input) as well as in "All properties"
+   (div.tree-item-inner-text), hence only the class as selector. Same
+   variables as Obsidian's real bold (--bold-weight, --bold-color) instead of
+   a fixed weight, so it follows theme and font. !important because
+   Obsidian's rule for the key input would win otherwise. */
+.typ-default-property {
   font-weight: var(--bold-weight) !important;
   color: var(--bold-color) !important;
 }
 
-/* Property-Label kursiv, wenn die Property als Floating Property eines TYPs
-   markiert ist (siehe typeFloatingKeys in settings.js) - dieselben
-   Fundstellen wie .fred-typ-default-property, nur font-style/--italic-*
-   statt font-weight/--bold-*, da beide Markierungen sich gegenseitig
-   ausschließen (eine Property ist entweder Standard oder Floating, nie
-   beides). Dieselben Variablen wie Obsidians echtes Kursiv (i/em/.cm-em:
-   font-style: italic; color: var(--italic-color); font-weight:
-   var(--italic-weight)), statt eines festen font-style - so passt es sich
-   Theme/Schriftart an, exakt wie beim Fett-Pendant oben. */
-.fred-typ-floating-property {
+/* Property name in italics if it is marked floating (see typFloatingKeys in
+   settings.js) - same places as .typ-default-property, just italic instead
+   of bold, since a property is either standard or floating, never both. Same
+   variables as Obsidian's real italics (--italic-color, --italic-weight), so
+   it follows theme and font like the bold counterpart. */
+.typ-floating-property {
   font-style: italic !important;
   color: var(--italic-color) !important;
   font-weight: var(--italic-weight) !important;
 }
 
-/* Globale Property-Reihenfolge (Einstellungen -> TYP) - siehe
-   frontmatter-order-editor.js. Bewusst eine eigene, schlichte Liste statt
-   Obsidians privates Metadata-Editor-Widget (siehe Kommentar oben in
-   type-frontmatter-editor.js zu dessen Stack-Overflow-Fallstricken beim
-   erneuten synchronize() aus saveFrontmatter heraus) - hier müssen zwei
-   Zeilen verschiebbar, aber nicht löschbar sein, was mit dem echten Widget
-   nicht sicher umsetzbar wäre. */
-.fred-order-list {
+/* Global property order (settings), see frontmatter-order-editor.js. A plain
+   list of its own instead of Obsidian's private metadata editor (see the
+   stack overflow pitfall of calling synchronize() from saveFrontmatter in
+   typ-frontmatter-editor.js) - here rows must be movable but not deletable,
+   which the real widget can't do safely. */
+.typ-order-list {
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   overflow: hidden;
 }
 
-.fred-order-row {
+.typ-order-row {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1136,33 +1028,30 @@ input[type="range"].fred-typ-subtype-color-slider {
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.fred-order-row:last-child {
+.typ-order-row:last-child {
   border-bottom: none;
 }
 
-.fred-order-row.is-dragging {
+.typ-order-row.is-dragging {
   opacity: 0.4;
 }
 
-/* Zeigt an, auf welcher Seite der Zeile eine gerade gezogene Zeile landen
-   würde - "before" (obere Kante) bzw. "after" (untere Kante), je nachdem, in
-   welcher Hälfte der Zeile sich der Mauszeiger befindet (siehe dragover in
-   frontmatter-order-editor.js). Ohne diese Unterscheidung landete der
-   Balken beim Ziehen auf die letzte Zeile immer über statt ggf. darunter -
-   ein Ablegen nach ganz unten war dadurch optisch nicht erkennbar. */
-.fred-order-row.is-drop-before {
+/* Shows on which side of the row a dragged row would land - "before" (top
+   edge) or "after" (bottom edge), by the half the pointer is in (see
+   dragover in frontmatter-order-editor.js). Without it, dropping below the
+   last row wasn't visible. */
+.typ-order-row.is-drop-before {
   box-shadow: inset 0 2px 0 var(--interactive-accent);
 }
 
-.fred-order-row.is-drop-after {
+.typ-order-row.is-drop-after {
   box-shadow: inset 0 -2px 0 var(--interactive-accent);
 }
 
-/* Feste Größe statt Obsidians variabler .clickable-icon-Polsterung - dadurch
-   sind Zeilen mit Entfernen-Button (fest hinzugefügte Properties) genauso
-   hoch wie die Platzhalter-Zeilen ohne Entfernen-Button. */
-.fred-order-drag,
-.fred-order-remove {
+/* Fixed size instead of Obsidian's variable .clickable-icon padding, so rows
+   with a remove button are as tall as the placeholder rows without one. */
+.typ-order-drag,
+.typ-order-remove {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1172,29 +1061,27 @@ input[type="range"].fred-typ-subtype-color-slider {
   padding: 0 !important;
 }
 
-.fred-order-drag {
+.typ-order-drag {
   cursor: grab;
   color: var(--text-faint);
 }
 
-.fred-order-label {
+.typ-order-label {
   flex: 1 1 auto;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
 
-/* "TYP Properties" ist der einzige Platzhalter, der auf einen ganzen Block
-   echter Properties verweist (statt auf eine einzelne oder den Rest) - daher
-   hier bewusst hervorgehoben statt wie die anderen beiden schlicht muted.
-   Dieselben Variablen wie Obsidians natives Fett (siehe Kommentar bei
-   .fred-typ-default-property), damit es sich mit dem Theme mitzieht statt
-   einen eigenen, festen Fett-Stil zu definieren. */
-.fred-order-row.is-typ-defaults .fred-order-label {
+/* "TYP-Frontmatter" is the only placeholder standing for a whole block of
+   real properties, so it is highlighted instead of plainly muted. Same
+   variables as Obsidian's native bold (see .typ-default-property), so it
+   follows the theme. */
+.typ-order-row.is-typ-defaults .typ-order-label {
   color: var(--bold-color);
   font-weight: var(--bold-weight);
 }
 
-.fred-order-name-input {
+.typ-order-name-input {
   flex: 1 1 auto;
   min-width: 0;
   border: none !important;
@@ -1205,28 +1092,28 @@ input[type="range"].fred-typ-subtype-color-slider {
   padding: 2px 0 !important;
 }
 
-.fred-order-name-input:focus {
+.typ-order-name-input:focus {
   background: var(--background-modifier-form-field);
 }
 
-.fred-order-remove {
+.typ-order-remove {
   color: var(--text-faint);
 }
 
-.fred-order-remove:hover {
+.typ-order-remove:hover {
   color: var(--text-error);
 }
 
-/* TYP-Picker (type-picker.js) - Zeile in Obsidians eigenem Suggester-Modal,
-   analog zur TYP-Liste selbst: Farbpunkt bzw. eingefärbter Name (je nach
-   Einstellung "TYP View einfärben"), Beschreibung muted, Notiz-Anzahl rechts. */
-.fred-typ-picker-suggestion {
+/* TYP-Picker (typ-picker.js) - a row in Obsidian's suggester, like the
+   TYP-List: dot or colored name (per "TYP-Pane" coloring), description
+   muted, note count on the right. */
+.typ-picker-suggestion {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 
-.fred-typ-picker-dot {
+.typ-picker-dot {
   width: 0.6em;
   height: 0.6em;
   border-radius: 50%;
@@ -1234,16 +1121,16 @@ input[type="range"].fred-typ-subtype-color-slider {
   align-self: center;
 }
 
-.fred-typ-picker-name {
+.typ-picker-name {
   font-weight: 600;
   flex-shrink: 0;
 }
 
-/* "TYP (Subtyp 1, Subtyp 2)" in der TYP-Auswahl des separaten Ablaufs (siehe
-   renderSubtypePreview in type-picker.js) - Klammern und Kommas muted, die
-   Namen in ihrer Farbe. Schrumpft vor der Beschreibung, damit lange Listen die
-   Zeile nicht sprengen. */
-.fred-typ-picker-subtypes {
+/* "TYP (Subtyp 1, Subtyp 2)" in the TYP choice of the separate flow (see
+   renderSubtypPreview in typ-picker.js) - brackets and commas muted, names in
+   their color. Shrinks before the description so long lists don't break the
+   row. */
+.typ-picker-subtyps {
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1252,7 +1139,7 @@ input[type="range"].fred-typ-subtype-color-slider {
   min-width: 3em;
 }
 
-.fred-typ-picker-desc {
+.typ-picker-desc {
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1260,97 +1147,94 @@ input[type="range"].fred-typ-subtype-color-slider {
   flex: 1 1 auto;
 }
 
-/* Der Zusatz der "ohne Subtyp"-Zeile im Subtyp-Picker (siehe
-   SubtypPickerModal in type-picker.js): in normaler Textfarbe, nicht muted wie
-   eine Beschreibung - die Zeile ist eine Wahl wie jede andere und hebt sich so
-   von den Subtyp-Zeilen ab, die nur aus ihrem Namen bestehen. */
-.fred-typ-picker-none {
+/* The suffix of the "no Subtyp" row in the Subtyp-Picker (see
+   SubtypPickerModal in typ-picker.js): normal text color, not muted like a
+   description - it is a choice like any other and stands apart from the
+   Subtyp rows, which are only their name. */
+.typ-picker-none {
   color: var(--text-normal);
 }
 
-.fred-typ-picker-count {
+.typ-picker-count {
   color: var(--text-faint);
   flex-shrink: 0;
   margin-left: auto;
 }
 
-/* Nicht registrierte TYPen (includeUnregistered, siehe type-picker.js) - keine
-   eigene Farbe vorhanden, daher komplett muted statt fett/eingefärbt, analog
-   zu .fred-typ-unregistered in der TYP-Liste selbst. */
-.fred-typ-picker-suggestion.fred-typ-picker-unregistered .fred-typ-picker-name {
+/* Unregistered values (includeUnregistered, see typ-picker.js) - no color of
+   their own, so fully muted, like .typ-unregistered in the TYP-List. */
+.typ-picker-suggestion.typ-picker-unregistered .typ-picker-name {
   color: var(--text-faint);
   font-weight: 400;
 }
 
-/* Subtyp-Zeile im kombinierten Picker (TypSubtypPickerModal, siehe
-   type-picker.js) - eingerückt unter ihrem TYP, in dessen Farbe, nicht fett. */
-.fred-typ-picker-suggestion.fred-typ-picker-subtype {
+/* Subtyp row in the combined picker (TypSubtypPickerModal, see
+   typ-picker.js) - indented below its TYP, in its color, not bold. */
+.typ-picker-suggestion.typ-picker-subtyp {
   padding-left: calc(var(--size-4-3) + 1.5em);
 }
 
-.fred-typ-picker-subtype .fred-typ-picker-name {
+.typ-picker-subtyp .typ-picker-name {
   font-weight: 400;
 }
 
-/* Links in Notizen (siehe link-colors.js), nur Live Preview/Quelltext: die
-   Markierung liegt dort INNERHALB von Obsidians ".cm-hmd-internal-link" und
-   trägt die TYP-Farbe als --link-color. Beim Überfahren des Links wieder die
-   normale Hover-Farbe (--link-color-hover wird nicht überschrieben, erbt also
-   den Standardwert). Im Lese-Modus braucht es keine eigene Regel - dort sitzt
-   --link-color direkt auf dem <a>, dessen eigene Regeln das schon so machen. */
-.cm-hmd-internal-link .fred-typ-link {
+/* Links in notes (see link-colors.js), Live Preview/source only: the mark sits
+   INSIDE Obsidian's ".cm-hmd-internal-link" and carries the TYP color as
+   --link-color. Hovering shows the normal hover color (--link-color-hover is
+   not overridden). Reading view needs no rule: --link-color sits directly on
+   the <a>, whose own rules handle it. */
+.cm-hmd-internal-link .typ-link {
   color: var(--link-color);
 }
 
-.cm-hmd-internal-link:hover .fred-typ-link {
+.cm-hmd-internal-link:hover .typ-link {
   color: var(--link-color-hover);
 }
 
 /* ============================================================
-   Base-Dialoge (siehe base-dialogs.js)
+   Base dialogs (see base-dialogs.js)
    ============================================================ */
 
-/* Vorschau der Spaltenliste unter den drei Schaltern: die Spalten als Chips
-   in genau der Reihenfolge, in der sie in der View stehen werden. Eigener
-   Rahmen nach oben, damit die Liste nicht als vierte Einstellungszeile
-   missverstanden wird. */
-.fred-base-preview {
+/* Preview of the column list below the three toggles: the columns as chips in
+   exactly the order the view will have. A top border so the list isn't
+   mistaken for a fourth setting row. */
+.typ-base-preview {
   border-top: 1px solid var(--background-modifier-border);
   margin-top: var(--size-4-3);
   padding-top: var(--size-4-3);
 }
 
-.fred-base-preview-title {
+.typ-base-preview-title {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   margin-bottom: var(--size-4-2);
 }
 
-.fred-base-preview-list {
+.typ-base-preview-list {
   display: flex;
   flex-wrap: wrap;
   gap: var(--size-2-2);
-  /* Ein TYP mit vielen Subtyp-Properties käme sonst über die Modalhöhe
-     hinaus und schöbe die Knopfzeile aus dem Blick. */
+  /* A TYP with many Subtyp properties would otherwise exceed the modal height
+     and push the buttons out of view. */
   max-height: 12em;
   overflow-y: auto;
 }
 
-.fred-base-preview-column {
+.typ-base-preview-column {
   background-color: var(--background-modifier-hover);
   border-radius: var(--radius-s);
   font-size: var(--font-ui-smaller);
   padding: 0 var(--size-2-2);
 }
 
-/* Die Zeilen des Entfernen-Dialogs sind reine Ja/Nein-Fragen ohne
-   Beschreibung - Obsidians Standardabstand je Setting-Zeile ist dafür zu
-   luftig, sobald eine View ein Dutzend fremder Spalten führt. */
-.fred-base-removal-modal .setting-item {
+/* The rows of the removal dialog are plain yes/no questions without a
+   description - Obsidian's default spacing per setting is too airy once a
+   view has a dozen foreign columns. */
+.typ-base-removal-modal .setting-item {
   padding: var(--size-2-2) 0;
 }
 
-.fred-base-removal-intro {
+.typ-base-removal-intro {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   margin-top: 0;

@@ -2,11 +2,11 @@ const { Events, TFile, debounce } = require("obsidian");
 
 const TYP_PROPERTY = "TYP";
 const SUBTYP_PROPERTY = "SUBTYP";
-const EMPTY_ENTRY = Object.freeze({ typeKey: null, rawType: null, subtypeKey: null, rawSubtype: null });
+const EMPTY_ENTRY = Object.freeze({ typKey: null, rawTyp: null, subtypKey: null, rawSubtyp: null });
 
-// Sammelt Änderungen mehrerer Dateien (z. B. Umbenennen eines TYPs in vielen
-// Notizen, Vault-Sync) zu einem einzigen "change"-Event. Ohne resetTimer, damit
-// ein Dauerstrom an Änderungen trotzdem regelmäßig durchgereicht wird.
+// Collects changes to many files (renaming a TYP in many notes, sync) into one
+// "change" event. No resetTimer, so a constant stream still gets through
+// regularly.
 const FLUSH_DELAY_MS = 100;
 
 function rawItem(value) {
@@ -14,17 +14,14 @@ function rawItem(value) {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-// Einheitliche Auslegung eines TYP-Werts für das ganze Plugin: der Wert wird
-// bewusst NICHT geglättet, sondern in seiner Rohform zum Schlüssel - ein TYP ist
-// genau ein einzelner, sauberer Wert. Alles andere (Leerzeichen am Rand, klein
-// geschrieben, Liste - auch eine einelementige) ergibt einen eigenen Schlüssel,
-// der in keinem registrierten TYP aufgeht: er bekommt keine Farbe, zählt nicht
-// beim "richtigen" TYP mit und steht in der TYP-View als eigener,
-// unregistrierter Eintrag, von wo aus er sich per Klick bereinigen lässt
-// (siehe registerType in typ-view.js). Listen erscheinen dabei als
-// "[A, B]" und können so nie mit einem Einzelwert "A, B" zusammenfallen.
-// null = kein TYP (fehlend, leer, nur Leerzeichen, leere Liste).
-function typeKeyOf(value) {
+// How the whole plugin reads a TYP value: deliberately NOT normalized - the
+// raw form is the key. A TYP is exactly one clean value; anything else (padded,
+// lowercase, a list - even with one item) becomes its own key that matches no
+// registered TYP: no color, not counted for the "real" TYP, and listed in the
+// TYP-Pane as an unregistered entry that a click cleans up (see registerTyp in
+// typ-pane.js). Lists show as "[A, B]" and never coincide with a value "A, B".
+// null = no TYP (missing, empty, blank, empty list).
+function typKeyOf(value) {
   if (Array.isArray(value)) {
     const items = value.map(rawItem);
     if (items.every((item) => item.trim() === "")) return null;
@@ -34,10 +31,9 @@ function typeKeyOf(value) {
   return text.trim() === "" ? null : text;
 }
 
-// Obsidian behandelt Property-Namen ohne Beachtung der Groß-/Kleinschreibung
-// ("Subtyp" und "SUBTYP" sind in "All properties" dieselbe Property) - TYP
-// und SUBTYP werden deshalb genauso gelesen. Die exakte Schreibweise hat
-// Vorrang, falls eine Notiz (fehlerhaft) mehrere Varianten trägt.
+// Obsidian treats property names case-insensitively ("Subtyp" and "SUBTYP"
+// are one property in "All properties"), so TYP and SUBTYP are read the same
+// way. The exact spelling wins if a note (wrongly) has several.
 function propertyKeyOf(frontmatter, name) {
   if (!frontmatter) return undefined;
   if (Object.prototype.hasOwnProperty.call(frontmatter, name)) return name;
@@ -50,11 +46,10 @@ function propertyValue(frontmatter, name) {
   return key === undefined ? undefined : frontmatter[key];
 }
 
-// Schreibt value unter der einheitlichen Schreibweise name (z. B. "SUBTYP")
-// in das von processFrontMatter gelieferte Objekt. Eine abweichend
-// geschriebene Variante ("Subtyp") wird dabei an Ort und Stelle umbenannt -
-// Objekt-Insertion-Order bestimmt die YAML-Reihenfolge, daher bei Bedarf alle
-// Keys in bisheriger Reihenfolge neu einfügen (wie in frontmatter-sort.js).
+// Writes value under the canonical spelling `name` (e.g. "SUBTYP") into the
+// processFrontMatter object. A differently spelled variant ("Subtyp") is
+// renamed in place - insertion order is YAML order, so all keys are re-added
+// in their order if needed (as in frontmatter-sort.js).
 function setCanonicalProperty(frontmatter, name, value) {
   const lower = name.toLowerCase();
   const keys = Object.keys(frontmatter);
@@ -70,8 +65,7 @@ function setCanonicalProperty(frontmatter, name, value) {
   }
 }
 
-// Entfernt name in jeder Schreibweise aus dem von processFrontMatter
-// gelieferten Objekt.
+// Removes `name` in any spelling from the processFrontMatter object.
 function deleteProperty(frontmatter, name) {
   const lower = name.toLowerCase();
   for (const key of Object.keys(frontmatter)) {
@@ -79,26 +73,22 @@ function deleteProperty(frontmatter, name) {
   }
 }
 
-// SUBTYP wird genauso ausgelegt (typeKeyOf): eine Notiz hat höchstens einen
-// SUBTYP als sauberen Einzelwert, alles andere ist ein eigener, nicht
-// erfasster Schlüssel (siehe Subtyp-Blöcke in der TYP-Detailansicht).
+// SUBTYP is read the same way (typKeyOf): at most one clean value per note,
+// anything else is its own unregistered key.
 function sameEntry(a, b) {
-  return !!a && !!b && a.typeKey === b.typeKey && a.subtypeKey === b.subtypeKey;
+  return !!a && !!b && a.typKey === b.typKey && a.subtypKey === b.subtypKey;
 }
 
-// Zentraler TYP-/SUBTYP-Index über alle Markdown-Dateien (Pfad -> Werte).
+// Central TYP/SUBTYP index over all markdown files (path -> values).
 //
-// Zweck: die Farb-Module hingen bisher alle direkt an metadataCache "changed"
-// und "resolved" - beide feuern bei JEDER Änderung an irgendeiner Notiz (beim
-// Tippen etwa alle zwei Sekunden), und jedes Modul färbte daraufhin seine
-// komplette Ansicht neu, doppelt. Der Index vergleicht stattdessen je Datei, ob
-// sich TYP oder SUBTYP tatsächlich geändert hat (bzw. eine Notiz hinzukam/
-// wegfiel), und feuert nur dann sein eigenes "change"-Event (Argument: Set der
-// betroffenen Pfade). Normales Schreiben löst damit gar kein Neu-Einfärben mehr aus.
+// metadataCache "changed"/"resolved" fire on EVERY edit to any note (about
+// every two seconds while typing). The index compares per file whether TYP or
+// SUBTYP really changed (or a note appeared/disappeared) and only then fires
+// its own "change" event (argument: set of affected paths). All coloring hangs
+// on this event, so normal typing triggers no recoloring.
 //
-// Zusätzlich hält er die vault-weiten Zählungen (TYP-Liste, SUBTYP-Liste,
-// Picker, getTypes() für Templater) zwischengespeichert, statt sie bei jedem
-// Aufruf per Scan über alle Notizen neu zu berechnen.
+// It also caches the vault-wide counts (TYP-List, Subtyp list, pickers,
+// getTyps()) instead of rescanning every note on each call.
 class TypIndex extends Events {
   constructor(plugin) {
     super();
@@ -120,14 +110,13 @@ class TypIndex extends Events {
     plugin.registerEvent(app.metadataCache.on("changed", (file) => this.update(file)));
     plugin.registerEvent(app.metadataCache.on("deleted", (file) => this.remove(file.path)));
     plugin.registerEvent(app.vault.on("rename", (file, oldPath) => this.rename(file, oldPath)));
-    // "Excluded files"-Liste geändert (siehe registerTypView) - die Einträge
-    // selbst bleiben gültig, nur die daraus gefilterten Zählungen nicht.
+    // "Excluded files" changed: the entries stay valid, only the filtered
+    // counts don't.
     plugin.registerEvent(app.vault.on("config-changed", () => (this.aggregates = null)));
 
-    // Beim App-Start kann der erste Zugriff (lazy, siehe ensureBuilt) noch vor
-    // dem vollständig geladenen MetadataCache liegen. Einmalig nach dessen
-    // erstem kompletten Auflösungsdurchlauf neu aufbauen; Abweichungen landen
-    // dabei wie jede andere Änderung im "change"-Event.
+    // At startup the first (lazy) access can come before the metadata cache is
+    // fully loaded. Rebuild once after its first complete resolve; differences
+    // go out through the "change" event like any other change.
     const resolvedRef = app.metadataCache.on("resolved", () => {
       app.metadataCache.offref(resolvedRef);
       this.rebuild();
@@ -139,9 +128,9 @@ class TypIndex extends Events {
 
   read(file) {
     const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    const rawType = propertyValue(frontmatter, TYP_PROPERTY) ?? null;
-    const rawSubtype = propertyValue(frontmatter, SUBTYP_PROPERTY) ?? null;
-    return { typeKey: typeKeyOf(rawType), rawType, subtypeKey: typeKeyOf(rawSubtype), rawSubtype };
+    const rawTyp = propertyValue(frontmatter, TYP_PROPERTY) ?? null;
+    const rawSubtyp = propertyValue(frontmatter, SUBTYP_PROPERTY) ?? null;
+    return { typKey: typKeyOf(rawTyp), rawTyp, subtypKey: typKeyOf(rawSubtyp), rawSubtyp };
   }
 
   ensureBuilt() {
@@ -173,8 +162,8 @@ class TypIndex extends Events {
   }
 
   update(file) {
-    // Vor dem ersten Zugriff gibt es noch keinen veralteten Stand - der
-    // spätere lazy Aufbau liest ohnehin frisch aus dem MetadataCache.
+    // Before the first access there is nothing stale; the lazy build reads
+    // fresh from the cache anyway.
     if (!this.built || !(file instanceof TFile) || file.extension !== "md") return;
     const next = this.read(file);
     if (sameEntry(this.entries.get(file.path), next)) return;
@@ -206,41 +195,37 @@ class TypIndex extends Events {
     return this.entries.get(file.path) ?? EMPTY_ENTRY;
   }
 
-  // TYP-Schlüssel (siehe typeKeyOf) oder null. Für einen sauberen Wert ist das
-  // schlicht der TYP-Name selbst.
-  typeOf(file) {
-    return this.entryFor(file).typeKey;
+  // TYP key (see typKeyOf) or null; for a clean value simply the TYP name.
+  typOf(file) {
+    return this.entryFor(file).typKey;
   }
 
-  // SUBTYP-Schlüssel (siehe typeKeyOf) oder null.
-  subtypeOf(file) {
-    return this.entryFor(file).subtypeKey;
+  // SUBTYP key (see typKeyOf) or null.
+  subtypOf(file) {
+    return this.entryFor(file).subtypKey;
   }
 
-  // Ein tatsächlicher Frontmatter-Wert zu einem Schlüssel - für Anzeige, Suche
-  // und Normalisierung unregistrierter Einträge (alle Notizen eines Schlüssels
-  // haben per Definition dieselbe Rohform).
-  rawValueOf(typeKey) {
-    return this.aggregate().rawByKey.get(typeKey);
+  // An actual frontmatter value for a key - for display, search and cleaning
+  // up unregistered entries (all notes of a key share the same raw form).
+  rawValueOf(typKey) {
+    return this.aggregate().rawByKey.get(typKey);
   }
 
-  // Sauberer Wert = Einzelwert ohne Leerzeichen am Rand. Klein geschriebene
-  // Werte zählen hier als sauber (sie sind ein gültiger, nur noch nicht
-  // registrierter TYP-Name), Listen und Randleerzeichen nicht.
-  isCleanKey(typeKey) {
-    const raw = this.rawValueOf(typeKey);
-    return raw !== undefined && !Array.isArray(raw) && typeKey === typeKey.trim();
+  // Clean = a single value without padding. Lowercase counts as clean (a valid
+  // TYP name, just not registered yet); lists and padding don't.
+  isCleanKey(typKey) {
+    const raw = this.rawValueOf(typKey);
+    return raw !== undefined && !Array.isArray(raw) && typKey === typKey.trim();
   }
 
-  // Dateien mit genau diesem TYP-Schlüssel, unter Beachtung der
-  // "Ignorierte Notizen berücksichtigen"-Einstellung.
-  filesWithType(typeKey) {
-    return this.filesMatching((entry) => entry.typeKey === typeKey);
+  // Files with exactly this TYP key, honoring the excluded-files setting.
+  filesWithTyp(typKey) {
+    return this.filesMatching((entry) => entry.typKey === typKey);
   }
 
-  // Dateien mit genau diesem TYP- und SUBTYP-Schlüssel.
-  filesWithSubtype(typeKey, subtypeKey) {
-    return this.filesMatching((entry) => entry.typeKey === typeKey && entry.subtypeKey === subtypeKey);
+  // Files with exactly this TYP and SUBTYP key.
+  filesWithSubtyp(typKey, subtypKey) {
+    return this.filesMatching((entry) => entry.typKey === typKey && entry.subtypKey === subtypKey);
   }
 
   filesMatching(predicate) {
@@ -256,11 +241,9 @@ class TypIndex extends Events {
     return files;
   }
 
-  // Respektiert standardmäßig Obsidians eigene "Excluded files"-Liste - dort
-  // tragen auch Plugins wie Hide Folders ausgeblendete Ordner ein. Über die
-  // Einstellung "Ignorierte Notizen berücksichtigen" abschaltbar.
-  //
-  // Eine Notiz ohne TYP hat keinen SUBTYP-Kontext.
+  // Honors Obsidian's "Excluded files" (where Hide Folders also puts hidden
+  // folders) unless "Include excluded files" is on. A note without a TYP has
+  // no SUBTYP context.
   aggregate() {
     this.ensureBuilt();
     const includeIgnored = !!this.plugin.settings.includeIgnoredFiles;
@@ -268,49 +251,49 @@ class TypIndex extends Events {
 
     const counts = new Map();
     const rawByKey = new Map();
-    const subtypesByType = new Map();
-    let noType = 0;
-    for (const [path, { typeKey, rawType, subtypeKey, rawSubtype }] of this.entries) {
+    const subtypsByTyp = new Map();
+    let noTyp = 0;
+    for (const [path, { typKey, rawTyp, subtypKey, rawSubtyp }] of this.entries) {
       if (!includeIgnored && this.app.metadataCache.isUserIgnored(path)) continue;
-      if (typeKey === null) {
-        noType++;
+      if (typKey === null) {
+        noTyp++;
         continue;
       }
-      counts.set(typeKey, (counts.get(typeKey) ?? 0) + 1);
-      if (!rawByKey.has(typeKey)) rawByKey.set(typeKey, rawType);
-      let bucket = subtypesByType.get(typeKey);
+      counts.set(typKey, (counts.get(typKey) ?? 0) + 1);
+      if (!rawByKey.has(typKey)) rawByKey.set(typKey, rawTyp);
+      let bucket = subtypsByTyp.get(typKey);
       if (!bucket) {
-        bucket = { counts: new Map(), noSubtype: 0, rawByKey: new Map() };
-        subtypesByType.set(typeKey, bucket);
+        bucket = { counts: new Map(), noSubtyp: 0, rawByKey: new Map() };
+        subtypsByTyp.set(typKey, bucket);
       }
-      if (subtypeKey === null) {
-        bucket.noSubtype++;
+      if (subtypKey === null) {
+        bucket.noSubtyp++;
       } else {
-        bucket.counts.set(subtypeKey, (bucket.counts.get(subtypeKey) ?? 0) + 1);
-        if (!bucket.rawByKey.has(subtypeKey)) bucket.rawByKey.set(subtypeKey, rawSubtype);
+        bucket.counts.set(subtypKey, (bucket.counts.get(subtypKey) ?? 0) + 1);
+        if (!bucket.rawByKey.has(subtypKey)) bucket.rawByKey.set(subtypKey, rawSubtyp);
       }
     }
-    this.aggregates = { includeIgnored, counts, noType, rawByKey, subtypesByType };
+    this.aggregates = { includeIgnored, counts, noTyp, rawByKey, subtypsByTyp };
     return this.aggregates;
   }
 
-  // Zwischengespeichert - die gelieferten Maps nicht verändern.
-  typeCounts() {
-    const { counts, noType } = this.aggregate();
-    return { counts, noType };
+  // Cached - don't modify the returned maps.
+  typCounts() {
+    const { counts, noTyp } = this.aggregate();
+    return { counts, noTyp };
   }
 
-  // TYP -> { counts: Map(SUBTYP-Schlüssel -> Anzahl), noSubtype, rawByKey }.
-  // Zwischengespeichert - nicht verändern.
-  subtypeCounts() {
-    return this.aggregate().subtypesByType;
+  // TYP -> { counts: Map(SUBTYP key -> count), noSubtyp, rawByKey }.
+  // Cached - don't modify.
+  subtypCounts() {
+    return this.aggregate().subtypsByTyp;
   }
 
-  subtypeBucket(typeKey) {
-    return this.subtypeCounts().get(typeKey) ?? EMPTY_BUCKET;
+  subtypBucket(typKey) {
+    return this.subtypCounts().get(typKey) ?? EMPTY_BUCKET;
   }
 }
 
-const EMPTY_BUCKET = Object.freeze({ counts: new Map(), noSubtype: 0, rawByKey: new Map() });
+const EMPTY_BUCKET = Object.freeze({ counts: new Map(), noSubtyp: 0, rawByKey: new Map() });
 
-module.exports = { TypIndex, typeKeyOf, propertyValue, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY };
+module.exports = { TypIndex, typKeyOf, propertyValue, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY };

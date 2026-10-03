@@ -1,33 +1,31 @@
 const { Modal, Setting } = require("obsidian");
+const { plural } = require("./typ-utils");
 
 /* ============================================================
- * Die beiden Dialoge der Base-Befehle (siehe bases.js)
- *  - Spalten-Optionen vor dem Anlegen/Aktualisieren
- *  - Bestätigung der Entfernungen beim Aktualisieren
+ * The two dialogs of the Base commands (see bases.js):
+ *  - column options before creating/updating
+ *  - confirming removals when updating
  * ============================================================ */
 
 const NOTE_PREFIX = "note.";
 
-// Anzeigename einer Spalte: dieselbe verkürzte Form, in der die Property auch
-// in der .base-Datei steht ("Titel" statt "note.Titel").
+// Column label: the short form the property has in the .base file
+// ("Titel" instead of "note.Titel").
 function columnLabel(id) {
   return id.startsWith(NOTE_PREFIX) ? id.slice(NOTE_PREFIX.length) : id;
 }
 
 function targetLabel(target) {
-  if (!target.type) return `Subtyp ${target.subtype}`;
-  return target.subtype ? `${target.type} / ${target.subtype}` : `TYP ${target.type}`;
+  if (!target.typ) return `Subtyp ${target.subtyp}`;
+  return target.subtyp ? `${target.typ} / ${target.subtyp}` : `TYP ${target.typ}`;
 }
 
-/* --- Spalten-Optionen ---------------------------------------------------- */
+/* --- Column options ------------------------------------------------------ */
 
-// Drei Schalter, alle standardmäßig aus - der schmale Satz (file.name plus
-// TYP-Frontmatter) ist der Normalfall. Darunter die Vorschau der Spalten, die
-// dabei herauskommen; sie wird bei jeder Änderung neu berechnet, damit die
-// Wirkung eines Schalters nicht erraten werden muss.
-//
-// "Alle Subtyp-Properties" erscheint nur bei einem TYP-Ziel: in einer
-// Subtyp-View blieben die Properties der übrigen Subtypen durchweg leer.
+// Three toggles, all off by default (file.name plus TYP-Frontmatter is the
+// normal case), with a live preview of the resulting columns so a toggle's
+// effect needn't be guessed. "All Subtyp properties" only shows for a TYP
+// target: in a Subtyp view the other Subtyp blocks would stay empty.
 class ColumnOptionsModal extends Modal {
   constructor(plugin, target, preview, resolve) {
     super(plugin.app);
@@ -35,14 +33,14 @@ class ColumnOptionsModal extends Modal {
     this.target = target;
     this.preview = preview;
     this.resolve = resolve;
-    this.options = { floating: false, allSubtypes: false, tags: false };
+    this.options = { floating: false, allSubtyps: false, tags: false };
     this.confirmed = false;
   }
 
   onOpen() {
     const { contentEl } = this;
-    this.modalEl.addClass("fred-base-options-modal");
-    this.titleEl.setText(`Spalten für ${targetLabel(this.target)}`);
+    this.modalEl.addClass("typ-base-options-modal");
+    this.titleEl.setText(`Columns for ${targetLabel(this.target)}`);
 
     const toggle = (name, description, key) => {
       new Setting(contentEl)
@@ -56,18 +54,18 @@ class ColumnOptionsModal extends Modal {
         );
     };
 
-    toggle("Floating Properties", "Die kursiv markierten Properties des Blocks mitnehmen.", "floating");
-    if (!this.target.subtype) {
-      toggle("Alle Subtyp-Properties", "Zusätzlich die Properties sämtlicher Subtyp-Blöcke dieses TYPs.", "allSubtypes");
+    toggle("Floating properties", "Include the block's floating (italic) properties.", "floating");
+    if (!this.target.subtyp) {
+      toggle("All Subtyp properties", "Also include the properties of every Subtyp block of this TYP.", "allSubtyps");
     }
-    toggle("tags", "Die tags-Property als eigene Spalte.", "tags");
+    toggle("tags", "Add the tags property as a column.", "tags");
 
-    this.previewEl = contentEl.createDiv({ cls: "fred-base-preview" });
+    this.previewEl = contentEl.createDiv({ cls: "typ-base-preview" });
     this.renderPreview();
 
     const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
-    const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "Übernehmen" });
+    buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "Apply" });
     confirm.addEventListener("click", () => {
       this.confirmed = true;
       this.close();
@@ -77,15 +75,14 @@ class ColumnOptionsModal extends Modal {
   renderPreview() {
     const ids = this.preview(this.options);
     this.previewEl.empty();
-    this.previewEl.createDiv({ cls: "fred-base-preview-title", text: `${ids.length} Spalte(n)` });
-    const list = this.previewEl.createDiv({ cls: "fred-base-preview-list" });
-    for (const id of ids) list.createSpan({ cls: "fred-base-preview-column", text: columnLabel(id) });
+    this.previewEl.createDiv({ cls: "typ-base-preview-title", text: plural(ids.length, "column") });
+    const list = this.previewEl.createDiv({ cls: "typ-base-preview-list" });
+    for (const id of ids) list.createSpan({ cls: "typ-base-preview-column", text: columnLabel(id) });
   }
 
   onClose() {
     this.contentEl.empty();
-    // ESC bzw. Klick daneben zählt wie Abbrechen - sonst liefe der Befehl mit
-    // einer Auswahl weiter, die gar nicht bestätigt wurde.
+    // ESC or a click outside counts as cancel.
     this.resolve(this.confirmed ? this.options : null);
   }
 }
@@ -94,12 +91,11 @@ function askColumnOptions(plugin, target, preview) {
   return new Promise((resolve) => new ColumnOptionsModal(plugin, target, preview, resolve).open());
 }
 
-/* --- Entfernungen bestätigen --------------------------------------------- */
+/* --- Confirm removals ---------------------------------------------------- */
 
-// Beim Aktualisieren laufen Ergänzen und Umsortieren stumm durch; nur das
-// Entfernen wird vorgelegt, denn nur dort geht etwas verloren. Alle Einträge
-// sind vorbelegt, einzeln abwählbar - eine abgewählte Spalte bleibt stehen
-// (vorn, siehe updateActiveView).
+// Adding and reordering columns happen silently; only removing is shown,
+// because only that loses something. Every entry starts checked; an unchecked
+// column is kept (at the front, see updateActiveView).
 class RemovalModal extends Modal {
   constructor(plugin, columns, viewName, resolve) {
     super(plugin.app);
@@ -112,11 +108,11 @@ class RemovalModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    this.modalEl.addClass("fred-base-removal-modal");
-    this.titleEl.setText(`Spalten entfernen aus "${this.viewName}"`);
+    this.modalEl.addClass("typ-base-removal-modal");
+    this.titleEl.setText(`Remove columns from "${this.viewName}"`);
     contentEl.createEl("p", {
-      cls: "fred-base-removal-intro",
-      text: "Diese Spalten gehören nicht zum TYP. Abgewählte bleiben stehen.",
+      cls: "typ-base-removal-intro",
+      text: "These columns don't belong to the TYP. Unchecked ones are kept.",
     });
 
     for (const id of this.columns) {
@@ -129,8 +125,8 @@ class RemovalModal extends Modal {
     }
 
     const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
-    const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "Übernehmen" });
+    buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+    const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "Apply" });
     confirm.addEventListener("click", () => {
       this.confirmed = true;
       this.close();

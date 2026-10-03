@@ -9,13 +9,13 @@ var require_typ_index = __commonJS({
     var { Events, TFile, debounce } = require("obsidian");
     var TYP_PROPERTY2 = "TYP";
     var SUBTYP_PROPERTY2 = "SUBTYP";
-    var EMPTY_ENTRY = Object.freeze({ typeKey: null, rawType: null, subtypeKey: null, rawSubtype: null });
+    var EMPTY_ENTRY = Object.freeze({ typKey: null, rawTyp: null, subtypKey: null, rawSubtyp: null });
     var FLUSH_DELAY_MS = 100;
     function rawItem(value) {
       if (value == null) return "";
       return typeof value === "object" ? JSON.stringify(value) : String(value);
     }
-    function typeKeyOf(value) {
+    function typKeyOf(value) {
       if (Array.isArray(value)) {
         const items = value.map(rawItem);
         if (items.every((item) => item.trim() === "")) return null;
@@ -55,7 +55,7 @@ var require_typ_index = __commonJS({
       }
     }
     function sameEntry(a, b) {
-      return !!a && !!b && a.typeKey === b.typeKey && a.subtypeKey === b.subtypeKey;
+      return !!a && !!b && a.typKey === b.typKey && a.subtypKey === b.subtypKey;
     }
     var TypIndex2 = class extends Events {
       constructor(plugin) {
@@ -87,9 +87,9 @@ var require_typ_index = __commonJS({
       }
       read(file) {
         const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-        const rawType = propertyValue(frontmatter, TYP_PROPERTY2) ?? null;
-        const rawSubtype = propertyValue(frontmatter, SUBTYP_PROPERTY2) ?? null;
-        return { typeKey: typeKeyOf(rawType), rawType, subtypeKey: typeKeyOf(rawSubtype), rawSubtype };
+        const rawTyp = propertyValue(frontmatter, TYP_PROPERTY2) ?? null;
+        const rawSubtyp = propertyValue(frontmatter, SUBTYP_PROPERTY2) ?? null;
+        return { typKey: typKeyOf(rawTyp), rawTyp, subtypKey: typKeyOf(rawSubtyp), rawSubtyp };
       }
       ensureBuilt() {
         if (!this.built) this.rebuild();
@@ -143,36 +143,32 @@ var require_typ_index = __commonJS({
         this.ensureBuilt();
         return this.entries.get(file.path) ?? EMPTY_ENTRY;
       }
-      // TYP-Schlüssel (siehe typeKeyOf) oder null. Für einen sauberen Wert ist das
-      // schlicht der TYP-Name selbst.
-      typeOf(file) {
-        return this.entryFor(file).typeKey;
+      // TYP key (see typKeyOf) or null; for a clean value simply the TYP name.
+      typOf(file) {
+        return this.entryFor(file).typKey;
       }
-      // SUBTYP-Schlüssel (siehe typeKeyOf) oder null.
-      subtypeOf(file) {
-        return this.entryFor(file).subtypeKey;
+      // SUBTYP key (see typKeyOf) or null.
+      subtypOf(file) {
+        return this.entryFor(file).subtypKey;
       }
-      // Ein tatsächlicher Frontmatter-Wert zu einem Schlüssel - für Anzeige, Suche
-      // und Normalisierung unregistrierter Einträge (alle Notizen eines Schlüssels
-      // haben per Definition dieselbe Rohform).
-      rawValueOf(typeKey) {
-        return this.aggregate().rawByKey.get(typeKey);
+      // An actual frontmatter value for a key - for display, search and cleaning
+      // up unregistered entries (all notes of a key share the same raw form).
+      rawValueOf(typKey) {
+        return this.aggregate().rawByKey.get(typKey);
       }
-      // Sauberer Wert = Einzelwert ohne Leerzeichen am Rand. Klein geschriebene
-      // Werte zählen hier als sauber (sie sind ein gültiger, nur noch nicht
-      // registrierter TYP-Name), Listen und Randleerzeichen nicht.
-      isCleanKey(typeKey) {
-        const raw = this.rawValueOf(typeKey);
-        return raw !== void 0 && !Array.isArray(raw) && typeKey === typeKey.trim();
+      // Clean = a single value without padding. Lowercase counts as clean (a valid
+      // TYP name, just not registered yet); lists and padding don't.
+      isCleanKey(typKey) {
+        const raw = this.rawValueOf(typKey);
+        return raw !== void 0 && !Array.isArray(raw) && typKey === typKey.trim();
       }
-      // Dateien mit genau diesem TYP-Schlüssel, unter Beachtung der
-      // "Ignorierte Notizen berücksichtigen"-Einstellung.
-      filesWithType(typeKey) {
-        return this.filesMatching((entry) => entry.typeKey === typeKey);
+      // Files with exactly this TYP key, honoring the excluded-files setting.
+      filesWithTyp(typKey) {
+        return this.filesMatching((entry) => entry.typKey === typKey);
       }
-      // Dateien mit genau diesem TYP- und SUBTYP-Schlüssel.
-      filesWithSubtype(typeKey, subtypeKey) {
-        return this.filesMatching((entry) => entry.typeKey === typeKey && entry.subtypeKey === subtypeKey);
+      // Files with exactly this TYP and SUBTYP key.
+      filesWithSubtyp(typKey, subtypKey) {
+        return this.filesMatching((entry) => entry.typKey === typKey && entry.subtypKey === subtypKey);
       }
       filesMatching(predicate) {
         this.ensureBuilt();
@@ -186,171 +182,113 @@ var require_typ_index = __commonJS({
         }
         return files;
       }
-      // Respektiert standardmäßig Obsidians eigene "Excluded files"-Liste - dort
-      // tragen auch Plugins wie Hide Folders ausgeblendete Ordner ein. Über die
-      // Einstellung "Ignorierte Notizen berücksichtigen" abschaltbar.
-      //
-      // Eine Notiz ohne TYP hat keinen SUBTYP-Kontext.
+      // Honors Obsidian's "Excluded files" (where Hide Folders also puts hidden
+      // folders) unless "Include excluded files" is on. A note without a TYP has
+      // no SUBTYP context.
       aggregate() {
         this.ensureBuilt();
         const includeIgnored = !!this.plugin.settings.includeIgnoredFiles;
         if (this.aggregates?.includeIgnored === includeIgnored) return this.aggregates;
         const counts = /* @__PURE__ */ new Map();
         const rawByKey = /* @__PURE__ */ new Map();
-        const subtypesByType = /* @__PURE__ */ new Map();
-        let noType = 0;
-        for (const [path, { typeKey, rawType, subtypeKey, rawSubtype }] of this.entries) {
+        const subtypsByTyp = /* @__PURE__ */ new Map();
+        let noTyp = 0;
+        for (const [path, { typKey, rawTyp, subtypKey, rawSubtyp }] of this.entries) {
           if (!includeIgnored && this.app.metadataCache.isUserIgnored(path)) continue;
-          if (typeKey === null) {
-            noType++;
+          if (typKey === null) {
+            noTyp++;
             continue;
           }
-          counts.set(typeKey, (counts.get(typeKey) ?? 0) + 1);
-          if (!rawByKey.has(typeKey)) rawByKey.set(typeKey, rawType);
-          let bucket = subtypesByType.get(typeKey);
+          counts.set(typKey, (counts.get(typKey) ?? 0) + 1);
+          if (!rawByKey.has(typKey)) rawByKey.set(typKey, rawTyp);
+          let bucket = subtypsByTyp.get(typKey);
           if (!bucket) {
-            bucket = { counts: /* @__PURE__ */ new Map(), noSubtype: 0, rawByKey: /* @__PURE__ */ new Map() };
-            subtypesByType.set(typeKey, bucket);
+            bucket = { counts: /* @__PURE__ */ new Map(), noSubtyp: 0, rawByKey: /* @__PURE__ */ new Map() };
+            subtypsByTyp.set(typKey, bucket);
           }
-          if (subtypeKey === null) {
-            bucket.noSubtype++;
+          if (subtypKey === null) {
+            bucket.noSubtyp++;
           } else {
-            bucket.counts.set(subtypeKey, (bucket.counts.get(subtypeKey) ?? 0) + 1);
-            if (!bucket.rawByKey.has(subtypeKey)) bucket.rawByKey.set(subtypeKey, rawSubtype);
+            bucket.counts.set(subtypKey, (bucket.counts.get(subtypKey) ?? 0) + 1);
+            if (!bucket.rawByKey.has(subtypKey)) bucket.rawByKey.set(subtypKey, rawSubtyp);
           }
         }
-        this.aggregates = { includeIgnored, counts, noType, rawByKey, subtypesByType };
+        this.aggregates = { includeIgnored, counts, noTyp, rawByKey, subtypsByTyp };
         return this.aggregates;
       }
-      // Zwischengespeichert - die gelieferten Maps nicht verändern.
-      typeCounts() {
-        const { counts, noType } = this.aggregate();
-        return { counts, noType };
+      // Cached - don't modify the returned maps.
+      typCounts() {
+        const { counts, noTyp } = this.aggregate();
+        return { counts, noTyp };
       }
-      // TYP -> { counts: Map(SUBTYP-Schlüssel -> Anzahl), noSubtype, rawByKey }.
-      // Zwischengespeichert - nicht verändern.
-      subtypeCounts() {
-        return this.aggregate().subtypesByType;
+      // TYP -> { counts: Map(SUBTYP key -> count), noSubtyp, rawByKey }.
+      // Cached - don't modify.
+      subtypCounts() {
+        return this.aggregate().subtypsByTyp;
       }
-      subtypeBucket(typeKey) {
-        return this.subtypeCounts().get(typeKey) ?? EMPTY_BUCKET;
+      subtypBucket(typKey) {
+        return this.subtypCounts().get(typKey) ?? EMPTY_BUCKET;
       }
     };
-    var EMPTY_BUCKET = Object.freeze({ counts: /* @__PURE__ */ new Map(), noSubtype: 0, rawByKey: /* @__PURE__ */ new Map() });
-    module2.exports = { TypIndex: TypIndex2, typeKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, deleteProperty: deleteProperty2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 };
+    var EMPTY_BUCKET = Object.freeze({ counts: /* @__PURE__ */ new Map(), noSubtyp: 0, rawByKey: /* @__PURE__ */ new Map() });
+    module2.exports = { TypIndex: TypIndex2, typKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, deleteProperty: deleteProperty2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 };
   }
 });
 
-// src/subtypes.js
-var require_subtypes = __commonJS({
-  "src/subtypes.js"(exports2, module2) {
-    var { typeKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
-    function normalizeSubtypeName(raw) {
+// src/subtyps.js
+var require_subtyps = __commonJS({
+  "src/subtyps.js"(exports2, module2) {
+    var { typKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
+    function normalizeSubtypName(raw) {
       return raw.trim().replace(/\S+/g, (word) => word.charAt(0).toLocaleUpperCase("de") + word.slice(1).toLocaleLowerCase("de"));
     }
     function isEmptyValue(value) {
       return value === null || value === void 0 || value === "";
     }
-    function getSubtypeNames2(settings, type) {
-      return Object.keys(settings.typeSubtypes?.[type] ?? {});
+    function getSubtypNames2(settings, typ) {
+      return Object.keys(settings.typSubtyps?.[typ] ?? {});
     }
-    function getSubtype2(settings, type, subtype) {
-      return settings.typeSubtypes?.[type]?.[subtype] ?? null;
+    function getSubtyp2(settings, typ, subtyp) {
+      return settings.typSubtyps?.[typ]?.[subtyp] ?? null;
     }
-    function ensureSubtype(settings, type, subtype) {
-      if (!settings.typeSubtypes) settings.typeSubtypes = {};
-      if (!settings.typeSubtypes[type]) settings.typeSubtypes[type] = {};
-      const byName = settings.typeSubtypes[type];
-      if (!byName[subtype]) {
-        byName[subtype] = { frontmatter: {}, floatingKeys: [], shortcuts: {} };
-        if (settings.typeManual?.[type] === false) byName[subtype].manual = false;
+    function ensureSubtyp(settings, typ, subtyp) {
+      if (!settings.typSubtyps) settings.typSubtyps = {};
+      if (!settings.typSubtyps[typ]) settings.typSubtyps[typ] = {};
+      const byName = settings.typSubtyps[typ];
+      if (!byName[subtyp]) {
+        byName[subtyp] = { frontmatter: {}, floatingKeys: [], shortcuts: {} };
+        if (settings.typManual?.[typ] === false) byName[subtyp].manual = false;
       }
-      return byName[subtype];
+      return byName[subtyp];
     }
-    function isSubtypeManual2(settings, type, subtype) {
-      return getSubtype2(settings, type, subtype)?.manual !== false;
+    function isSubtypManual2(settings, typ, subtyp) {
+      return getSubtyp2(settings, typ, subtyp)?.manual !== false;
     }
-    function setSubtypeManual(settings, type, subtype, on) {
-      const data = getSubtype2(settings, type, subtype);
+    function setSubtypManual(settings, typ, subtyp, on) {
+      const data = getSubtyp2(settings, typ, subtyp);
       if (!data) return;
       if (on) delete data.manual;
       else data.manual = false;
     }
-    function setAllSubtypesManual(settings, type, on) {
-      for (const subtype of getSubtypeNames2(settings, type)) setSubtypeManual(settings, type, subtype, on);
+    function setAllSubtypsManual(settings, typ, on) {
+      for (const subtyp of getSubtypNames2(settings, typ)) setSubtypManual(settings, typ, subtyp, on);
     }
-    function migrateSubtypeManual2(settings) {
-      let changed = false;
-      for (const [type, off] of Object.entries(settings.typeManual ?? {})) {
-        if (off !== false) continue;
-        for (const subtype of getSubtypeNames2(settings, type)) {
-          if (!isSubtypeManual2(settings, type, subtype)) continue;
-          setSubtypeManual(settings, type, subtype, false);
-          changed = true;
-        }
-      }
-      return changed;
+    function moveTypSubtyps(settings, oldTyp, newTyp) {
+      if (!settings.typSubtyps?.[oldTyp]) return;
+      settings.typSubtyps[newTyp] = settings.typSubtyps[oldTyp];
+      delete settings.typSubtyps[oldTyp];
     }
-    function moveTypeSubtypes(settings, oldType, newType) {
-      if (!settings.typeSubtypes?.[oldType]) return;
-      settings.typeSubtypes[newType] = settings.typeSubtypes[oldType];
-      delete settings.typeSubtypes[oldType];
+    function deleteTypSubtyps(settings, typ) {
+      if (settings.typSubtyps) delete settings.typSubtyps[typ];
     }
-    function deleteTypeSubtypes(settings, type) {
-      if (settings.typeSubtypes) delete settings.typeSubtypes[type];
-    }
-    function migrateAboveStandard2(settings) {
-      let changed = false;
-      for (const byName of Object.values(settings.typeSubtypes ?? {})) {
-        for (const data of Object.values(byName)) {
-          if (data.aboveStandard === void 0) continue;
-          delete data.aboveStandard;
-          changed = true;
-        }
-      }
-      return changed;
-    }
-    var SUBTYPE_COLOR_SCALE = 3;
-    var PREVIOUS_SUBTYPE_COLOR_RANGES = {
-      2: { h: 25, s: 30, l: 20 },
-      3: { h: 35, s: 20, l: 40 }
-    };
-    function migrateSubtypeColorScale2(settings, defaultRanges) {
-      const from = Number(settings.subtypeColorScale) || 1;
-      if (from >= SUBTYPE_COLOR_SCALE) return false;
-      const allColors = function* () {
-        for (const byName of Object.values(settings.typeSubtypes ?? {})) {
-          for (const data of Object.values(byName)) if (data.color) yield data.color;
-        }
-      };
-      const adoptDefaults = (step) => {
-        const previous = PREVIOUS_SUBTYPE_COLOR_RANGES[step];
-        if (Object.entries(previous).every(([key, value]) => Number(settings.subtypeColorRanges?.[key]) === value)) {
-          settings.subtypeColorRanges = { ...defaultRanges };
-        }
-      };
-      if (from < 2) {
-        const oldRange = Number(settings.subtypeColorRanges?.l);
-        adoptDefaults(2);
-        const newRange = Number(settings.subtypeColorRanges?.l);
-        const factor = oldRange > 0 && Number.isFinite(newRange) ? newRange / oldRange : 1;
-        for (const color of allColors()) if (color.l) color.l = Math.round(color.l * factor);
-      }
-      if (from < 3) {
-        adoptDefaults(3);
-        for (const color of allColors()) if (color.s > 0) color.s = 0;
-      }
-      settings.subtypeColorScale = SUBTYPE_COLOR_SCALE;
-      return true;
-    }
-    function mergeTypeSubtypes(settings, source, target) {
-      const sourceSubtypes = settings.typeSubtypes?.[source];
-      if (!sourceSubtypes) return;
-      for (const [name, sourceData] of Object.entries(sourceSubtypes)) {
-        const targetData = getSubtype2(settings, target, name);
+    function mergeTypSubtyps(settings, source, target) {
+      const sourceSubtyps = settings.typSubtyps?.[source];
+      if (!sourceSubtyps) return;
+      for (const [name, sourceData] of Object.entries(sourceSubtyps)) {
+        const targetData = getSubtyp2(settings, target, name);
         if (!targetData) {
-          ensureSubtype(settings, target, name);
-          settings.typeSubtypes[target][name] = sourceData;
+          ensureSubtyp(settings, target, name);
+          settings.typSubtyps[target][name] = sourceData;
           continue;
         }
         const targetLower = new Set(Object.keys(targetData.frontmatter).map((key) => key.toLowerCase()));
@@ -362,34 +300,34 @@ var require_subtypes = __commonJS({
           if (shortcut) (targetData.shortcuts ?? (targetData.shortcuts = {}))[key] = shortcut;
         }
       }
-      delete settings.typeSubtypes[source];
+      delete settings.typSubtyps[source];
     }
-    function renameSubtype(settings, type, oldName, newName) {
-      const byName = settings.typeSubtypes?.[type];
+    function renameSubtyp(settings, typ, oldName, newName) {
+      const byName = settings.typSubtyps?.[typ];
       if (!byName?.[oldName] || oldName === newName) return;
-      settings.typeSubtypes[type] = Object.fromEntries(
+      settings.typSubtyps[typ] = Object.fromEntries(
         Object.entries(byName).map(([name, data]) => [name === oldName ? newName : name, data])
       );
     }
-    function getSectionOrder(settings, type) {
-      return [null, ...getSubtypeNames2(settings, type)];
+    function getSectionOrder(settings, typ) {
+      return [null, ...getSubtypNames2(settings, typ)];
     }
-    function reorderSubtypes(settings, type, order) {
-      const byName = settings.typeSubtypes?.[type];
+    function reorderSubtyps(settings, typ, order) {
+      const byName = settings.typSubtyps?.[typ];
       if (!byName) return;
       const names = order.filter((name) => name !== null && byName[name]);
       const ordered = [...names, ...Object.keys(byName).filter((name) => !names.includes(name))];
-      settings.typeSubtypes[type] = Object.fromEntries(ordered.map((name) => [name, byName[name]]));
+      settings.typSubtyps[typ] = Object.fromEntries(ordered.map((name) => [name, byName[name]]));
     }
-    function deleteSubtype(settings, type, name) {
-      const byName = settings.typeSubtypes?.[type];
+    function deleteSubtyp(settings, typ, name) {
+      const byName = settings.typSubtyps?.[typ];
       if (!byName) return;
       delete byName[name];
-      if (Object.keys(byName).length === 0) delete settings.typeSubtypes[type];
+      if (Object.keys(byName).length === 0) delete settings.typSubtyps[typ];
     }
-    function mergeSubtypes(settings, type, source, target) {
-      const sourceData = getSubtype2(settings, type, source);
-      const targetData = getSubtype2(settings, type, target);
+    function mergeSubtyps(settings, typ, source, target) {
+      const sourceData = getSubtyp2(settings, typ, source);
+      const targetData = getSubtyp2(settings, typ, target);
       if (!sourceData || !targetData || source === target) return;
       const targetKeys = new Map(Object.keys(targetData.frontmatter).map((key) => [key.toLowerCase(), key]));
       for (const [key, value] of Object.entries(sourceData.frontmatter)) {
@@ -405,14 +343,14 @@ var require_subtypes = __commonJS({
           targetData.frontmatter[existing] = value;
         }
       }
-      deleteSubtype(settings, type, source);
+      deleteSubtyp(settings, typ, source);
     }
-    async function renameSubtypeInNotes(plugin, type, oldKey, newValue) {
+    async function renameSubtypInNotes(plugin, typ, oldKey, newValue) {
       let changed = 0;
-      for (const file of plugin.typIndex.filesWithSubtype(type, oldKey)) {
+      for (const file of plugin.typIndex.filesWithSubtyp(typ, oldKey)) {
         let matched = false;
         await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-          if (typeKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY2)) !== oldKey) return;
+          if (typKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY2)) !== oldKey) return;
           setCanonicalProperty2(frontmatter, SUBTYP_PROPERTY2, newValue);
           matched = true;
         });
@@ -421,37 +359,93 @@ var require_subtypes = __commonJS({
       return changed;
     }
     module2.exports = {
-      normalizeSubtypeName,
+      normalizeSubtypName,
       isEmptyValue,
-      getSubtypeNames: getSubtypeNames2,
-      getSubtype: getSubtype2,
-      ensureSubtype,
-      isSubtypeManual: isSubtypeManual2,
-      setSubtypeManual,
-      setAllSubtypesManual,
-      migrateSubtypeManual: migrateSubtypeManual2,
-      migrateAboveStandard: migrateAboveStandard2,
-      migrateSubtypeColorScale: migrateSubtypeColorScale2,
-      moveTypeSubtypes,
-      deleteTypeSubtypes,
-      mergeTypeSubtypes,
-      renameSubtype,
+      getSubtypNames: getSubtypNames2,
+      getSubtyp: getSubtyp2,
+      ensureSubtyp,
+      isSubtypManual: isSubtypManual2,
+      setSubtypManual,
+      setAllSubtypsManual,
+      moveTypSubtyps,
+      deleteTypSubtyps,
+      mergeTypSubtyps,
+      renameSubtyp,
       getSectionOrder,
-      reorderSubtypes,
-      deleteSubtype,
-      mergeSubtypes,
-      renameSubtypeInNotes
+      reorderSubtyps,
+      deleteSubtyp,
+      mergeSubtyps,
+      renameSubtypInNotes
     };
+  }
+});
+
+// src/typ-utils.js
+var require_typ_utils = __commonJS({
+  "src/typ-utils.js"(exports2, module2) {
+    function normalizeTypName(raw) {
+      return raw.trim().toUpperCase();
+    }
+    function plural(count, word, pluralWord = `${word}s`) {
+      return `${count} ${count === 1 ? word : pluralWord}`;
+    }
+    function joinAnd(parts) {
+      return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+    }
+    function hexToHue(hex) {
+      const match = /^#?([0-9a-f]{6})$/i.exec(hex ?? "");
+      if (!match) return null;
+      const int = parseInt(match[1], 16);
+      const r = (int >> 16 & 255) / 255;
+      const g = (int >> 8 & 255) / 255;
+      const b = (int & 255) / 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const delta = max - min;
+      if (delta === 0) return null;
+      let hue;
+      if (max === r) hue = (g - b) / delta % 6;
+      else if (max === g) hue = (b - r) / delta + 2;
+      else hue = (r - g) / delta + 4;
+      hue *= 60;
+      return hue < 0 ? hue + 360 : hue;
+    }
+    function compareTyps(mode, a, b, counts, typColors) {
+      const [key, dir] = mode.split("-");
+      let cmp;
+      if (key === "count") {
+        cmp = (counts.get(a) ?? 0) - (counts.get(b) ?? 0);
+        if (dir === "desc") cmp = -cmp;
+      } else if (key === "color") {
+        const hueA = hexToHue(typColors[a] ?? null);
+        const hueB = hexToHue(typColors[b] ?? null);
+        if (hueA === null && hueB === null) cmp = 0;
+        else if (hueA === null) cmp = 1;
+        else if (hueB === null) cmp = -1;
+        else {
+          cmp = hueA - hueB;
+          if (dir === "desc") cmp = -cmp;
+        }
+      } else {
+        cmp = a.localeCompare(b);
+        if (dir === "desc") cmp = -cmp;
+      }
+      return cmp || a.localeCompare(b);
+    }
+    function sortTypsByMode2(typs, mode, counts, typColors) {
+      if (mode === "manual") return [...typs];
+      return [...typs].sort((a, b) => compareTyps(mode, a, b, counts, typColors));
+    }
+    module2.exports = { normalizeTypName, plural, joinAnd, hexToHue, compareTyps, sortTypsByMode: sortTypsByMode2 };
   }
 });
 
 // src/frontmatter-sort.js
 var require_frontmatter_sort = __commonJS({
   "src/frontmatter-sort.js"(exports2, module2) {
-    var { getSubtype: getSubtype2 } = require_subtypes();
-    var { typeKeyOf, propertyValue } = require_typ_index();
-    var TYP_PROPERTY2 = "TYP";
-    var SUBTYP_PROPERTY2 = "SUBTYP";
+    var { getSubtyp: getSubtyp2 } = require_subtyps();
+    var { typKeyOf, propertyValue, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
+    var { plural } = require_typ_utils();
     var DEFAULT_GLOBAL_ORDER = [{ kind: "typValue" }, { kind: "subtypValue" }, { kind: "typ" }, { kind: "other" }];
     function normalizeGlobalOrder2(order) {
       const result = Array.isArray(order) ? order.filter((entry) => entry && typeof entry === "object") : [];
@@ -465,11 +459,11 @@ var require_frontmatter_sort = __commonJS({
       if (!hasKind("other")) result.push({ kind: "other" });
       return result;
     }
-    function orderedDefaultKeys(plugin, type, subtype = null) {
-      if (!type) return null;
+    function orderedDefaultKeys(plugin, typ, subtyp = null) {
+      if (!typ) return null;
       const isSystemKey = (key) => key === "" || [TYP_PROPERTY2, SUBTYP_PROPERTY2].some((p) => key.toLowerCase() === p.toLowerCase());
-      const subtypeData = subtype ? getSubtype2(plugin.settings, type, subtype) : null;
-      const blocks = [plugin.settings.typeDefaultFrontmatter[type], subtypeData?.frontmatter];
+      const subtypData = subtyp ? getSubtyp2(plugin.settings, typ, subtyp) : null;
+      const blocks = [plugin.settings.typDefaultFrontmatter[typ], subtypData?.frontmatter];
       const keys = [];
       const seen = /* @__PURE__ */ new Set();
       for (const block of blocks) {
@@ -481,7 +475,7 @@ var require_frontmatter_sort = __commonJS({
       }
       return keys.length > 0 ? keys : null;
     }
-    function computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys) {
+    function computeSortedKeys(existingKeys, globalOrder, typDefaultKeys) {
       const lowerToActual = new Map(existingKeys.map((key) => [key.toLowerCase(), key]));
       const resolve = (name) => lowerToActual.get(name.toLowerCase());
       const pinned = new Set(
@@ -490,7 +484,7 @@ var require_frontmatter_sort = __commonJS({
       const typKey = resolve(TYP_PROPERTY2);
       const subtypKey = resolve(SUBTYP_PROPERTY2);
       const typBlockKeys = new Set(
-        (typeDefaultKeys ?? []).map(resolve).filter((key) => key && key !== typKey && !pinned.has(key))
+        (typDefaultKeys ?? []).map(resolve).filter((key) => key && key !== typKey && !pinned.has(key))
       );
       const claimed = new Set(pinned);
       for (const key of typBlockKeys) claimed.add(key);
@@ -509,7 +503,7 @@ var require_frontmatter_sort = __commonJS({
         else if (entry.kind === "typValue") push(typKey);
         else if (entry.kind === "subtypValue") push(subtypKey);
         else if (entry.kind === "typ") {
-          for (const name of typeDefaultKeys ?? []) {
+          for (const name of typDefaultKeys ?? []) {
             const key = resolve(name);
             if (key && typBlockKeys.has(key)) push(key);
           }
@@ -527,39 +521,39 @@ var require_frontmatter_sort = __commonJS({
       if (!frontmatter) return null;
       return Object.keys(frontmatter).filter((key) => key !== "position");
     }
-    async function sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys) {
+    async function sortFileFrontmatter(app, file, globalOrder, typDefaultKeys) {
       const cachedKeys = cachedFrontmatterKeys(app, file);
       if (!cachedKeys || cachedKeys.length <= 1) return false;
-      const cachedSorted = computeSortedKeys(cachedKeys, globalOrder, typeDefaultKeys);
+      const cachedSorted = computeSortedKeys(cachedKeys, globalOrder, typDefaultKeys);
       if (cachedSorted.every((key, i) => key === cachedKeys[i])) return false;
       let changed = false;
       await app.fileManager.processFrontMatter(file, (frontmatter) => {
-        changed = sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys);
+        changed = sortFrontmatterObject(frontmatter, globalOrder, typDefaultKeys);
       });
       return changed;
     }
-    function sortFrontmatterObject(frontmatter, globalOrder, typeDefaultKeys) {
+    function sortFrontmatterObject(frontmatter, globalOrder, typDefaultKeys) {
       const existingKeys = Object.keys(frontmatter);
       if (existingKeys.length <= 1) return false;
-      const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typeDefaultKeys);
+      const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typDefaultKeys);
       if (sortedKeys.every((key, i) => key === existingKeys[i])) return false;
       const snapshot = { ...frontmatter };
       for (const key of existingKeys) delete frontmatter[key];
       for (const key of sortedKeys) frontmatter[key] = snapshot[key];
       return true;
     }
-    function sortFrontmatterFor2(plugin, frontmatter, type, subtype) {
+    function sortFrontmatterFor2(plugin, frontmatter, typ, subtyp) {
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
-      return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, type, subtype));
+      return sortFrontmatterObject(frontmatter, globalOrder, orderedDefaultKeys(plugin, typ, subtyp));
     }
     function placePropertyFor2(plugin, frontmatter, key) {
       const existingKeys = Object.keys(frontmatter);
       const actualKey = existingKeys.find((k) => k.toLowerCase() === key.toLowerCase());
       if (!actualKey || existingKeys.length <= 1) return false;
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
-      const type = typeKeyOf(propertyValue(frontmatter, TYP_PROPERTY2));
-      const subtype = typeKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY2));
-      const sortedKeys = computeSortedKeys(existingKeys, globalOrder, orderedDefaultKeys(plugin, type, subtype));
+      const typ = typKeyOf(propertyValue(frontmatter, TYP_PROPERTY2));
+      const subtyp = typKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY2));
+      const sortedKeys = computeSortedKeys(existingKeys, globalOrder, orderedDefaultKeys(plugin, typ, subtyp));
       const rest = existingKeys.filter((k) => k !== actualKey);
       const predecessor = sortedKeys.slice(0, sortedKeys.indexOf(actualKey)).pop();
       const newKeys = [...rest];
@@ -572,24 +566,27 @@ var require_frontmatter_sort = __commonJS({
     }
     async function sortSingleFileFrontmatter(app, plugin, file) {
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
-      const type = plugin.typIndex.typeOf(file);
-      const typeDefaultKeys = orderedDefaultKeys(plugin, type, plugin.typIndex.subtypeOf(file));
-      return sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys);
+      const typ = plugin.typIndex.typOf(file);
+      const typDefaultKeys = orderedDefaultKeys(plugin, typ, plugin.typIndex.subtypOf(file));
+      return sortFileFrontmatter(app, file, globalOrder, typDefaultKeys);
     }
-    async function sortAllFrontmatter(app, plugin, onlyType) {
+    async function sortAllFrontmatter(app, plugin, onlyTyp) {
       let checked = 0;
       let changed = 0;
       const globalOrder = normalizeGlobalOrder2(plugin.settings.globalPropertyOrder);
-      const hasTypeDefaults = onlyType ? orderedDefaultKeys(plugin, onlyType) !== null : null;
+      const hasTypDefaults = onlyTyp ? orderedDefaultKeys(plugin, onlyTyp) !== null : null;
       for (const file of app.vault.getMarkdownFiles()) {
         if (!plugin.settings.includeIgnoredFiles && app.metadataCache.isUserIgnored(file.path)) continue;
-        const type = plugin.typIndex.typeOf(file);
-        if (onlyType && type !== onlyType) continue;
-        const typeDefaultKeys = orderedDefaultKeys(plugin, type, plugin.typIndex.subtypeOf(file));
+        const typ = plugin.typIndex.typOf(file);
+        if (onlyTyp && typ !== onlyTyp) continue;
+        const typDefaultKeys = orderedDefaultKeys(plugin, typ, plugin.typIndex.subtypOf(file));
         checked++;
-        if (await sortFileFrontmatter(app, file, globalOrder, typeDefaultKeys)) changed++;
+        if (await sortFileFrontmatter(app, file, globalOrder, typDefaultKeys)) changed++;
       }
-      return { checked, changed, hasTypeDefaults };
+      return { checked, changed, hasTypDefaults };
+    }
+    function sortSummary(label, checked, changed) {
+      return changed > 0 ? `${label}: checked ${plural(checked, "note")}, sorted ${changed}.` : `${label}: checked ${plural(checked, "note")}, all already sorted.`;
     }
     module2.exports = {
       sortAllFrontmatter,
@@ -597,6 +594,7 @@ var require_frontmatter_sort = __commonJS({
       sortFrontmatterFor: sortFrontmatterFor2,
       placePropertyFor: placePropertyFor2,
       normalizeGlobalOrder: normalizeGlobalOrder2,
+      sortSummary,
       DEFAULT_GLOBAL_ORDER,
       TYP_PROPERTY: TYP_PROPERTY2,
       SUBTYP_PROPERTY: SUBTYP_PROPERTY2
@@ -608,33 +606,31 @@ var require_frontmatter_sort = __commonJS({
 var require_frontmatter_order_editor = __commonJS({
   "src/frontmatter-order-editor.js"(exports2, module2) {
     var { setIcon, Notice } = require("obsidian");
-    var { TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2, sortAllFrontmatter } = require_frontmatter_sort();
+    var { TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2, sortAllFrontmatter, sortSummary } = require_frontmatter_sort();
     var PLACEHOLDER_LABELS = {
       typValue: "TYP",
       subtypValue: "SUBTYP",
       typ: "TYP-Frontmatter",
-      other: "Sonstige Properties"
+      other: "Other properties"
     };
     function mountGlobalOrderEditor(containerEl, plugin) {
-      const header = containerEl.createDiv({ cls: "fred-typ-frontmatter-header" });
-      const titleGroup = header.createDiv({ cls: "fred-typ-frontmatter-title-group" });
-      const applyBtn = titleGroup.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Auf alle Notizen anwenden" } });
+      const header = containerEl.createDiv({ cls: "typ-frontmatter-header" });
+      const titleGroup = header.createDiv({ cls: "typ-frontmatter-title-group" });
+      const applyBtn = titleGroup.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Apply to all notes" } });
       setIcon(applyBtn, "play");
       applyBtn.addEventListener("click", async () => {
         try {
           const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
-          new Notice(
-            changed > 0 ? `Frontmatter Sortierung: ${checked} Notizen gepr\xFCft, ${changed} sortiert.` : `Frontmatter Sortierung: ${checked} Notizen gepr\xFCft, bereits alle sortiert.`
-          );
+          new Notice(sortSummary("Frontmatter sorting", checked, changed));
         } catch (error) {
-          console.error("[Frontmatter Sortierung]", error);
-          new Notice(`Frontmatter Sortierung fehlgeschlagen: ${error.message}`);
+          console.error("[Frontmatter sorting]", error);
+          new Notice(`Frontmatter sorting failed: ${error.message}`);
         }
       });
-      titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: "Globale Property-Reihenfolge" });
-      const addBtn = header.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Property hinzuf\xFCgen" } });
+      titleGroup.createDiv({ cls: "typ-detail-section-title", text: "Global property order" });
+      const addBtn = header.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Add property" } });
       setIcon(addBtn, "plus");
-      const listEl = containerEl.createDiv({ cls: "fred-order-list" });
+      const listEl = containerEl.createDiv({ cls: "typ-order-list" });
       const order = () => plugin.settings.globalPropertyOrder;
       let draftEntry = null;
       const isDuplicateName = (value, ownEntry) => {
@@ -648,17 +644,17 @@ var require_frontmatter_order_editor = __commonJS({
         entries.forEach((entry, index) => {
           const isDraft = entry === draftEntry;
           const isPlaceholder = entry.kind !== "property";
-          const rowCls = "fred-order-row" + (isPlaceholder ? " is-placeholder" : "") + (entry.kind === "typ" ? " is-typ-defaults" : "");
+          const rowCls = "typ-order-row" + (isPlaceholder ? " is-placeholder" : "") + (entry.kind === "typ" ? " is-typ-defaults" : "");
           const row = listEl.createDiv({ cls: rowCls });
-          const dragHandle = row.createDiv({ cls: "fred-order-drag", attr: { "aria-label": "Verschieben" } });
+          const dragHandle = row.createDiv({ cls: "typ-order-drag", attr: { "aria-label": "Drag to move" } });
           setIcon(dragHandle, "grip-vertical");
           if (isPlaceholder) {
-            row.createDiv({ cls: "fred-order-label", text: PLACEHOLDER_LABELS[entry.kind] });
+            row.createDiv({ cls: "typ-order-label", text: PLACEHOLDER_LABELS[entry.kind] });
           } else {
             const input = row.createEl("input", {
               type: "text",
-              cls: "fred-order-name-input",
-              attr: { placeholder: "Property-Name" }
+              cls: "typ-order-name-input",
+              attr: { placeholder: "Property name" }
             });
             input.value = entry.name;
             input.addEventListener("blur", async () => {
@@ -674,7 +670,7 @@ var require_frontmatter_order_editor = __commonJS({
                 return;
               }
               if (isDuplicateName(value, isDraft ? null : entry)) {
-                new Notice(`"${value}" ist bereits in der Liste.`);
+                new Notice(`"${value}" is already in the list.`);
                 input.value = entry.name;
                 return;
               }
@@ -686,7 +682,7 @@ var require_frontmatter_order_editor = __commonJS({
               await plugin.saveSettings();
               render();
             });
-            const removeBtn = row.createDiv({ cls: "fred-order-remove clickable-icon", attr: { "aria-label": "Entfernen" } });
+            const removeBtn = row.createDiv({ cls: "typ-order-remove clickable-icon", attr: { "aria-label": "Remove" } });
             setIcon(removeBtn, "x");
             removeBtn.addEventListener("click", async () => {
               if (isDraft) {
@@ -734,7 +730,7 @@ var require_frontmatter_order_editor = __commonJS({
           draftEntry = { kind: "property", name: "" };
           render();
         }
-        const inputs = listEl.querySelectorAll(".fred-order-name-input");
+        const inputs = listEl.querySelectorAll(".typ-order-name-input");
         inputs[inputs.length - 1]?.focus();
       });
       render();
@@ -743,33 +739,33 @@ var require_frontmatter_order_editor = __commonJS({
   }
 });
 
-// src/type-colors.js
-var require_type_colors = __commonJS({
-  "src/type-colors.js"(exports2, module2) {
-    var { getSubtype: getSubtype2 } = require_subtypes();
-    var DEFAULT_TYPE_COLOR = "#888888";
-    var SUBTYPE_COLOR_CHANNELS = [
-      { key: "h", label: "Farbton", unit: "\xB0" },
-      // { key: "s", label: "Sättigung", unit: "%", downOnly: true },
-      { key: "l", label: "Helligkeit", unit: "%" }
+// src/typ-colors.js
+var require_typ_colors = __commonJS({
+  "src/typ-colors.js"(exports2, module2) {
+    var { getSubtyp: getSubtyp2 } = require_subtyps();
+    var DEFAULT_TYP_COLOR = "#888888";
+    var SUBTYP_COLOR_CHANNELS = [
+      { key: "h", label: "Hue", unit: "\xB0" },
+      // { key: "s", label: "Saturation", unit: "%", downOnly: true },
+      { key: "l", label: "Lightness", unit: "%" }
     ];
-    var DEFAULT_SUBTYPE_COLOR_RANGES2 = {
+    var DEFAULT_SUBTYP_COLOR_RANGES = {
       h: 35,
       /* s: 40, */
       l: 40
     };
     function colorRange(settings, key) {
-      const value = Number(settings.subtypeColorRanges?.[key]);
-      return Number.isFinite(value) && value >= 0 ? value : DEFAULT_SUBTYPE_COLOR_RANGES2[key];
+      const value = Number(settings.subtypColorRanges?.[key]);
+      return Number.isFinite(value) && value >= 0 ? value : DEFAULT_SUBTYP_COLOR_RANGES[key];
     }
     function channelBounds(settings, key) {
       const range = colorRange(settings, key);
-      return SUBTYPE_COLOR_CHANNELS.find((channel) => channel.key === key)?.downOnly ? [-range, 0] : [-range, range];
+      return SUBTYP_COLOR_CHANNELS.find((channel) => channel.key === key)?.downOnly ? [-range, 0] : [-range, range];
     }
     function clampedOffset(settings, offset) {
       if (!offset) return null;
       const result = {};
-      for (const { key } of SUBTYPE_COLOR_CHANNELS) {
+      for (const { key } of SUBTYP_COLOR_CHANNELS) {
         const [min, max] = channelBounds(settings, key);
         result[key] = Math.min(max, Math.max(min, Number(offset[key]) || 0));
       }
@@ -866,23 +862,23 @@ var require_type_colors = __commonJS({
       return oklchToHex({ L, C: Math.max(0, C), H });
     }
     function hasColorOffset(offset) {
-      return !!offset && SUBTYPE_COLOR_CHANNELS.some(({ key }) => (offset[key] ?? 0) !== 0);
+      return !!offset && SUBTYP_COLOR_CHANNELS.some(({ key }) => (offset[key] ?? 0) !== 0);
     }
-    function subtypeColor(settings, type, subtype) {
-      const typeColor = settings.typeColors[type] ?? null;
-      if (!typeColor || !subtype) return typeColor;
-      const offset = clampedOffset(settings, getSubtype2(settings, type, subtype)?.color);
-      return hasColorOffset(offset) ? applyColorOffset(typeColor, offset) : typeColor;
+    function subtypColor(settings, typ, subtyp) {
+      const typColor = settings.typColors[typ] ?? null;
+      if (!typColor || !subtyp) return typColor;
+      const offset = clampedOffset(settings, getSubtyp2(settings, typ, subtyp)?.color);
+      return hasColorOffset(offset) ? applyColorOffset(typColor, offset) : typColor;
     }
-    function subtypeHasOwnColor(settings, type, subtype) {
-      return hasColorOffset(clampedOffset(settings, getSubtype2(settings, type, subtype)?.color));
+    function subtypHasOwnColor(settings, typ, subtyp) {
+      return hasColorOffset(clampedOffset(settings, getSubtyp2(settings, typ, subtyp)?.color));
     }
-    function nameColor(settings, type, subtype = null) {
-      const useSubtype = !!subtype && settings.colorViews.typListSubtyp;
-      const typeColor = settings.typeColors[type] ?? null;
+    function nameColor(settings, typ, subtyp = null) {
+      const useSubtyp = !!subtyp && settings.colorViews.typListSubtyp;
+      const typColor = settings.typColors[typ] ?? null;
       return {
-        color: (useSubtype ? subtypeColor(settings, type, subtype) : typeColor) ?? DEFAULT_TYPE_COLOR,
-        isDefault: !typeColor || useSubtype && !subtypeHasOwnColor(settings, type, subtype)
+        color: (useSubtyp ? subtypColor(settings, typ, subtyp) : typColor) ?? DEFAULT_TYP_COLOR,
+        isDefault: !typColor || useSubtyp && !subtypHasOwnColor(settings, typ, subtyp)
       };
     }
     function paintColorDot(el, color, isDefault) {
@@ -890,26 +886,26 @@ var require_type_colors = __commonJS({
       el.style.boxShadow = isDefault ? `inset 0 0 0 max(1.5px, 0.15em) ${color}` : "";
     }
     function colorForFile(plugin, file, viewKey = null) {
-      const type = plugin.typIndex.typeOf(file);
-      if (!type) return null;
+      const typ = plugin.typIndex.typOf(file);
+      if (!typ) return null;
       const { settings } = plugin;
-      if (!viewKey || !settings.colorViews[`${viewKey}Subtyp`]) return settings.typeColors[type] ?? null;
-      return subtypeColor(settings, type, plugin.typIndex.subtypeOf(file));
+      if (!viewKey || !settings.colorViews[`${viewKey}Subtyp`]) return settings.typColors[typ] ?? null;
+      return subtypColor(settings, typ, plugin.typIndex.subtypOf(file));
     }
     module2.exports = {
       colorForFile,
       nameColor,
-      DEFAULT_TYPE_COLOR,
-      subtypeColor,
+      DEFAULT_TYP_COLOR,
+      subtypColor,
       applyColorOffset,
       hasColorOffset,
-      subtypeHasOwnColor,
+      subtypHasOwnColor,
       paintColorDot,
       colorRange,
       channelBounds,
       clampedOffset,
-      SUBTYPE_COLOR_CHANNELS,
-      DEFAULT_SUBTYPE_COLOR_RANGES: DEFAULT_SUBTYPE_COLOR_RANGES2
+      SUBTYP_COLOR_CHANNELS,
+      DEFAULT_SUBTYP_COLOR_RANGES
     };
   }
 });
@@ -920,80 +916,61 @@ var require_settings = __commonJS({
     var { PluginSettingTab, SettingGroup, ToggleComponent, DropdownComponent, debounce } = require("obsidian");
     var { mountGlobalOrderEditor } = require_frontmatter_order_editor();
     var { DEFAULT_GLOBAL_ORDER } = require_frontmatter_sort();
-    var { SUBTYPE_COLOR_CHANNELS, DEFAULT_SUBTYPE_COLOR_RANGES: DEFAULT_SUBTYPE_COLOR_RANGES2, colorRange } = require_type_colors();
+    var { SUBTYP_COLOR_CHANNELS, DEFAULT_SUBTYP_COLOR_RANGES, colorRange } = require_typ_colors();
     var DEFAULT_SETTINGS2 = {
-      types: [],
-      typeColors: {},
-      typeDescriptions: {},
-      typeDefaultFrontmatter: {},
-      // Keys aus typeDefaultFrontmatter[type], die als "Floating Property" markiert
-      // sind (siehe type-frontmatter-editor.js/typ-view.js) - Teil derselben Liste
-      // und Reihenfolge wie die übrigen Standard-Properties des Typs (wichtig für
-      // die Frontmatter-Sortierung, siehe orderedDefaultKeys in frontmatter-sort.js),
-      // aber NICHT Teil des von getTypeDefaults() (main.js) standardmäßig
-      // gelieferten Frontmatters - Templater legt sie beim Anlegen einer Notiz also
-      // nicht automatisch an (nur über den expliziten includeFloating-Parameter).
-      typeFloatingKeys: {},
-      // Shortcuts je Key aus typeDefaultFrontmatter[type]:
-      //   { [TYP]: { [Property]: { name: "today" | "tp.<Skriptname>" } } }
-      // Bewusst NEBEN dem Frontmatter statt als dessen Wert - siehe die Begründung
-      // in shortcuts.js. Der Wert der Property bleibt dadurch typrein (Obsidians
-      // natives Widget bleibt unangetastet) und dient bei gesetztem Shortcut als
-      // Rückfallwert, falls dessen Templater-Skript fehlschlägt.
-      typeShortcuts: {},
-      typeManual: {},
-      // Registrierte Subtypen je TYP samt eigenem Frontmatter-Block, siehe subtypes.js.
-      typeSubtypes: {},
-      // Siehe frontmatter-order-editor.js / frontmatter-sort.js: Reihenfolge aus
-      // fest positionierten Einzel-Properties (kind: "property") sowie den vier
-      // nicht entfernbaren Platzhaltern "typValue" (TYP-Property selbst),
-      // "subtypValue" (SUBTYP-Property selbst), "typ" (Standardliste des Typs)
-      // und "other" (alles Übrige).
+      typs: [],
+      typColors: {},
+      typDescriptions: {},
+      typDefaultFrontmatter: {},
+      // Keys of typDefaultFrontmatter[typ] marked as floating. They share the list
+      // and its order (which frontmatter sorting uses), but getTypDefaults() leaves
+      // them out unless asked with includeFloating, so new notes don't get them
+      // automatically.
+      typFloatingKeys: {},
+      // Shortcuts per key of typDefaultFrontmatter[typ]:
+      //   { [TYP]: { [Property]: { name: "today" | "tp.<script>" } } }
+      // Kept NEXT TO the frontmatter, not as its value - see shortcuts.js.
+      typShortcuts: {},
+      typManual: {},
+      // Registered Subtyps per TYP with their own frontmatter block, see subtyps.js.
+      typSubtyps: {},
+      // Pinned single properties (kind: "property") plus the four fixed
+      // placeholders "typValue", "subtypValue", "typ" and "other" - see
+      // frontmatter-sort.js.
       globalPropertyOrder: DEFAULT_GLOBAL_ORDER,
-      // Siehe active-title-colors.js: wie der TYP in der geöffneten Notiz markiert
-      // wird - "none" (nichts), "dot" (Farbpunkt am Titel) oder "badge" (Box mit
-      // TYP-Namen, weiter konfiguriert über die drei folgenden Einstellungen, die
-      // nur bei "badge" überhaupt eine Rolle spielen bzw. in den Einstellungen
-      // angezeigt werden). Unabhängig davon und beliebig kombinierbar:
-      // colorViews.noteTitleColor färbt den Titeltext selbst ein.
+      // How the open note shows its TYP (see active-title-colors.js): "none",
+      // "dot" or "badge". The three badge settings below only matter for "badge".
+      // colorViews.noteTitleColor (the title text itself) is independent.
       noteTitleStyle: "dot",
-      // Nur relevant bei noteTitleStyle: "badge" - ob die Box farbig (TYP-Farbe)
-      // oder neutral (text-muted) dargestellt wird.
+      // Badge colored (TYP color) or neutral (text-muted).
       noteTitleBadgeColored: true,
-      // Nur relevant bei noteTitleStyle: "badge" - Beschriftung der Box: "type"
-      // ([TYP]), "type-subtype" ([TYP/Subtyp]) oder "subtype" ([Subtyp], bei
-      // Notizen ohne Subtyp keine Box). Farbe (mit noteTitleBadgeColored)
-      // entsprechend die des TYPs bzw. des Subtyps - bei "type-subtype" wählbar
-      // über colorViews.noteTitleMarkerSubtyp ("Subtyp-Farbe").
-      noteTitleBadgeLabel: "type",
-      // Nur relevant bei noteTitleStyle: "badge" - "title" (neben dem Inline-Titel,
-      // normale Ausrichtung) oder "block" (links am Property-Block, um 90° gedreht).
+      // Badge label: "typ" ([TYP]), "typ-subtyp" ([TYP/Subtyp]) or "subtyp"
+      // ([Subtyp]; no badge without a Subtyp). Colored in the TYP or Subtyp color;
+      // for "typ-subtyp" chosen with colorViews.noteTitleMarkerSubtyp.
+      noteTitleBadgeLabel: "typ",
+      // "title" (next to the inline title) or "block" (left of the property
+      // block, turned 90°).
       noteTitleBadgePosition: "title",
-      // Nur relevant bei noteTitleBadgePosition: "block" - ob die gedrehte Box am
-      // oberen oder unteren Rand des Property-Blocks sitzt.
+      // For position "block": top or bottom edge of the property block.
       noteTitleVerticalAlign: "top",
       typSortOrder: "count-desc",
-      // Was in der TYP-Liste rechts neben dem Namen steht - "description",
-      // "subtypes" oder "none". Umgeschaltet wird das nicht hier, sondern über den
-      // Knopf im Listen-Header neben der Sortierung (siehe SECONDARY_MODES in
-      // typ-view.js), wie schon die Sortierreihenfolge: beides betrifft nur das
-      // Aussehen dieser einen Liste und gehört daher an sie selbst, nicht in eine
-      // Einstellungsseite, die man dafür jedes Mal öffnen müsste.
-      typListSecondary: "subtypes",
-      // Siehe pickTypeAndSubtype in type-picker.js: false = Subtypen eingerückt
-      // direkt im TYP-Picker, true = eigener Subtyp-Picker nach der TYP-Auswahl.
-      separateSubtypePicker: false,
+      // What the TYP-List shows next to the name: "subtyps", "description" or
+      // "none". Switched by the header button next to sorting (SECONDARY_MODES in
+      // typ-pane.js), not here: like the sort order it only concerns that list.
+      typListSecondary: "subtyps",
+      // See pickTypAndSubtyp in typ-picker.js: false = each Subtyp indented in the
+      // TYP-Picker, true = a separate Subtyp-Picker after the TYP choice.
+      separateSubtypPicker: false,
       includeIgnoredFiles: false,
-      // Eigene Tag-/Anhänge-Farbe im Graph deaktiviert (30.09.2026): beides ist in
-      // den Style Settings des Minimal Theme einstellbar, siehe graph-colors.js.
+      // Own tag/attachment colors in the graph disabled (2026-09-30): the Minimal
+      // theme's Style Settings cover both, see graph-colors.js.
       // graphTagColorEnabled: false,
       // graphTagColor: "",
       // graphAttachmentColorEnabled: false,
       // graphAttachmentColor: "",
-      // Wie weit die Farbe eines Subtyps höchstens von der seines TYPs abweichen
-      // darf (±), siehe type-colors.js: Farbton in Grad, Helligkeit in % des Wegs
-      // zu Weiß bzw. Schwarz.
-      subtypeColorRanges: { ...DEFAULT_SUBTYPE_COLOR_RANGES2 },
+      // How far a Subtyp's color may differ from its TYP's (±), see typ-colors.js:
+      // hue in degrees, lightness in % of the way to white or black.
+      subtypColorRanges: { ...DEFAULT_SUBTYP_COLOR_RANGES },
       colorViews: {
         fileExplorer: true,
         graph: true,
@@ -1001,8 +978,8 @@ var require_settings = __commonJS({
         recentFiles: true,
         backlinks: true,
         bookmarks: true,
-        // Unter-Schalter "<Ansicht>Subtyp" der Einfärbungen: Farbe des Subtyps
-        // einer Notiz statt der ihres TYPs (siehe colorForFile in type-colors.js).
+        // "<view>Subtyp" sub-toggles: use a note's Subtyp color instead of its
+        // TYP's (see colorForFile in typ-colors.js).
         fileExplorerSubtyp: true,
         graphSubtyp: true,
         searchSubtyp: true,
@@ -1014,10 +991,9 @@ var require_settings = __commonJS({
         noteTitleColorSubtyp: true,
         noteTitleMarkerSubtyp: true,
         frontmatterDefaults: true,
-        // Unter-Schalter zu frontmatterDefaults bzw. allProperties: bezieht die
-        // Frontmatter-Blöcke der Subtypen mit ein (siehe
-        // frontmatter-default-highlight.js) - bei allProperties zugleich in der
-        // Farbe des jeweiligen Subtyps.
+        // Sub-toggle of frontmatterDefaults and allProperties: include the Subtyp
+        // blocks (see frontmatter-default-highlight.js); for allProperties also in
+        // the Subtyp color.
         frontmatterDefaultsSubtyp: true,
         typList: true,
         allProperties: true,
@@ -1031,17 +1007,16 @@ var require_settings = __commonJS({
         super(app, plugin);
         this.plugin = plugin;
       }
-      // Jeder Abschnitt ist eine SettingGroup - Obsidians eigene Gruppierung
-      // (Überschrift + eine Box, Einträge darin durch Trennlinien getrennt), wie
-      // in den Core-Einstellungen. Einzeln per new Setting(containerEl) angelegte
-      // Einträge würden stattdessen je als eigene kleine Box gerendert.
+      // Each section is a SettingGroup (heading plus one box, entries separated by
+      // lines), like Obsidian's core settings. Settings created one by one with
+      // new Setting(containerEl) would each get their own small box.
       display() {
         const { containerEl } = this;
         const { scrollTop } = containerEl;
         containerEl.empty();
-        new SettingGroup(containerEl).setHeading("TYP-Liste").addSetting(
-          (setting) => setting.setName("Ignorierte Notizen IMMER ber\xFCcksichtigen").setDesc(
-            'Bezieht Notizen aus Obsidians "Excluded files"-Liste (dort tragen auch Plugins wie Hide Folders ausgeblendete Ordner ein) wieder in TYP-Z\xE4hler, TYP-Picker und die Frontmatter-Sortierung mit ein, statt sie zu \xFCberspringen.'
+        new SettingGroup(containerEl).setHeading("TYP-List").addSetting(
+          (setting) => setting.setName("Include excluded files").setDesc(
+            `Count notes from Obsidian's "Excluded files" (e.g. folders hidden by Hide Folders) in TYP counts, the TYP-Picker and frontmatter sorting.`
           ).addToggle(
             (toggle) => toggle.setValue(this.plugin.settings.includeIgnoredFiles).onChange(async (value) => {
               this.plugin.settings.includeIgnoredFiles = value;
@@ -1051,16 +1026,16 @@ var require_settings = __commonJS({
           )
         );
         new SettingGroup(containerEl).setHeading("TYP-Picker").addSetting(
-          (setting) => setting.setName("Subtyp-Picker separat").setDesc(
-            "Beim Anlegen einer Notiz folgt auf den TYP-Picker ein eigener Subtyp-Picker (ESC dort f\xFChrt zur\xFCck zur TYP-Auswahl), statt die Subtypen direkt einger\xFCckt unter ihrem TYP im TYP-Picker anzuzeigen. Der TYP-Picker nennt die Subtypen dann hinter dem TYP-Namen."
+          (setting) => setting.setName("Separate Subtyp-Picker").setDesc(
+            "After choosing a TYP, choose the Subtyp in a second picker. When off, each Subtyp is listed indented below its TYP."
           ).addToggle(
-            (toggle) => toggle.setValue(this.plugin.settings.separateSubtypePicker).onChange(async (value) => {
-              this.plugin.settings.separateSubtypePicker = value;
+            (toggle) => toggle.setValue(this.plugin.settings.separateSubtypPicker).onChange(async (value) => {
+              this.plugin.settings.separateSubtypPicker = value;
               await this.plugin.saveSettings();
             })
           )
         );
-        const colorViewToggle = (group, key, name, desc, subtypKey = null, { typTooltip = "Nach TYP-Farbe einf\xE4rben", subtypTooltip = "Farbe des Subtyps statt der des TYPs verwenden" } = {}) => group.addSetting((setting) => {
+        const colorViewToggle = (group, key, name, desc, subtypKey = null, { typTooltip = "Color by TYP", subtypTooltip = "Use Subtyp color instead of TYP color" } = {}) => group.addSetting((setting) => {
           setting.setName(name).setDesc(desc);
           const save = async (settingKey, value) => {
             this.plugin.settings.colorViews[settingKey] = value;
@@ -1071,10 +1046,10 @@ var require_settings = __commonJS({
             setting.addToggle((toggle) => toggle.setValue(this.plugin.settings.colorViews[key]).onChange((value) => save(key, value)));
             return;
           }
-          setting.settingEl.addClass("fred-note-title-setting");
+          setting.settingEl.addClass("typ-note-title-setting");
           const addRow = (label, tooltip, settingKey, onChanged) => {
-            const row = setting.controlEl.createDiv({ cls: "fred-note-title-toggle-row" });
-            row.createSpan({ cls: "fred-note-title-toggle-label", text: label });
+            const row = setting.controlEl.createDiv({ cls: "typ-note-title-toggle-row" });
+            row.createSpan({ cls: "typ-note-title-toggle-label", text: label });
             new ToggleComponent(row).setTooltip(tooltip).setValue(this.plugin.settings.colorViews[settingKey]).onChange(async (value) => {
               await save(settingKey, value);
               onChanged?.();
@@ -1083,57 +1058,49 @@ var require_settings = __commonJS({
           addRow("TYP", typTooltip, key, () => this.display());
           if (this.plugin.settings.colorViews[key]) addRow("Subtyp", subtypTooltip, subtypKey);
         });
-        const coloringGroup = new SettingGroup(containerEl).setHeading("Einf\xE4rbung");
-        colorViewToggle(coloringGroup, "fileExplorer", "Datei-Explorer", "Notiznamen im Datei-Explorer nach TYP einf\xE4rben.", "fileExplorerSubtyp");
-        colorViewToggle(coloringGroup, "graph", "Graph", "Knoten im Graph (global und lokal) nach TYP einf\xE4rben.", "graphSubtyp");
-        colorViewToggle(coloringGroup, "search", "Suche", "Treffer-Titel in der Suche nach TYP einf\xE4rben.", "searchSubtyp");
-        colorViewToggle(coloringGroup, "recentFiles", "Recent Files", "Eintr\xE4ge im Recent-Files-Plugin nach TYP einf\xE4rben.", "recentFilesSubtyp");
+        const coloringGroup = new SettingGroup(containerEl).setHeading("Coloring");
+        colorViewToggle(coloringGroup, "fileExplorer", "File explorer", "Color note names in the file explorer.", "fileExplorerSubtyp");
+        colorViewToggle(coloringGroup, "graph", "Graph", "Color nodes in the global and local graph.", "graphSubtyp");
+        colorViewToggle(coloringGroup, "search", "Search", "Color result titles in search.", "searchSubtyp");
+        colorViewToggle(coloringGroup, "recentFiles", "Recent Files", "Color entries in the Recent Files plugin.", "recentFilesSubtyp");
         colorViewToggle(
           coloringGroup,
           "links",
-          "Links in Notizen",
-          "Interne Links im Notiztext (Lese-Modus, Live Preview, Hover-Vorschau) in der Farbe des TYPs ihres Ziels darstellen. Nicht aufgel\xF6ste Links bleiben unver\xE4ndert.",
+          "Links in notes",
+          "Color internal links by the TYP of their target (reading view, Live Preview, hover preview). Unresolved links stay as they are.",
           "linksSubtyp"
         );
-        colorViewToggle(
-          coloringGroup,
-          "typList",
-          "TYP View",
-          'Typ-Namen in der TYP-View selbst (Liste und Detailansicht) und im TYP-Picker in ihrer jeweiligen Farbe darstellen. Mit "Subtyp" auch die Subtypen in ihrer eigenen Farbe.',
-          "typListSubtyp"
-        );
+        colorViewToggle(coloringGroup, "typList", "TYP-Pane", "Color names in the TYP-Pane and TYP-Picker.", "typListSubtyp");
         colorViewToggle(
           coloringGroup,
           "noteTitleColor",
-          "Titel-Text einf\xE4rben",
-          "F\xE4rbt den Inline-Titel der ge\xF6ffneten Notiz selbst in der Farbe ihres TYPs ein - unabh\xE4ngig von der TYP-Markierung daneben (s. u.), beides l\xE4sst sich kombinieren.",
+          "Color note title",
+          "Color the inline title of the open note.",
           "noteTitleColorSubtyp"
         );
         const isBadge = this.plugin.settings.noteTitleStyle === "badge";
         const isBlockPosition = this.plugin.settings.noteTitleBadgePosition === "block";
         coloringGroup.addSetting((noteTitleSetting) => {
-          noteTitleSetting.setName("TYP-Markierung in der Notiz").setDesc(
-            isBadge ? '"Box mit TYP-Namen" - Beschriftung, Schalter: farbig/neutral, am Titel/am Property-Block (gedreht)' + (isBlockPosition ? ", oben/unten am Property-Block" : "") + "." : "Wie der TYP in der ge\xF6ffneten Notiz markiert wird."
-          ).addDropdown(
-            (dropdown) => dropdown.addOption("none", "Nichts").addOption("dot", "Farbpunkt am Titel").addOption("badge", "Box mit TYP-Namen").setValue(this.plugin.settings.noteTitleStyle).onChange(async (value) => {
+          noteTitleSetting.setName("TYP marker in note").setDesc(isBadge ? "Badge options: label, color, position." : "How the open note shows its TYP.").addDropdown(
+            (dropdown) => dropdown.addOption("none", "None").addOption("dot", "Dot at title").addOption("badge", "Badge with TYP name").setValue(this.plugin.settings.noteTitleStyle).onChange(async (value) => {
               this.plugin.settings.noteTitleStyle = value;
               await this.plugin.saveSettings();
               this.plugin.refreshTypColors?.();
               this.display();
             })
           );
-          const badgeLabel = this.plugin.settings.noteTitleBadgeLabel ?? "type";
-          const showSubtyp = this.plugin.settings.noteTitleStyle === "dot" || isBadge && this.plugin.settings.noteTitleBadgeColored && badgeLabel === "type-subtype";
+          const badgeLabel = this.plugin.settings.noteTitleBadgeLabel ?? "typ";
+          const showSubtyp = this.plugin.settings.noteTitleStyle === "dot" || isBadge && this.plugin.settings.noteTitleBadgeColored && badgeLabel === "typ-subtyp";
           if (!isBadge && !showSubtyp) return;
-          noteTitleSetting.settingEl.addClass("fred-note-title-setting");
+          noteTitleSetting.settingEl.addClass("typ-note-title-setting");
           const addLabeledToggle = (label, tooltip, value, onChange) => {
-            const row = noteTitleSetting.controlEl.createDiv({ cls: "fred-note-title-toggle-row" });
-            row.createSpan({ cls: "fred-note-title-toggle-label", text: label });
+            const row = noteTitleSetting.controlEl.createDiv({ cls: "typ-note-title-toggle-row" });
+            row.createSpan({ cls: "typ-note-title-toggle-label", text: label });
             new ToggleComponent(row).setTooltip(tooltip).setValue(value).onChange(onChange);
           };
           const addSubtypToggle = (label) => addLabeledToggle(
             label,
-            "Farbe des Subtyps statt der des TYPs verwenden",
+            "Use Subtyp color instead of TYP color",
             this.plugin.settings.colorViews.noteTitleMarkerSubtyp,
             async (value) => {
               this.plugin.settings.colorViews.noteTitleMarkerSubtyp = value;
@@ -1145,22 +1112,22 @@ var require_settings = __commonJS({
             addSubtypToggle("Subtyp");
             return;
           }
-          const labelRow = noteTitleSetting.controlEl.createDiv({ cls: "fred-note-title-toggle-row" });
-          labelRow.createSpan({ cls: "fred-note-title-toggle-label", text: "Beschriftung" });
-          new DropdownComponent(labelRow).addOption("type", "[TYP]").addOption("type-subtype", "[TYP/Subtyp]").addOption("subtype", "[Subtyp]").setValue(badgeLabel).onChange(async (value) => {
+          const labelRow = noteTitleSetting.controlEl.createDiv({ cls: "typ-note-title-toggle-row" });
+          labelRow.createSpan({ cls: "typ-note-title-toggle-label", text: "Label" });
+          new DropdownComponent(labelRow).addOption("typ", "[TYP]").addOption("typ-subtyp", "[TYP/Subtyp]").addOption("subtyp", "[Subtyp]").setValue(badgeLabel).onChange(async (value) => {
             this.plugin.settings.noteTitleBadgeLabel = value;
             await this.plugin.saveSettings();
             this.plugin.refreshTypColors?.();
             this.display();
           });
-          addLabeledToggle("Farbig", "Farbig (TYP-Farbe) statt neutral", this.plugin.settings.noteTitleBadgeColored, async (value) => {
+          addLabeledToggle("Colored", "Colored instead of neutral", this.plugin.settings.noteTitleBadgeColored, async (value) => {
             this.plugin.settings.noteTitleBadgeColored = value;
             await this.plugin.saveSettings();
             this.plugin.refreshTypColors?.();
             this.display();
           });
-          if (showSubtyp) addSubtypToggle("Subtyp-Farbe");
-          addLabeledToggle("Am Property-Block", "Am Property-Block (gedreht) statt am Titel", isBlockPosition, async (value) => {
+          if (showSubtyp) addSubtypToggle("Subtyp color");
+          addLabeledToggle("At property block", "At the property block (rotated) instead of the title", isBlockPosition, async (value) => {
             this.plugin.settings.noteTitleBadgePosition = value ? "block" : "title";
             await this.plugin.saveSettings();
             this.plugin.refreshTypColors?.();
@@ -1168,8 +1135,8 @@ var require_settings = __commonJS({
           });
           if (isBlockPosition) {
             addLabeledToggle(
-              "Oben statt unten",
-              "Oben statt unten am Property-Block",
+              "Top instead of bottom",
+              "Top of the property block instead of bottom",
               this.plugin.settings.noteTitleVerticalAlign === "top",
               async (value) => {
                 this.plugin.settings.noteTitleVerticalAlign = value ? "top" : "bottom";
@@ -1183,47 +1150,41 @@ var require_settings = __commonJS({
           coloringGroup,
           "backlinks",
           "Backlinks",
-          "Trefferzeilen im Backlinks-Pane sowie in den im Dokument eingebetteten Backlinks (inkl. nicht verlinkter Erw\xE4hnungen) nach TYP einf\xE4rben.",
+          "Color results in the backlinks pane and in embedded backlinks, including unlinked mentions.",
           "backlinksSubtyp"
         );
-        colorViewToggle(
-          coloringGroup,
-          "bookmarks",
-          "Bookmarks",
-          "Eintr\xE4ge im Bookmarks-Pane, die direkt auf eine Notiz zeigen, nach TYP einf\xE4rben.",
-          "bookmarksSubtyp"
-        );
+        colorViewToggle(coloringGroup, "bookmarks", "Bookmarks", "Color bookmarks that point directly to a note.", "bookmarksSubtyp");
         colorViewToggle(
           coloringGroup,
           "allProperties",
           "All Properties",
-          'In Obsidians vault-weiter "All Properties"-Ansicht Property-Namen einf\xE4rben, die im TYP-Frontmatter genau eines TYPs vorkommen (in dessen Farbe) - kommen sie bei mehreren TYPs vor, stattdessen fett statt eingef\xE4rbt. Mit "Subtyp" z\xE4hlen auch die Frontmatter-Bl\xF6cke der Subtypen f\xFCr ihren jeweiligen TYP, eingef\xE4rbt in der Farbe des Subtyps.',
+          `In Obsidian's "All properties" view, color property names that belong to exactly one TYP-Frontmatter, or bold them if more than one TYP uses them. With Subtyp, Subtyp blocks count as well, in the Subtyp color.`,
           "allPropertiesSubtyp",
-          { typTooltip: "TYP-Frontmatter der TYPen", subtypTooltip: "Frontmatter-Bl\xF6cke der Subtypen mit einbeziehen, in Subtyp-Farbe" }
+          { typTooltip: "TYP-Frontmatter", subtypTooltip: "Include Subtyp blocks, in Subtyp color" }
         );
-        const subtypeColorGroup = new SettingGroup(containerEl).setHeading("Subtyp-Farben");
+        const subtypColorGroup = new SettingGroup(containerEl).setHeading("Subtyp colors");
         const rangeMax = {
           h: 180,
           /* s: 100, */
           l: 100
         };
         const rangeDesc = {
-          h: "Wie weit der Farbton eines Subtyps h\xF6chstens von dem seines TYPs abweichen darf (\xB1 Grad).",
-          // s: "Wie blass ein Subtyp gegenüber seinem TYP höchstens werden darf (Prozent der TYP-Sättigung). Der Regler geht nur nach unten - kräftiger als die Hauptfarbe soll ein Subtyp nicht werden.",
-          l: "Wie weit die Helligkeit eines Subtyps h\xF6chstens von der seines TYPs abweichen darf (\xB1 Prozent des Wegs zu Wei\xDF bzw. Schwarz - 100 % w\xE4re reines Wei\xDF bzw. Schwarz)."
+          h: "Maximum hue difference between a Subtyp and its TYP.",
+          // s: "Maximum share by which a Subtyp may be paler than its TYP. Only goes down - a Subtyp shouldn't be louder than its TYP.",
+          l: "Maximum lightness difference between a Subtyp and its TYP, as a share of the way to white or black."
         };
         const refreshColorsSoon = debounce(() => this.plugin.refreshTypColors?.(), 300, true);
-        for (const { key, label, unit, downOnly } of SUBTYPE_COLOR_CHANNELS) {
-          subtypeColorGroup.addSetting(
+        for (const { key, label, unit, downOnly } of SUBTYP_COLOR_CHANNELS) {
+          subtypColorGroup.addSetting(
             (setting) => setting.setName(`${label} (${downOnly ? "\u2212" : "\xB1"} ${unit})`).setDesc(rangeDesc[key]).addSlider(
               (slider) => slider.setLimits(0, rangeMax[key], 1).setValue(colorRange(this.plugin.settings, key)).setDynamicTooltip().onChange(async (value) => {
-                this.plugin.settings.subtypeColorRanges = { ...DEFAULT_SUBTYPE_COLOR_RANGES2, ...this.plugin.settings.subtypeColorRanges, [key]: value };
+                this.plugin.settings.subtypColorRanges = { ...DEFAULT_SUBTYP_COLOR_RANGES, ...this.plugin.settings.subtypColorRanges, [key]: value };
                 await this.plugin.saveSettings();
                 refreshColorsSoon();
               })
             ).addExtraButton(
-              (button) => button.setIcon("rotate-ccw").setTooltip(`Zur\xFCcksetzen auf ${DEFAULT_SUBTYPE_COLOR_RANGES2[key]}`).onClick(async () => {
-                this.plugin.settings.subtypeColorRanges = { ...DEFAULT_SUBTYPE_COLOR_RANGES2, ...this.plugin.settings.subtypeColorRanges, [key]: DEFAULT_SUBTYPE_COLOR_RANGES2[key] };
+              (button) => button.setIcon("rotate-ccw").setTooltip(`Reset to ${DEFAULT_SUBTYP_COLOR_RANGES[key]}`).onClick(async () => {
+                this.plugin.settings.subtypColorRanges = { ...DEFAULT_SUBTYP_COLOR_RANGES, ...this.plugin.settings.subtypColorRanges, [key]: DEFAULT_SUBTYP_COLOR_RANGES[key] };
                 await this.plugin.saveSettings();
                 this.plugin.refreshTypColors?.();
                 this.display();
@@ -1235,17 +1196,17 @@ var require_settings = __commonJS({
         colorViewToggle(
           frontmatterGroup,
           "frontmatterDefaults",
-          "Property-Namen fett markieren",
-          'In Notizen (Frontmatter im Dokument sowie Properties-Seitenleiste) die Namen der Properties fett darstellen, die im TYP-Frontmatter des jeweiligen TYPs hinterlegt sind. Mit "Subtyp" zus\xE4tzlich die aus dem Frontmatter-Block ihres SUBTYPs.',
+          "Bold TYP properties",
+          "Show TYP-Frontmatter property names in bold in notes and the properties sidebar. With Subtyp, the note's Subtyp block counts as well.",
           "frontmatterDefaultsSubtyp",
-          { typTooltip: "TYP-Frontmatter der TYPen", subtypTooltip: "Frontmatter-Bl\xF6cke der Subtypen mit einbeziehen" }
+          { typTooltip: "TYP-Frontmatter", subtypTooltip: "Include Subtyp blocks" }
         );
         frontmatterGroup.addSetting((setting) => {
-          setting.settingEl.addClass("fred-order-setting");
+          setting.settingEl.addClass("typ-order-setting");
           mountGlobalOrderEditor(setting.infoEl, this.plugin);
           setting.infoEl.createDiv({
             cls: "setting-item-description",
-            text: 'Bestimmt die Reihenfolge, in der die Befehle "Frontmatter Sortierung aktualisieren" die in einer Notiz vorhandenen Properties anordnen (erg\xE4nzt oder \xE4ndert keine Werte). Einzelne Properties (z. B. cssclasses, aliases) lassen sich fest platzieren - "TYP" ist die TYP-Property selbst, "SUBTYP" analog die SUBTYP-Property, "TYP-Frontmatter" steht f\xFCr die TYP-Frontmatter-Liste des jeweiligen Typs samt dahinter dem Block seines SUBTYPs, "Sonstige Properties" f\xFCr alles \xDCbrige. Reihenfolge per Drag & Drop \xE4nderbar, die vier Platzhalter-Zeilen lassen sich nicht entfernen.'
+            text: `Order applied by the "Sort frontmatter" commands; values are never changed. Pin single properties such as cssclasses or aliases. TYP and SUBTYP are the properties themselves, "TYP-Frontmatter" is the TYP's list followed by its Subtyp block, "Other properties" is everything else. Drag to reorder; the four placeholder rows can't be removed.`
           });
         });
         containerEl.scrollTop = scrollTop;
@@ -1259,13 +1220,14 @@ var require_settings = __commonJS({
 var require_base_dialogs = __commonJS({
   "src/base-dialogs.js"(exports2, module2) {
     var { Modal, Setting } = require("obsidian");
+    var { plural } = require_typ_utils();
     var NOTE_PREFIX = "note.";
     function columnLabel(id) {
       return id.startsWith(NOTE_PREFIX) ? id.slice(NOTE_PREFIX.length) : id;
     }
     function targetLabel(target) {
-      if (!target.type) return `Subtyp ${target.subtype}`;
-      return target.subtype ? `${target.type} / ${target.subtype}` : `TYP ${target.type}`;
+      if (!target.typ) return `Subtyp ${target.subtyp}`;
+      return target.subtyp ? `${target.typ} / ${target.subtyp}` : `TYP ${target.typ}`;
     }
     var ColumnOptionsModal = class extends Modal {
       constructor(plugin, target, preview, resolve) {
@@ -1274,13 +1236,13 @@ var require_base_dialogs = __commonJS({
         this.target = target;
         this.preview = preview;
         this.resolve = resolve;
-        this.options = { floating: false, allSubtypes: false, tags: false };
+        this.options = { floating: false, allSubtyps: false, tags: false };
         this.confirmed = false;
       }
       onOpen() {
         const { contentEl } = this;
-        this.modalEl.addClass("fred-base-options-modal");
-        this.titleEl.setText(`Spalten f\xFCr ${targetLabel(this.target)}`);
+        this.modalEl.addClass("typ-base-options-modal");
+        this.titleEl.setText(`Columns for ${targetLabel(this.target)}`);
         const toggle = (name, description, key) => {
           new Setting(contentEl).setName(name).setDesc(description).addToggle(
             (control) => control.setValue(this.options[key]).onChange((value) => {
@@ -1289,16 +1251,16 @@ var require_base_dialogs = __commonJS({
             })
           );
         };
-        toggle("Floating Properties", "Die kursiv markierten Properties des Blocks mitnehmen.", "floating");
-        if (!this.target.subtype) {
-          toggle("Alle Subtyp-Properties", "Zus\xE4tzlich die Properties s\xE4mtlicher Subtyp-Bl\xF6cke dieses TYPs.", "allSubtypes");
+        toggle("Floating properties", "Include the block's floating (italic) properties.", "floating");
+        if (!this.target.subtyp) {
+          toggle("All Subtyp properties", "Also include the properties of every Subtyp block of this TYP.", "allSubtyps");
         }
-        toggle("tags", "Die tags-Property als eigene Spalte.", "tags");
-        this.previewEl = contentEl.createDiv({ cls: "fred-base-preview" });
+        toggle("tags", "Add the tags property as a column.", "tags");
+        this.previewEl = contentEl.createDiv({ cls: "typ-base-preview" });
         this.renderPreview();
         const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-        buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
-        const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "\xDCbernehmen" });
+        buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+        const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "Apply" });
         confirm.addEventListener("click", () => {
           this.confirmed = true;
           this.close();
@@ -1307,9 +1269,9 @@ var require_base_dialogs = __commonJS({
       renderPreview() {
         const ids = this.preview(this.options);
         this.previewEl.empty();
-        this.previewEl.createDiv({ cls: "fred-base-preview-title", text: `${ids.length} Spalte(n)` });
-        const list = this.previewEl.createDiv({ cls: "fred-base-preview-list" });
-        for (const id of ids) list.createSpan({ cls: "fred-base-preview-column", text: columnLabel(id) });
+        this.previewEl.createDiv({ cls: "typ-base-preview-title", text: plural(ids.length, "column") });
+        const list = this.previewEl.createDiv({ cls: "typ-base-preview-list" });
+        for (const id of ids) list.createSpan({ cls: "typ-base-preview-column", text: columnLabel(id) });
       }
       onClose() {
         this.contentEl.empty();
@@ -1330,11 +1292,11 @@ var require_base_dialogs = __commonJS({
       }
       onOpen() {
         const { contentEl } = this;
-        this.modalEl.addClass("fred-base-removal-modal");
-        this.titleEl.setText(`Spalten entfernen aus "${this.viewName}"`);
+        this.modalEl.addClass("typ-base-removal-modal");
+        this.titleEl.setText(`Remove columns from "${this.viewName}"`);
         contentEl.createEl("p", {
-          cls: "fred-base-removal-intro",
-          text: "Diese Spalten geh\xF6ren nicht zum TYP. Abgew\xE4hlte bleiben stehen."
+          cls: "typ-base-removal-intro",
+          text: "These columns don't belong to the TYP. Unchecked ones are kept."
         });
         for (const id of this.columns) {
           new Setting(contentEl).setName(columnLabel(id)).addToggle(
@@ -1345,8 +1307,8 @@ var require_base_dialogs = __commonJS({
           );
         }
         const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-        buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
-        const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "\xDCbernehmen" });
+        buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+        const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "Apply" });
         confirm.addEventListener("click", () => {
           this.confirmed = true;
           this.close();
@@ -1368,9 +1330,10 @@ var require_base_dialogs = __commonJS({
 var require_bases = __commonJS({
   "src/bases.js"(exports2, module2) {
     var { Notice, TFile, stringifyYaml } = require("obsidian");
-    var { getSubtypeNames: getSubtypeNames2 } = require_subtypes();
+    var { getSubtypNames: getSubtypNames2 } = require_subtyps();
     var { normalizeGlobalOrder: normalizeGlobalOrder2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_frontmatter_sort();
     var { askColumnOptions, askRemovals } = require_base_dialogs();
+    var { plural } = require_typ_utils();
     var FILE_NAME_ID = "file.name";
     var NOTE_PREFIX = "note.";
     var TAGS_PROPERTY = "tags";
@@ -1417,21 +1380,21 @@ var require_bases = __commonJS({
     function readTarget(...filterGroups) {
       const found = { [TYP_PROPERTY2]: /* @__PURE__ */ new Set(), [SUBTYP_PROPERTY2]: /* @__PURE__ */ new Set() };
       for (const group of filterGroups) collectEquals(group, found);
-      const types = [...found[TYP_PROPERTY2]];
-      const subtypes = [...found[SUBTYP_PROPERTY2]];
-      if (types.length > 1 || subtypes.length > 1) return null;
-      if (types.length === 0 && subtypes.length === 0) return null;
-      return { type: types[0] ?? null, subtype: subtypes[0] ?? null };
+      const typs = [...found[TYP_PROPERTY2]];
+      const subtyps = [...found[SUBTYP_PROPERTY2]];
+      if (typs.length > 1 || subtyps.length > 1) return null;
+      if (typs.length === 0 && subtyps.length === 0) return null;
+      return { typ: typs[0] ?? null, subtyp: subtyps[0] ?? null };
     }
     function isSystemKey(key) {
       return key === "" || sameId(key, TYP_PROPERTY2) || sameId(key, SUBTYP_PROPERTY2);
     }
-    function blockKeys(plugin, type, subtype, includeFloating) {
-      const { defaults } = plugin.collectBlocks(type, subtype, includeFloating);
+    function blockKeys(plugin, typ, subtyp, includeFloating) {
+      const { defaults } = plugin.collectBlocks(typ, subtyp, includeFloating);
       return Object.keys(defaults).filter((key) => !isSystemKey(key));
     }
-    function typesForSubtype(plugin, subtype) {
-      return plugin.settings.types.filter((type) => getSubtypeNames2(plugin.settings, type).includes(subtype));
+    function typsForSubtyp(plugin, subtyp) {
+      return plugin.settings.typs.filter((typ) => getSubtypNames2(plugin.settings, typ).includes(subtyp));
     }
     function targetKeys(plugin, target, options) {
       const seen = /* @__PURE__ */ new Set();
@@ -1445,16 +1408,16 @@ var require_bases = __commonJS({
           list.push(key);
         }
       };
-      if (!target.type) {
-        for (const type of typesForSubtype(plugin, target.subtype)) {
-          add(main, blockKeys(plugin, type, target.subtype, options.floating));
+      if (!target.typ) {
+        for (const typ of typsForSubtyp(plugin, target.subtyp)) {
+          add(main, blockKeys(plugin, typ, target.subtyp, options.floating));
         }
         return { main, others };
       }
-      add(main, blockKeys(plugin, target.type, target.subtype, options.floating));
-      if (options.allSubtypes && !target.subtype) {
-        for (const subtype of getSubtypeNames2(plugin.settings, target.type)) {
-          add(others, blockKeys(plugin, target.type, subtype, options.floating));
+      add(main, blockKeys(plugin, target.typ, target.subtyp, options.floating));
+      if (options.allSubtyps && !target.subtyp) {
+        for (const subtyp of getSubtypNames2(plugin.settings, target.typ)) {
+          add(others, blockKeys(plugin, target.typ, subtyp, options.floating));
         }
       }
       return { main, others };
@@ -1487,36 +1450,36 @@ var require_bases = __commonJS({
       return ids;
     }
     function targetViews(plugin, target, options, { scoped }) {
-      if (!target.type) {
+      if (!target.typ) {
         const view = {
           type: "table",
-          name: target.subtype,
+          name: target.subtyp,
           order: columnIds(plugin, target, options)
         };
-        if (scoped) view.filters = { and: [equalsFilter(SUBTYP_PROPERTY2, target.subtype)] };
-        if (typesForSubtype(plugin, target.subtype).length > 1) {
+        if (scoped) view.filters = { and: [equalsFilter(SUBTYP_PROPERTY2, target.subtyp)] };
+        if (typsForSubtyp(plugin, target.subtyp).length > 1) {
           view.groupBy = { property: noteId(TYP_PROPERTY2), direction: "ASC" };
         }
         return [view];
       }
-      const type = target.type;
-      const subtypes = getSubtypeNames2(plugin.settings, type);
+      const typ = target.typ;
+      const subtyps = getSubtypNames2(plugin.settings, typ);
       const main = {
         type: "table",
-        name: type,
-        order: columnIds(plugin, { type, subtype: null }, options)
+        name: typ,
+        order: columnIds(plugin, { typ, subtyp: null }, options)
       };
-      if (scoped) main.filters = { and: [equalsFilter(TYP_PROPERTY2, type)] };
-      if (subtypes.length > 0) main.groupBy = { property: noteId(SUBTYP_PROPERTY2), direction: "ASC" };
+      if (scoped) main.filters = { and: [equalsFilter(TYP_PROPERTY2, typ)] };
+      if (subtyps.length > 0) main.groupBy = { property: noteId(SUBTYP_PROPERTY2), direction: "ASC" };
       const views = [main];
-      for (const subtype of subtypes) {
+      for (const subtyp of subtyps) {
         views.push({
           type: "table",
-          name: subtype,
-          // allSubtypes ist in einer Subtyp-View bewusst aus (siehe targetKeys).
-          order: columnIds(plugin, { type, subtype }, { ...options, allSubtypes: false }),
+          name: subtyp,
+          // allSubtyps is always off in a Subtyp view (see targetKeys).
+          order: columnIds(plugin, { typ, subtyp }, { ...options, allSubtyps: false }),
           filters: {
-            and: scoped ? [equalsFilter(TYP_PROPERTY2, type), equalsFilter(SUBTYP_PROPERTY2, subtype)] : [equalsFilter(SUBTYP_PROPERTY2, subtype)]
+            and: scoped ? [equalsFilter(TYP_PROPERTY2, typ), equalsFilter(SUBTYP_PROPERTY2, subtyp)] : [equalsFilter(SUBTYP_PROPERTY2, subtyp)]
           }
         });
       }
@@ -1549,24 +1512,24 @@ var require_bases = __commonJS({
     }
     async function createBase(plugin, target, options) {
       const app = plugin.app;
-      const name = target.subtype ?? target.type;
+      const name = target.subtyp ?? target.typ;
       const path = `${name}.${BASE_EXTENSION}`;
       const existing = app.vault.getAbstractFileByPath(path);
       if (existing && !(existing instanceof TFile)) {
-        new Notice(`"${path}" ist keine Datei - Base nicht angelegt.`);
+        new Notice(`"${path}" is not a file \u2013 Base not created.`);
         return;
       }
       if (!existing) {
         const views = targetViews(plugin, target, options, { scoped: false });
-        const root = target.type ? { and: [equalsFilter(TYP_PROPERTY2, target.type)] } : { and: [equalsFilter(SUBTYP_PROPERTY2, target.subtype)] };
+        const root = target.typ ? { and: [equalsFilter(TYP_PROPERTY2, target.typ)] } : { and: [equalsFilter(SUBTYP_PROPERTY2, target.subtyp)] };
         const file = await app.vault.create(path, stringifyYaml({ filters: root, views: views.map(serializeView) }));
         await openBase(app, file);
-        new Notice(`${path} angelegt: ${views.length} View(s).`);
+        new Notice(`Created ${path} with ${plural(views.length, "view")}.`);
         return;
       }
       const view = await openBase(app, existing);
       if (!view) {
-        new Notice(`${path} konnte nicht gelesen werden - Base nicht erg\xE4nzt.`);
+        new Notice(`Couldn't read ${path} \u2013 Base not updated.`);
         return;
       }
       const present = new Set(view.query.views.map((cfg) => cfg.name));
@@ -1575,14 +1538,14 @@ var require_bases = __commonJS({
       const skipped = wanted.filter((entry) => present.has(entry.name)).map((entry) => entry.name);
       if (toAdd.length > 0) await appendViews(app, view, toAdd);
       const parts = [];
-      parts.push(toAdd.length > 0 ? `${path}: ${toAdd.length} View(s) erg\xE4nzt.` : `${path}: nichts zu erg\xE4nzen.`);
-      if (skipped.length > 0) parts.push(`Bereits vorhanden und unangetastet: ${skipped.join(", ")}.`);
+      parts.push(toAdd.length > 0 ? `${path}: added ${plural(toAdd.length, "view")}.` : `${path}: nothing to add.`);
+      if (skipped.length > 0) parts.push(`Already present, left unchanged: ${skipped.join(", ")}.`);
       new Notice(parts.join(" "));
     }
     async function createBaseCommand(plugin) {
-      const choice = await plugin.pickTypeAndSubtype({ includeManualOff: true });
+      const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true });
       if (!choice) return;
-      const target = choice.subtype ? { type: null, subtype: choice.subtype } : { type: choice.type, subtype: null };
+      const target = choice.subtyp ? { typ: null, subtyp: choice.subtyp } : { typ: choice.typ, subtyp: null };
       const options = await askColumnOptions(plugin, target, (current) => columnIds(plugin, target, current));
       if (!options) return;
       await createBase(plugin, target, options);
@@ -1601,16 +1564,16 @@ var require_bases = __commonJS({
       const viewName = view.controller?.viewName;
       const cfg = (viewName ? query.getViewConfig(viewName) : null) ?? query.views[0];
       if (!cfg) {
-        new Notice("Keine View aktiv.");
+        new Notice("No active view.");
         return;
       }
       let target = readTarget(serializeFilters(query.filters), serializeFilters(cfg.filters));
       if (!target) {
-        const choice = await plugin.pickTypeAndSubtype({ includeManualOff: true });
+        const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true });
         if (!choice) return;
-        target = { type: choice.type, subtype: choice.subtype };
-        const and = [equalsFilter(TYP_PROPERTY2, choice.type)];
-        if (choice.subtype) and.push(equalsFilter(SUBTYP_PROPERTY2, choice.subtype));
+        target = { typ: choice.typ, subtyp: choice.subtyp };
+        const and = [equalsFilter(TYP_PROPERTY2, choice.typ)];
+        if (choice.subtyp) and.push(equalsFilter(SUBTYP_PROPERTY2, choice.subtyp));
         query.setViewFilters(cfg.name, { and });
       }
       const options = await askColumnOptions(plugin, target, (current2) => columnIds(plugin, target, current2));
@@ -1631,19 +1594,19 @@ var require_bases = __commonJS({
         ...desired.filter((id) => !sameId(id, FILE_NAME_ID))
       ];
       if (newOrder.length === current.length && newOrder.every((id, index) => id === current[index])) {
-        new Notice(`View "${cfg.name}": Spalten sind bereits aktuell.`);
+        new Notice(`View "${cfg.name}": columns are already up to date.`);
         return;
       }
       const added = desired.filter((id) => !current.some((existing) => sameId(existing, id))).length;
       const removed = extras.length - kept.length;
       cfg.setOrder(newOrder);
-      new Notice(`View "${cfg.name}": ${added} Spalte(n) erg\xE4nzt, ${removed} entfernt.`);
+      new Notice(`View "${cfg.name}": added ${plural(added, "column")}, removed ${removed}.`);
     }
     module2.exports = {
       createBaseCommand,
       activeBaseView,
       updateActiveView,
-      // Für Tests/Entwicklung an einzelnen Bausteinen
+      // Exposed for testing single building blocks
       columnIds,
       readTarget,
       targetViews
@@ -1655,7 +1618,7 @@ var require_bases = __commonJS({
 var require_commands = __commonJS({
   "src/commands.js"(exports2, module2) {
     var { Notice } = require("obsidian");
-    var { sortAllFrontmatter, sortSingleFileFrontmatter } = require_frontmatter_sort();
+    var { sortAllFrontmatter, sortSingleFileFrontmatter, sortSummary } = require_frontmatter_sort();
     var { createBaseCommand, activeBaseView, updateActiveView } = require_bases();
     function registerCommands2(plugin) {
       const runOrReportError = (label, fn) => async () => {
@@ -1663,60 +1626,58 @@ var require_commands = __commonJS({
           await fn();
         } catch (error) {
           console.error(`[${label}]`, error);
-          new Notice(`${label} fehlgeschlagen: ${error.message}`);
+          new Notice(`${label} failed: ${error.message}`);
         }
       };
       plugin.addCommand({
-        id: "frontmatter-sortierung-alle",
-        name: "Frontmatter Sortierung GLOBAL aktualisieren",
-        callback: runOrReportError("Frontmatter Sortierung", async () => {
+        id: "sort-frontmatter-all",
+        name: "Sort frontmatter in all notes",
+        callback: runOrReportError("Frontmatter sorting", async () => {
           const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
-          new Notice(
-            changed > 0 ? `Frontmatter Sortierung: ${checked} Notizen gepr\xFCft, ${changed} sortiert.` : `Frontmatter Sortierung: ${checked} Notizen gepr\xFCft, bereits alle sortiert.`
-          );
+          new Notice(sortSummary("Frontmatter sorting", checked, changed));
         })
       });
       plugin.addCommand({
-        id: "frontmatter-sortierung-typ",
-        name: "Frontmatter Sortierung f\xFCr TYP aktualisieren",
-        callback: runOrReportError("Frontmatter Sortierung", async () => {
-          const type = await plugin.pickType({ includeManualOff: true, includeUnregistered: true });
-          if (!type) return;
-          const { checked, changed, hasTypeDefaults } = await sortAllFrontmatter(plugin.app, plugin, type);
-          let message = changed > 0 ? `Frontmatter Sortierung ${type}: ${checked} Notizen gepr\xFCft, ${changed} sortiert.` : `Frontmatter Sortierung ${type}: ${checked} Notizen gepr\xFCft, bereits alle sortiert.`;
-          if (hasTypeDefaults === false) {
-            message += ` Hinweis: F\xFCr ${type} ist kein TYP-Frontmatter hinterlegt - nur die globale Reihenfolge wurde angewendet.`;
+        id: "sort-frontmatter-typ",
+        name: "Sort frontmatter for one TYP",
+        callback: runOrReportError("Frontmatter sorting", async () => {
+          const typ = await plugin.pickTyp({ includeManualOff: true, includeUnregistered: true });
+          if (!typ) return;
+          const { checked, changed, hasTypDefaults } = await sortAllFrontmatter(plugin.app, plugin, typ);
+          let message = sortSummary(`Frontmatter sorting ${typ}`, checked, changed);
+          if (hasTypDefaults === false) {
+            message += ` Note: ${typ} has no TYP-Frontmatter, so only the global order was applied.`;
           }
           new Notice(message);
         })
       });
       plugin.addCommand({
-        id: "frontmatter-sortierung-aktive-notiz",
-        name: "Frontmatter Sortierung der aktiven Notiz aktualisieren",
+        id: "sort-frontmatter-active-note",
+        name: "Sort frontmatter of active note",
         checkCallback: (checking) => {
           const file = plugin.app.workspace.getActiveFile();
           if (!file || file.extension !== "md") return false;
           if (checking) return true;
-          runOrReportError("Frontmatter Sortierung", async () => {
+          runOrReportError("Frontmatter sorting", async () => {
             const changed = await sortSingleFileFrontmatter(plugin.app, plugin, file);
-            new Notice(changed ? `Frontmatter von "${file.basename}" sortiert.` : `Frontmatter von "${file.basename}" war bereits sortiert.`);
+            new Notice(changed ? `Sorted frontmatter of "${file.basename}".` : `Frontmatter of "${file.basename}" was already sorted.`);
           })();
           return true;
         }
       });
       plugin.addCommand({
-        id: "base-fuer-typ-anlegen",
-        name: "Base f\xFCr TYP anlegen",
-        callback: runOrReportError("Base anlegen", () => createBaseCommand(plugin))
+        id: "create-base-for-typ",
+        name: "Create Base for TYP",
+        callback: runOrReportError("Create Base", () => createBaseCommand(plugin))
       });
       plugin.addCommand({
-        id: "base-view-spalten-aktualisieren",
-        name: "Spalten der Base-View aktualisieren",
+        id: "update-base-view-columns",
+        name: "Update columns of Base view",
         checkCallback: (checking) => {
           const view = activeBaseView(plugin);
           if (!view) return false;
           if (checking) return true;
-          runOrReportError("Base aktualisieren", () => updateActiveView(plugin, view))();
+          runOrReportError("Update Base", () => updateActiveView(plugin, view))();
           return true;
         }
       });
@@ -1741,10 +1702,8 @@ var require_shortcuts = __commonJS({
         resolve: () => moment().format("YYYY-MM-DD HH:mm")
       },
       {
-        // Anders als today/now nicht der Aufrufzeitpunkt, sondern das
-        // Erstellungsdatum der jeweiligen Datei (file.stat.ctime) - braucht daher
-        // die Ziel-Datei als Kontext (file-Parameter, von getTypeDefaults
-        // durchgereicht). Ohne Datei Fallback auf den aktuellen Zeitpunkt.
+        // The file's creation date (file.stat.ctime), not the call time; falls
+        // back to now without a file.
         name: "created",
         description: "Erstellungsdatum der Datei (JJJJ-MM-TT)",
         resolve: (file) => moment(file?.stat?.ctime ?? Date.now()).format("YYYY-MM-DD")
@@ -1762,8 +1721,8 @@ var require_shortcuts = __commonJS({
     }
     function shortcutLabel(record) {
       if (!record?.name) return "";
-      const werte = Object.values(record.args ?? {}).filter((value) => value !== void 0);
-      return werte.length > 0 ? `${record.name}: ${werte.join(", ")}` : record.name;
+      const values = Object.values(record.args ?? {}).filter((value) => value !== void 0);
+      return values.length > 0 ? `${record.name}: ${values.join(", ")}` : record.name;
     }
     function parseArgValue(raw) {
       const text = String(raw ?? "").trim();
@@ -1778,38 +1737,38 @@ var require_shortcuts = __commonJS({
     function inputParams(params) {
       return (params ?? []).filter((name) => name !== "tp" && !RESERVED_PARAMS.includes(name));
     }
-    function buildArgs(params, eingaben) {
+    function buildArgs(params, inputs) {
       const args = {};
       for (const name of inputParams(params)) {
-        const value = parseArgValue(eingaben[name]);
+        const value = parseArgValue(inputs[name]);
         if (value !== void 0) args[name] = value;
       }
       return args;
     }
     function resolveCallArgs2(params, args, reserved = {}) {
       if (params === null || params === void 0) return [reserved.newFile, reserved.ctx];
-      const werte = [];
-      const objektPosition = /* @__PURE__ */ new Map();
+      const callArgs = [];
+      const objectIndex = /* @__PURE__ */ new Map();
       for (const name of params) {
         if (name === "tp") continue;
         if (RESERVED_PARAMS.includes(name)) {
-          werte.push(reserved[name]);
+          callArgs.push(reserved[name]);
           continue;
         }
-        const punkt = name.indexOf(".");
-        if (punkt === -1) {
-          werte.push(args?.[name]);
+        const dot = name.indexOf(".");
+        if (dot === -1) {
+          callArgs.push(args?.[name]);
           continue;
         }
-        const basis = name.slice(0, punkt);
-        if (!objektPosition.has(basis)) {
-          objektPosition.set(basis, werte.length);
-          werte.push({});
+        const base = name.slice(0, dot);
+        if (!objectIndex.has(base)) {
+          objectIndex.set(base, callArgs.length);
+          callArgs.push({});
         }
-        const wert = args?.[name];
-        if (wert !== void 0) werte[objektPosition.get(basis)][name.slice(punkt + 1)] = wert;
+        const value = args?.[name];
+        if (value !== void 0) callArgs[objectIndex.get(base)][name.slice(dot + 1)] = value;
       }
-      return werte;
+      return callArgs;
     }
     function isListProperty(app, key) {
       return app?.metadataTypeManager?.getTypeInfo?.(key)?.expected?.type === "multitext";
@@ -1866,22 +1825,20 @@ var require_shortcut_picker = __commonJS({
       getItems() {
         return this.items;
       }
-      // Fuzzy-Suche greift auch auf die Beschreibung, nicht nur auf den Namen -
-      // "Erstellungsdatum" findet so auch "created".
+      // Fuzzy search also covers the description: "Erstellungsdatum" finds "created".
       getItemText(item) {
         const label = itemLabel(item);
         return item.description ? `${label} ${item.description}` : label;
       }
       renderSuggestion(match, el) {
         const item = match.item;
-        el.addClass("fred-typ-shortcut-suggestion");
-        el.createEl("code", { cls: "fred-typ-shortcut-suggestion-name", text: itemLabel(item) });
-        if (item.description) el.createSpan({ cls: "fred-typ-shortcut-suggestion-desc", text: item.description });
+        el.addClass("typ-shortcut-suggestion");
+        el.createEl("code", { cls: "typ-shortcut-suggestion-name", text: itemLabel(item) });
+        if (item.description) el.createSpan({ cls: "typ-shortcut-suggestion-desc", text: item.description });
       }
-      // Siehe TypPickerModal in type-picker.js: Obsidians selectSuggestion() ruft
-      // erst close() und danach erst onChooseItem() - "chosen" muss deshalb schon
-      // hier gesetzt werden, sonst löst das von close() ausgelöste onClose() das
-      // Promise vorzeitig mit null auf und die eigentliche Auswahl geht verloren.
+      // Obsidian's selectSuggestion() calls close() BEFORE onChooseItem(), so
+      // "chosen" must be set here - otherwise onClose() resolves with null first
+      // and the choice is lost. Same as in TypPickerModal (typ-picker.js).
       selectSuggestion(item, evt) {
         this.chosen = true;
         super.selectSuggestion(item, evt);
@@ -1895,49 +1852,49 @@ var require_shortcut_picker = __commonJS({
       }
     };
     var ShortcutArgsModal = class extends Modal {
-      constructor(app, item, vorhandene, resolve) {
+      constructor(app, item, existing, resolve) {
         super(app);
         this.item = item;
         this.resolve = resolve;
-        this.felder = inputParams(item.params);
-        this.eingaben = {};
-        for (const name of this.felder) {
-          const wert = vorhandene?.[name];
-          this.eingaben[name] = wert === void 0 || wert === null ? "" : String(wert);
+        this.fields = inputParams(item.params);
+        this.inputs = {};
+        for (const name of this.fields) {
+          const value = existing?.[name];
+          this.inputs[name] = value === void 0 || value === null ? "" : String(value);
         }
-        this.bestaetigt = false;
+        this.confirmed = false;
       }
       onOpen() {
         this.titleEl.setText(`Argumente f\xFCr ${this.item.name}`);
         if (this.item.description) {
-          this.contentEl.createDiv({ cls: "fred-typ-shortcut-args-desc", text: this.item.description });
+          this.contentEl.createDiv({ cls: "typ-shortcut-args-desc", text: this.item.description });
         }
-        for (const name of this.felder) {
+        for (const name of this.fields) {
           new Setting(this.contentEl).setName(name).addText(
-            (text) => text.setValue(this.eingaben[name]).onChange((value) => {
-              this.eingaben[name] = value;
+            (text) => text.setValue(this.inputs[name]).onChange((value) => {
+              this.inputs[name] = value;
             }).inputEl.addEventListener("keydown", (event) => {
               if (event.key === "Enter" && !event.isComposing) {
                 event.preventDefault();
-                this.uebernehmen();
+                this.submit();
               }
             })
           );
         }
         new Setting(this.contentEl).addButton(
-          (button) => button.setButtonText("\xDCbernehmen").setCta().onClick(() => this.uebernehmen())
+          (button) => button.setButtonText("\xDCbernehmen").setCta().onClick(() => this.submit())
         );
       }
-      uebernehmen() {
-        this.bestaetigt = true;
+      submit() {
+        this.confirmed = true;
         this.close();
       }
       onClose() {
         this.contentEl.empty();
-        this.resolve(this.bestaetigt ? buildArgs(this.felder, this.eingaben) : null);
+        this.resolve(this.confirmed ? buildArgs(this.fields, this.inputs) : null);
       }
     };
-    async function pickShortcut(app, key, getScripts, vorhanden = null) {
+    async function pickShortcut(app, key, getScripts, current = null) {
       const items = [
         ...FIXED_SHORTCUTS.map(({ name, description }) => ({ name, description, params: null })),
         ...getScripts().map(({ name, params, description }) => ({ name: SCRIPT_PREFIX + name, params, description }))
@@ -1945,8 +1902,8 @@ var require_shortcut_picker = __commonJS({
       const item = await new Promise((resolve) => new ShortcutPickerModal(app, key, items, resolve).open());
       if (!item) return null;
       if (inputParams(item.params).length === 0) return { name: item.name };
-      const vorbelegung = vorhanden?.name === item.name ? vorhanden.args : null;
-      const args = await new Promise((resolve) => new ShortcutArgsModal(app, item, vorbelegung, resolve).open());
+      const prefill = current?.name === item.name ? current.args : null;
+      const args = await new Promise((resolve) => new ShortcutArgsModal(app, item, prefill, resolve).open());
       if (args === null) return null;
       return Object.keys(args).length > 0 ? { name: item.name, args } : { name: item.name };
     }
@@ -1954,16 +1911,15 @@ var require_shortcut_picker = __commonJS({
   }
 });
 
-// src/type-frontmatter-editor.js
-var require_type_frontmatter_editor = __commonJS({
-  "src/type-frontmatter-editor.js"(exports2, module2) {
+// src/typ-frontmatter-editor.js
+var require_typ_frontmatter_editor = __commonJS({
+  "src/typ-frontmatter-editor.js"(exports2, module2) {
     var { MarkdownView, Menu, WorkspaceLeaf, setIcon } = require("obsidian");
     var { shortcutLabel } = require_shortcuts();
     var { pickShortcut } = require_shortcut_picker();
-    var { getSubtype: getSubtype2, ensureSubtype } = require_subtypes();
-    var EDITOR_CLASS = "fred-typ-frontmatter-editor";
-    var TYP_PROPERTY2 = "TYP";
-    var SUBTYP_PROPERTY2 = "SUBTYP";
+    var { getSubtyp: getSubtyp2, ensureSubtyp } = require_subtyps();
+    var { TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
+    var EDITOR_CLASS = "typ-frontmatter-editor";
     var SYSTEM_PROPERTIES = [TYP_PROPERTY2.toLowerCase(), SUBTYP_PROPERTY2.toLowerCase()];
     function stripTypProperty(frontmatter) {
       for (const key of Object.keys(frontmatter)) {
@@ -1971,41 +1927,41 @@ var require_type_frontmatter_editor = __commonJS({
       }
       return frontmatter;
     }
-    function typeStore(plugin, type) {
+    function typStore(plugin, typ) {
       return {
-        type,
-        subtype: null,
-        getFrontmatter: () => plugin.settings.typeDefaultFrontmatter[type] ?? {},
+        typ,
+        subtyp: null,
+        getFrontmatter: () => plugin.settings.typDefaultFrontmatter[typ] ?? {},
         setFrontmatter: (frontmatter) => {
-          plugin.settings.typeDefaultFrontmatter[type] = frontmatter;
+          plugin.settings.typDefaultFrontmatter[typ] = frontmatter;
         },
-        getFloating: () => plugin.settings.typeFloatingKeys[type] ?? [],
+        getFloating: () => plugin.settings.typFloatingKeys[typ] ?? [],
         setFloating: (keys) => {
-          if (keys.length > 0) plugin.settings.typeFloatingKeys[type] = keys;
-          else delete plugin.settings.typeFloatingKeys[type];
+          if (keys.length > 0) plugin.settings.typFloatingKeys[typ] = keys;
+          else delete plugin.settings.typFloatingKeys[typ];
         },
-        getShortcuts: () => plugin.settings.typeShortcuts[type] ?? {},
+        getShortcuts: () => plugin.settings.typShortcuts[typ] ?? {},
         setShortcuts: (shortcuts) => {
-          if (Object.keys(shortcuts).length > 0) plugin.settings.typeShortcuts[type] = shortcuts;
-          else delete plugin.settings.typeShortcuts[type];
+          if (Object.keys(shortcuts).length > 0) plugin.settings.typShortcuts[typ] = shortcuts;
+          else delete plugin.settings.typShortcuts[typ];
         }
       };
     }
-    function subtypeStore(plugin, type, subtype) {
+    function subtypStore(plugin, typ, subtyp) {
       return {
-        type,
-        subtype,
-        getFrontmatter: () => getSubtype2(plugin.settings, type, subtype)?.frontmatter ?? {},
+        typ,
+        subtyp,
+        getFrontmatter: () => getSubtyp2(plugin.settings, typ, subtyp)?.frontmatter ?? {},
         setFrontmatter: (frontmatter) => {
-          ensureSubtype(plugin.settings, type, subtype).frontmatter = frontmatter;
+          ensureSubtyp(plugin.settings, typ, subtyp).frontmatter = frontmatter;
         },
-        getFloating: () => getSubtype2(plugin.settings, type, subtype)?.floatingKeys ?? [],
+        getFloating: () => getSubtyp2(plugin.settings, typ, subtyp)?.floatingKeys ?? [],
         setFloating: (keys) => {
-          ensureSubtype(plugin.settings, type, subtype).floatingKeys = keys;
+          ensureSubtyp(plugin.settings, typ, subtyp).floatingKeys = keys;
         },
-        getShortcuts: () => getSubtype2(plugin.settings, type, subtype)?.shortcuts ?? {},
+        getShortcuts: () => getSubtyp2(plugin.settings, typ, subtyp)?.shortcuts ?? {},
         setShortcuts: (shortcuts) => {
-          ensureSubtype(plugin.settings, type, subtype).shortcuts = shortcuts;
+          ensureSubtyp(plugin.settings, typ, subtyp).shortcuts = shortcuts;
         }
       };
     }
@@ -2034,13 +1990,13 @@ var require_type_frontmatter_editor = __commonJS({
         view = createView(new WorkspaceLeaf(app));
         return view.metadataEditor?.constructor ?? null;
       } catch (error) {
-        console.error("[typ-system] MetadataEditor-Klasse konnte nicht ermittelt werden", error);
+        console.error("[typ-system] couldn't find the MetadataEditor class", error);
         return null;
       } finally {
         try {
           view?.unload();
         } catch (error) {
-          console.error("[typ-system] Verwerfen der Hilfs-MarkdownView fehlgeschlagen", error);
+          console.error("[typ-system] couldn't discard the helper MarkdownView", error);
         }
       }
     }
@@ -2064,26 +2020,35 @@ var require_type_frontmatter_editor = __commonJS({
       }
       return null;
     }
+    var undoPropertyMenuPatch = null;
     function ensurePropertyMenuPatch(app, editor) {
       const RowClass = getPropertyRowClass(app, editor);
-      if (!RowClass || RowClass._fredMenuPatched) return;
-      RowClass._fredMenuPatched = true;
+      if (!RowClass || RowClass._typSystemMenuPatched) return;
+      RowClass._typSystemMenuPatched = true;
       const originalShowPropertyMenu = RowClass.prototype.showPropertyMenu;
+      undoPropertyMenuPatch = () => {
+        RowClass.prototype.showPropertyMenu = originalShowPropertyMenu;
+        delete RowClass._typSystemMenuPatched;
+      };
       RowClass.prototype.showPropertyMenu = function(event) {
         const owner = this.metadataEditor?.owner;
-        if (!owner?.fredStore) return originalShowPropertyMenu.call(this, event);
+        if (!owner?.typStore) return originalShowPropertyMenu.call(this, event);
         const row = this;
         const originalShowAtMouseEvent = Menu.prototype.showAtMouseEvent;
         Menu.prototype.showAtMouseEvent = function(mouseEvent) {
           Menu.prototype.showAtMouseEvent = originalShowAtMouseEvent;
-          const isFloating = owner.fredStore.getFloating().includes(row.entry.key);
+          const isFloating = owner.typStore.getFloating().includes(row.entry.key);
           this.addItem(
-            (item) => item.setTitle("Floating").setIcon("pin-off").setChecked(isFloating).setSection("title").onClick(() => toggleFloatingProperty(owner.fredView, owner.fredStore, row.entry.key))
+            (item) => item.setTitle("Floating").setIcon("pin-off").setChecked(isFloating).setSection("title").onClick(() => toggleFloatingProperty(owner.typPane, owner.typStore, row.entry.key))
           );
           return originalShowAtMouseEvent.call(this, mouseEvent);
         };
         return originalShowPropertyMenu.call(this, event);
       };
+    }
+    function removePropertyMenuPatch2() {
+      undoPropertyMenuPatch?.();
+      undoPropertyMenuPatch = null;
     }
     function toggleFloatingProperty(view, store, key) {
       const floating = store.getFloating();
@@ -2117,39 +2082,34 @@ var require_type_frontmatter_editor = __commonJS({
       const EditorClass = getMetadataEditorClass(app);
       if (!EditorClass) {
         containerEl.createEl("p", {
-          cls: "fred-typ-frontmatter-unavailable",
+          cls: "typ-frontmatter-unavailable",
           text: "Zum Initialisieren des Editors bitte zuerst einmal eine Notiz \xF6ffnen."
         });
         return null;
       }
       const owner = {
         app,
-        // Marker für ensurePropertyMenuPatch() oben: identifiziert Property-
-        // Zeilen dieses Plugin-eigenen Editors (nie einer echten Notiz) und
-        // liefert Speicherort/View, die der globale Menü-Patch pro Zeile
-        // dynamisch braucht (die Patch-Installation selbst passiert nur einmal,
-        // unabhängig davon, welcher Block dabei gerade offen war).
-        fredStore: store,
-        fredView: view,
+        // Lets ensurePropertyMenuPatch() recognize rows of this editor and gives
+        // the global menu patch the store and view per row (the patch itself is
+        // installed only once).
+        typStore: store,
+        typPane: view,
         getFile() {
           return null;
         },
-        // Nur für Obsidians Hover-Preview bei internen Links innerhalb eines
-        // Property-Werts (Event "hover-link") - beliebiger String reicht.
+        // Only for Obsidian's hover preview of internal links in a value; any
+        // string will do.
         getHoverSource() {
-          return "fred-typ-frontmatter";
+          return "typ-frontmatter";
         },
         shiftFocusBefore() {
         },
         shiftFocusAfter() {
         },
-        // Obsidians Editor ruft dies genau einmal pro abgeschlossener Änderung auf
-        // (Rename erst beim Blur des Key-Inputs, siehe handleUpdateKey im
-        // gebauten app.js) - jeder Aufruf trägt hier also maximal eine
-        // hinzugefügte und/oder entfernte (nicht-leere) Property, nie mehrere
-        // gleichzeitig außer bei einem Mehrfach-Löschen. Das macht die
-        // Floating-Markierung unten robust nachführbar, ohne Zwischenzustände
-        // während des Tippens verfolgen zu müssen.
+        // Called once per completed change (a rename only on blur of the key
+        // input), so each call adds and/or removes at most one non-empty property,
+        // except a multi-delete. That keeps the floating flag easy to track
+        // without following intermediate typing states.
         saveFrontmatter(frontmatter) {
           stripTypProperty(frontmatter);
           const previous = store.getFrontmatter();
@@ -2162,9 +2122,9 @@ var require_type_frontmatter_editor = __commonJS({
             floating = floating.map((key) => key === removedKeys[0] ? addedKeys[0] : key);
           } else {
             if (removedKeys.length > 0) floating = floating.filter((key) => !removedKeys.includes(key));
-            if (editor.fredPendingFloatingAdd && addedKeys.length === 1) {
+            if (editor.typPendingFloatingAdd && addedKeys.length === 1) {
               floating = [...floating, addedKeys[0]];
-              editor.fredPendingFloatingAdd = false;
+              editor.typPendingFloatingAdd = false;
             }
           }
           const shortcuts = { ...store.getShortcuts() };
@@ -2185,25 +2145,21 @@ var require_type_frontmatter_editor = __commonJS({
         }
       };
       const editor = new EditorClass(app, owner);
-      editor.fredPendingFloatingAdd = false;
+      editor.typPendingFloatingAdd = false;
       if (onShiftFocus) registerFocusChain(editor, onShiftFocus);
       editor.containerEl.addClass(EDITOR_CLASS);
       containerEl.appendChild(editor.containerEl);
       view.addChild(editor);
-      const defaults = store.getFrontmatter();
-      const hadTyp = Object.keys(defaults).some((key) => SYSTEM_PROPERTIES.includes(key.trim().toLowerCase()));
-      stripTypProperty(defaults);
-      if (hadTyp) view.plugin.saveSettings();
-      editor.synchronize(defaults);
+      editor.synchronize(store.getFrontmatter());
       renderShortcutControls(view, editor, store);
       ensurePropertyMenuPatch(app, editor);
       return editor;
     }
-    var CHIP_CLASS = "fred-typ-shortcut-chip";
-    var CHIP_TEXT_CLASS = "fred-typ-shortcut-chip-text";
-    var BUTTON_CLASS = "fred-typ-shortcut-button";
-    var ROW_CLASS = "fred-typ-has-shortcut";
-    var WARNING_CLASS = "fred-typ-shortcut-blocked";
+    var CHIP_CLASS = "typ-shortcut-chip";
+    var CHIP_TEXT_CLASS = "typ-shortcut-chip-text";
+    var BUTTON_CLASS = "typ-shortcut-button";
+    var ROW_CLASS = "typ-has-shortcut";
+    var WARNING_CLASS = "typ-shortcut-blocked";
     function renderShortcutControls(view, editor, store) {
       const shortcuts = store.getShortcuts();
       for (const row of editor.rendered ?? []) {
@@ -2270,41 +2226,41 @@ var require_type_frontmatter_editor = __commonJS({
       if (!current.hasOwnProperty("")) {
         current[""] = null;
         editor.synchronize(current);
-        renderShortcutControls(editor.owner.fredView, editor, editor.owner.fredStore);
+        renderShortcutControls(editor.owner.typPane, editor, editor.owner.typStore);
       }
       editor.focusKey("");
       ensurePropertyMenuPatch(editor.owner.app, editor);
     }
-    module2.exports = { mountFrontmatterEditor, addBlankProperty, ensurePropertyMenuPatch, typeStore, subtypeStore };
+    module2.exports = { mountFrontmatterEditor, addBlankProperty, ensurePropertyMenuPatch, removePropertyMenuPatch: removePropertyMenuPatch2, typStore, subtypStore };
   }
 });
 
 // src/frontmatter-blocks.js
 var require_frontmatter_blocks = __commonJS({
   "src/frontmatter-blocks.js"(exports2, module2) {
-    var { mountFrontmatterEditor, addBlankProperty, typeStore, subtypeStore } = require_type_frontmatter_editor();
-    var { getSectionOrder, isEmptyValue } = require_subtypes();
+    var { mountFrontmatterEditor, addBlankProperty, typStore, subtypStore } = require_typ_frontmatter_editor();
+    var { getSectionOrder, isEmptyValue } = require_subtyps();
     function isGrabTarget(target) {
-      if (target.closest(".clickable-icon, .fred-typ-subtype-color-dot, [contenteditable='true'], input, textarea")) return false;
+      if (target.closest(".clickable-icon, .typ-subtyp-color-dot, [contenteditable='true'], input, textarea")) return false;
       return !target.closest(".metadata-property");
     }
-    function mountFrontmatterBlocks(view, containerEl, type, { renderHeader, renderFooter, onMoveSection }) {
-      const wrapper = containerEl.createDiv({ cls: "fred-typ-blocks" });
-      const sections = getSectionOrder(view.plugin.settings, type);
+    function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFooter, onMoveSection }) {
+      const wrapper = containerEl.createDiv({ cls: "typ-blocks" });
+      const sections = getSectionOrder(view.plugin.settings, typ);
       const editors = /* @__PURE__ */ new Map();
       const blockEls = /* @__PURE__ */ new Map();
       const stores = /* @__PURE__ */ new Map();
       const api = {
-        // Alle Editor-Instanzen in Block-Reihenfolge - typ-view.js hängt sie als
-        // Component-Children ein und baut sie vor jedem Neuaufbau wieder ab.
+        // All editor instances in block order; typ-pane.js adds them as component
+        // children and unloads them before each rebuild.
         editors: [],
-        // Leerzeile am Ende des gewünschten Blocks anlegen, mit dem Fokus im
-        // Key-Feld (siehe addBlankProperty in type-frontmatter-editor.js).
-        // floating markiert die als nächstes benannte Property als Floating.
+        // Adds a blank row at the end of the block with focus in the key field
+        // (see addBlankProperty). floating marks the next named property as
+        // floating.
         addBlank(section, floating = false) {
           const editor = editors.get(section);
           if (!editor) return;
-          editor.fredPendingFloatingAdd = floating;
+          editor.typPendingFloatingAdd = floating;
           addBlankProperty(editor);
         }
       };
@@ -2320,13 +2276,13 @@ var require_frontmatter_blocks = __commonJS({
       for (const section of sections) {
         const isSub = section !== null;
         const blockEl = wrapper.createDiv({
-          cls: "fred-typ-block" + (isSub ? " fred-typ-frontmatter-block fred-typ-subtype-block" : "")
+          cls: "typ-block" + (isSub ? " typ-frontmatter-block typ-subtyp-block" : "")
         });
         blockEls.set(section, blockEl);
-        blockEl.fredSection = section;
-        const header = blockEl.createDiv({ cls: "fred-typ-frontmatter-header fred-typ-section-header" });
-        header.toggleClass("fred-typ-section-sub", isSub);
-        const store = section === null ? typeStore(view.plugin, type) : subtypeStore(view.plugin, type, section);
+        blockEl.typSection = section;
+        const header = blockEl.createDiv({ cls: "typ-frontmatter-header typ-section-header" });
+        header.toggleClass("typ-section-sub", isSub);
+        const store = section === null ? typStore(view.plugin, typ) : subtypStore(view.plugin, typ, section);
         stores.set(section, store);
         const editor = mountFrontmatterEditor(view, blockEl, store, {
           onShiftFocus: (step) => focusNeighbor(section, step)
@@ -2335,8 +2291,8 @@ var require_frontmatter_blocks = __commonJS({
           editors.set(section, editor);
           api.editors.push(editor);
         }
-        const footer = blockEl.createDiv({ cls: "fred-typ-section-footer" });
-        footer.toggleClass("fred-typ-section-sub", isSub);
+        const footer = blockEl.createDiv({ cls: "typ-section-footer" });
+        footer.toggleClass("typ-section-sub", isSub);
         renderHeader(section, header, api);
         renderFooter?.(section, footer, api);
         if (!isSub) continue;
@@ -2361,11 +2317,11 @@ var require_frontmatter_blocks = __commonJS({
           if (!dragging) {
             if (Math.abs(moveEvent.clientY - startY) < 4) return;
             dragging = true;
-            wrapper.doc.body.addClass("fred-typ-block-dragging");
+            wrapper.doc.body.addClass("typ-block-dragging");
             win.getSelection()?.removeAllRanges();
             blockEls.get(section).addClass("is-dragging");
             measure();
-            indicator = wrapper.createDiv({ cls: "fred-typ-block-drop-indicator" });
+            indicator = wrapper.createDiv({ cls: "typ-block-drop-indicator" });
           }
           moveEvent.preventDefault();
           const y = moveEvent.clientY - wrapper.getBoundingClientRect().top;
@@ -2381,7 +2337,7 @@ var require_frontmatter_blocks = __commonJS({
           win.removeEventListener("mouseup", onUp);
           win.removeEventListener("keydown", onKey, true);
           if (!dragging) return;
-          wrapper.doc.body.removeClass("fred-typ-block-dragging");
+          wrapper.doc.body.removeClass("typ-block-dragging");
           blockEls.get(section).removeClass("is-dragging");
           indicator?.remove();
           const order = boxes.map((box) => box.section);
@@ -2424,7 +2380,7 @@ var require_frontmatter_blocks = __commonJS({
           (event) => {
             if (event.button !== 0) return;
             const rowEl = event.target.closest(".metadata-property-icon")?.closest(".metadata-property");
-            const section = rowEl?.closest(".fred-typ-block")?.fredSection;
+            const section = rowEl?.closest(".typ-block")?.typSection;
             const editor = section === void 0 ? null : editors.get(section);
             const key = editor?.rendered.find((row) => row.containerEl === rowEl)?.entry.key;
             if (!key) return;
@@ -2432,10 +2388,9 @@ var require_frontmatter_blocks = __commonJS({
               section,
               key,
               rowEl,
-              // Jetzt schon gemessen: sobald die Zeile für den Platzhalter
-              // ausgeblendet ist, liefert offsetHeight 0.
+              // Measured now: once hidden for the placeholder, offsetHeight is 0.
               height: rowEl.offsetHeight,
-              spacer: editor.propertyListEl.createDiv({ cls: "fred-typ-drag-spacer" }),
+              spacer: editor.propertyListEl.createDiv({ cls: "typ-drag-spacer" }),
               placeholder: null,
               target: null
             };
@@ -2453,7 +2408,7 @@ var require_frontmatter_blocks = __commonJS({
           const list = editors.get(target).propertyListEl;
           if (!drag.placeholder) {
             drag.rowEl.style.display = "none";
-            drag.placeholder = createDiv({ cls: "metadata-property drag-ghost-hidden fred-typ-drag-placeholder" });
+            drag.placeholder = createDiv({ cls: "metadata-property drag-ghost-hidden typ-drag-placeholder" });
             drag.placeholder.style.height = `${drag.height}px`;
           }
           const rows = [...list.children].filter((el) => el !== drag.placeholder && el !== drag.spacer);
@@ -2526,125 +2481,69 @@ var require_frontmatter_blocks = __commonJS({
   }
 });
 
-// src/type-utils.js
-var require_type_utils = __commonJS({
-  "src/type-utils.js"(exports2, module2) {
-    function normalizeTypeName(raw) {
-      return raw.trim().toUpperCase();
-    }
-    function hexToHue(hex) {
-      const match = /^#?([0-9a-f]{6})$/i.exec(hex ?? "");
-      if (!match) return null;
-      const int = parseInt(match[1], 16);
-      const r = (int >> 16 & 255) / 255;
-      const g = (int >> 8 & 255) / 255;
-      const b = (int & 255) / 255;
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const delta = max - min;
-      if (delta === 0) return null;
-      let hue;
-      if (max === r) hue = (g - b) / delta % 6;
-      else if (max === g) hue = (b - r) / delta + 2;
-      else hue = (r - g) / delta + 4;
-      hue *= 60;
-      return hue < 0 ? hue + 360 : hue;
-    }
-    function compareTypes(mode, a, b, counts, typeColors) {
-      const [key, dir] = mode.split("-");
-      let cmp;
-      if (key === "count") {
-        cmp = (counts.get(a) ?? 0) - (counts.get(b) ?? 0);
-        if (dir === "desc") cmp = -cmp;
-      } else if (key === "color") {
-        const hueA = hexToHue(typeColors[a] ?? null);
-        const hueB = hexToHue(typeColors[b] ?? null);
-        if (hueA === null && hueB === null) cmp = 0;
-        else if (hueA === null) cmp = 1;
-        else if (hueB === null) cmp = -1;
-        else {
-          cmp = hueA - hueB;
-          if (dir === "desc") cmp = -cmp;
-        }
-      } else {
-        cmp = a.localeCompare(b);
-        if (dir === "desc") cmp = -cmp;
-      }
-      return cmp || a.localeCompare(b);
-    }
-    function sortTypesByMode2(types, mode, counts, typeColors) {
-      if (mode === "manual") return [...types];
-      return [...types].sort((a, b) => compareTypes(mode, a, b, counts, typeColors));
-    }
-    module2.exports = { normalizeTypeName, hexToHue, compareTypes, sortTypesByMode: sortTypesByMode2 };
-  }
-});
-
-// src/typ-view.js
-var require_typ_view = __commonJS({
-  "src/typ-view.js"(exports2, module2) {
+// src/typ-pane.js
+var require_typ_pane = __commonJS({
+  "src/typ-pane.js"(exports2, module2) {
     var { ItemView, Menu, Modal, Notice, setIcon, debounce } = require("obsidian");
     var { mountFrontmatterBlocks } = require_frontmatter_blocks();
     var {
-      normalizeSubtypeName,
-      getSubtypeNames: getSubtypeNames2,
-      ensureSubtype,
-      moveTypeSubtypes,
-      deleteTypeSubtypes,
-      mergeTypeSubtypes,
-      getSubtype: getSubtype2,
-      isSubtypeManual: isSubtypeManual2,
-      setSubtypeManual,
-      setAllSubtypesManual,
-      renameSubtype,
-      reorderSubtypes,
-      deleteSubtype,
-      mergeSubtypes,
-      renameSubtypeInNotes
-    } = require_subtypes();
-    var { normalizeTypeName, compareTypes, sortTypesByMode: sortTypesByMode2 } = require_type_utils();
-    var { typeKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
+      normalizeSubtypName,
+      getSubtypNames: getSubtypNames2,
+      ensureSubtyp,
+      moveTypSubtyps,
+      deleteTypSubtyps,
+      mergeTypSubtyps,
+      getSubtyp: getSubtyp2,
+      isSubtypManual: isSubtypManual2,
+      setSubtypManual,
+      setAllSubtypsManual,
+      renameSubtyp,
+      reorderSubtyps,
+      deleteSubtyp,
+      mergeSubtyps,
+      renameSubtypInNotes
+    } = require_subtyps();
+    var { normalizeTypName, compareTyps, sortTypsByMode: sortTypsByMode2, plural, joinAnd } = require_typ_utils();
+    var { typKeyOf, propertyValue, setCanonicalProperty: setCanonicalProperty2, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
     var {
-      subtypeColor,
+      subtypColor,
       applyColorOffset,
       hasColorOffset,
-      subtypeHasOwnColor,
+      subtypHasOwnColor,
       paintColorDot,
       nameColor,
       channelBounds,
       clampedOffset,
-      SUBTYPE_COLOR_CHANNELS,
-      DEFAULT_TYPE_COLOR
-    } = require_type_colors();
-    var VIEW_TYPE_TYP = "fred-typ-view";
+      SUBTYP_COLOR_CHANNELS,
+      DEFAULT_TYP_COLOR
+    } = require_typ_colors();
+    var VIEW_TYPE_TYP_PANE = "typ-system-pane";
     var DEFAULT_SORT_ORDER2 = "count-desc";
-    var DEFAULT_SECONDARY = "subtypes";
+    var DEFAULT_SECONDARY = "subtyps";
     var SECONDARY_MODES = [
-      { mode: "subtypes", title: "Subtypen", icon: "list-tree" },
-      { mode: "description", title: "Beschreibung", icon: "text-cursor-input" },
-      { mode: "none", title: "Nichts", icon: "minus" }
+      { mode: "subtyps", title: "Subtyp list", icon: "list-tree" },
+      { mode: "description", title: "Description", icon: "text-cursor-input" },
+      { mode: "none", title: "Nothing", icon: "minus" }
     ];
     var SORT_OPTIONS = [
-      // Nutzt (anders als die übrigen Modi) keinen eigenen Vergleich, sondern die
-      // Reihenfolge von plugin.settings.types selbst als Speicherort - siehe
-      // render() und renderRegisteredItem() für das per Drag & Drop verschiebbare
-      // Rendern, das genau darauf aufbaut. Bewusst als erste Option (siehe
-      // showSortMenu) - eigene, oberste Gruppe im Menü statt einsortiert zwischen
-      // die eigentlichen Sortierkriterien.
-      { mode: "manual", title: "Manuell (Drag & Drop)" },
-      { mode: "count-desc", title: "H\xE4ufigkeit (absteigend)" },
-      { mode: "count-asc", title: "H\xE4ufigkeit (aufsteigend)" },
-      { mode: "name-asc", title: "Name (A bis Z)" },
-      { mode: "name-desc", title: "Name (Z bis A)" },
-      { mode: "color-asc", title: "Farbe (Rot \u2192 Violett)" },
-      { mode: "color-desc", title: "Farbe (Violett \u2192 Rot)" }
+      // Unlike the others, "manual" has no comparison: the order of settings.typs
+      // itself is the storage (see render() and renderRegisteredItem() for the
+      // drag & drop rendering built on it). First on purpose - its own group at
+      // the top of the menu (see showSortMenu).
+      { mode: "manual", title: "Manual (drag & drop)" },
+      { mode: "count-desc", title: "Most notes first" },
+      { mode: "count-asc", title: "Fewest notes first" },
+      { mode: "name-asc", title: "Name (A to Z)" },
+      { mode: "name-desc", title: "Name (Z to A)" },
+      { mode: "color-asc", title: "Color (red \u2192 violet)" },
+      { mode: "color-desc", title: "Color (violet \u2192 red)" }
     ];
-    async function renameTypeInNotes(plugin, oldKey, newValue) {
+    async function renameTypInNotes(plugin, oldKey, newValue) {
       let changed = 0;
-      for (const file of plugin.typIndex.filesWithType(oldKey)) {
+      for (const file of plugin.typIndex.filesWithTyp(oldKey)) {
         let matched = false;
         await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-          if (typeKeyOf(propertyValue(frontmatter, TYP_PROPERTY2)) !== oldKey) return;
+          if (typKeyOf(propertyValue(frontmatter, TYP_PROPERTY2)) !== oldKey) return;
           setCanonicalProperty2(frontmatter, TYP_PROPERTY2, newValue);
           matched = true;
         });
@@ -2652,41 +2551,41 @@ var require_typ_view = __commonJS({
       }
       return changed;
     }
-    function normalizeRawType(raw, normalize = normalizeTypeName) {
+    function normalizeRawTyp(raw, normalize = normalizeTypName) {
       if (Array.isArray(raw)) {
         return raw.map((v) => normalize(String(v ?? ""))).filter(Boolean).join(", ");
       }
       return normalize(String(raw));
     }
-    function displayTypeKey(typeKey) {
-      return typeKey !== typeKey.trim() ? `"${typeKey}"` : typeKey;
+    function displayTypKey(typKey) {
+      return typKey !== typKey.trim() ? `"${typKey}"` : typKey;
     }
-    function appendTypeName(parentEl, plugin, type, color) {
+    function appendTypName(parentEl, plugin, typ, color) {
       if (plugin.settings.colorViews.typList) {
-        const nameEl = parentEl.createSpan({ cls: "fred-typ-inline-name", text: type });
+        const nameEl = parentEl.createSpan({ cls: "typ-inline-name", text: typ });
         if (color) nameEl.style.color = color;
       } else {
-        paintColorDot(parentEl.createSpan({ cls: "fred-typ-inline-dot" }), color ?? DEFAULT_TYPE_COLOR, !color);
-        parentEl.createSpan({ cls: "fred-typ-inline-name", text: type });
+        paintColorDot(parentEl.createSpan({ cls: "typ-inline-dot" }), color ?? DEFAULT_TYP_COLOR, !color);
+        parentEl.createSpan({ cls: "typ-inline-name", text: typ });
       }
     }
-    var ConfirmDeleteTypeModal = class extends Modal {
-      constructor(plugin, type, onConfirm) {
+    var ConfirmDeleteTypModal = class extends Modal {
+      constructor(plugin, typ, onConfirm) {
         super(plugin.app);
         this.plugin = plugin;
-        this.type = type;
+        this.typ = typ;
         this.onConfirm = onConfirm;
       }
       onOpen() {
         const { contentEl } = this;
-        this.modalEl.addClass("fred-confirm-delete-modal");
+        this.modalEl.addClass("typ-confirm-modal");
         const p = contentEl.createEl("p");
-        p.appendText("Typ ");
-        appendTypeName(p, this.plugin, this.type, this.plugin.settings.typeColors[this.type] ?? null);
-        p.appendText(" wirklich l\xF6schen?");
+        p.appendText("Delete TYP ");
+        appendTypName(p, this.plugin, this.typ, this.plugin.settings.typColors[this.typ] ?? null);
+        p.appendText("?");
         const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-        buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
-        const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "L\xF6schen" });
+        buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+        const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "Delete" });
         confirmBtn.addEventListener("click", () => {
           this.close();
           this.onConfirm();
@@ -2696,12 +2595,12 @@ var require_typ_view = __commonJS({
         this.contentEl.empty();
       }
     };
-    var ConfirmRenameTypeModal = class extends Modal {
-      constructor(plugin, oldType, newType, affectedCount, onConfirm, onCancel) {
+    var ConfirmRenameTypModal = class extends Modal {
+      constructor(plugin, oldTyp, newTyp, affectedCount, onConfirm, onCancel) {
         super(plugin.app);
         this.plugin = plugin;
-        this.oldType = oldType;
-        this.newType = newType;
+        this.oldTyp = oldTyp;
+        this.newTyp = newTyp;
         this.affectedCount = affectedCount;
         this.onConfirm = onConfirm;
         this.onCancel = onCancel;
@@ -2709,47 +2608,46 @@ var require_typ_view = __commonJS({
       }
       onOpen() {
         const { contentEl } = this;
-        this.modalEl.addClass("fred-confirm-delete-modal");
-        const color = this.plugin.settings.typeColors[this.oldType] ?? null;
+        this.modalEl.addClass("typ-confirm-modal");
+        const color = this.plugin.settings.typColors[this.oldTyp] ?? null;
         const p = contentEl.createEl("p");
-        p.appendText("TYP ");
-        appendTypeName(p, this.plugin, this.oldType, color);
-        p.appendText(" in ");
-        appendTypeName(p, this.plugin, this.newType, color);
-        p.appendText(` umbenennen und ${this.affectedCount} Notiz(en) entsprechend anpassen?`);
+        p.appendText("Rename TYP ");
+        appendTypName(p, this.plugin, this.oldTyp, color);
+        p.appendText(" to ");
+        appendTypName(p, this.plugin, this.newTyp, color);
+        p.appendText(` and update ${plural(this.affectedCount, "note")}?`);
         const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-        buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
-        const confirmBtn = buttonRow.createEl("button", { cls: "mod-cta", text: "Umbenennen" });
+        buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+        const confirmBtn = buttonRow.createEl("button", { cls: "mod-cta", text: "Rename" });
         confirmBtn.addEventListener("click", () => {
           this.confirmed = true;
           this.close();
           this.onConfirm();
         });
       }
-      // Deckt sowohl "Abbrechen"-Klick als auch Escape/Klick daneben ab - analog
-      // zum Cancel-Handling in TypPickerModal.
+      // Covers "Cancel" as well as Escape or a click outside.
       onClose() {
         this.contentEl.empty();
         if (!this.confirmed) this.onCancel?.();
       }
     };
-    var ConfirmMergeTypeModal = class extends ConfirmRenameTypeModal {
+    var ConfirmMergeTypModal = class extends ConfirmRenameTypModal {
       onOpen() {
         const { contentEl } = this;
-        this.modalEl.addClass("fred-confirm-delete-modal");
+        this.modalEl.addClass("typ-confirm-modal");
         const settings = this.plugin.settings;
         const p = contentEl.createEl("p");
         p.appendText("TYP ");
-        appendTypeName(p, this.plugin, this.newType, settings.typeColors[this.newType] ?? null);
-        p.appendText(" existiert bereits. ");
-        appendTypeName(p, this.plugin, this.oldType, settings.typeColors[this.oldType] ?? null);
-        p.appendText(" damit zusammenlegen?");
+        appendTypName(p, this.plugin, this.newTyp, settings.typColors[this.newTyp] ?? null);
+        p.appendText(" already exists. Merge ");
+        appendTypName(p, this.plugin, this.oldTyp, settings.typColors[this.oldTyp] ?? null);
+        p.appendText(" into it?");
         contentEl.createEl("p", {
-          text: `${this.affectedCount} Notiz(en) werden auf ${this.newType} umgestellt. Farbe, Beschreibung und TYP-Frontmatter von ${this.oldType} entfallen, seine Subtypen werden \xFCbernommen (gleichnamige Subtyp-Bl\xF6cke zusammengef\xFChrt).`
+          text: `${plural(this.affectedCount, "note")} ${this.affectedCount === 1 ? "moves" : "move"} to ${this.newTyp}. The color, description and TYP-Frontmatter of ${this.oldTyp} are dropped. Every Subtyp moves along; blocks with the same name are merged.`
         });
         const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-        buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
-        const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "Zusammenlegen" });
+        buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+        const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "Merge" });
         confirmBtn.addEventListener("click", () => {
           this.confirmed = true;
           this.close();
@@ -2757,7 +2655,7 @@ var require_typ_view = __commonJS({
         });
       }
     };
-    var ConfirmSubtypeModal = class extends Modal {
+    var ConfirmSubtypModal = class extends Modal {
       constructor(app, { paragraphs, confirmText, confirmCls, onConfirm, onCancel }) {
         super(app);
         this.paragraphs = paragraphs;
@@ -2769,10 +2667,10 @@ var require_typ_view = __commonJS({
       }
       onOpen() {
         const { contentEl } = this;
-        this.modalEl.addClass("fred-confirm-delete-modal");
+        this.modalEl.addClass("typ-confirm-modal");
         for (const text of this.paragraphs) contentEl.createEl("p", { text });
         const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-        buttonRow.createEl("button", { text: "Abbrechen" }).addEventListener("click", () => this.close());
+        buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
         const confirmBtn = buttonRow.createEl("button", { cls: this.confirmCls, text: this.confirmText });
         confirmBtn.addEventListener("click", () => {
           this.confirmed = true;
@@ -2785,13 +2683,13 @@ var require_typ_view = __commonJS({
         if (!this.confirmed) this.onCancel?.();
       }
     };
-    var TypView = class extends ItemView {
+    var TypPane = class extends ItemView {
       constructor(leaf, plugin) {
         super(leaf);
         this.plugin = plugin;
       }
       getViewType() {
-        return VIEW_TYPE_TYP;
+        return VIEW_TYPE_TYP_PANE;
       }
       getDisplayText() {
         return "TYP";
@@ -2801,67 +2699,63 @@ var require_typ_view = __commonJS({
       }
       async onOpen() {
         this.isEditing = false;
-        this.selectedType = null;
+        this.selectedTyp = null;
         this.frontmatterBlocks = null;
         this.frontmatterEditors = [];
         this.contentEl.empty();
-        this.contentEl.addClass("fred-typ-view");
+        this.contentEl.addClass("typ-system-pane");
         this.registerDomEvent(this.contentEl, "keydown", (event) => {
-          if (event.key === "Escape" && this.selectedType !== null) this.closeTypeSettings();
+          if (event.key === "Escape" && this.selectedTyp !== null) this.closeTypSettings();
         });
         this.render();
       }
       async onClose() {
-        this.closeSubtypeColorPopover?.();
+        this.closeSubtypColorPopover?.();
       }
-      openSearch(type) {
+      openSearch(typ) {
         const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
         if (!globalSearch) return;
-        const query = type === null ? `-["${TYP_PROPERTY2}"] file:.md` : this.typeClause(type);
+        const query = typ === null ? `-["${TYP_PROPERTY2}"] file:.md` : this.typClause(typ);
         globalSearch.instance.openGlobalSearch(query);
       }
-      // Suchklausel für einen TYP-Schlüssel. Für eine Liste (unregistrierter
-      // Schlüssel "[A, B]") gibt es keine exakte Suchsyntax - dann nach Notizen
-      // suchen, die alle ihre Einträge tragen. Auch von openSubtypeSearch()
-      // genutzt: seit die nicht erfassten Subtypen in der Liste stehen, kann dort
-      // auch ein nicht erfasster (und damit unsauberer) TYP-Schlüssel ankommen.
-      typeClause(type) {
-        const raw = this.plugin.typIndex.rawValueOf(type);
-        return Array.isArray(raw) ? raw.map((v) => `["${TYP_PROPERTY2}":"${String(v ?? "").trim()}"]`).join(" ") : `["${TYP_PROPERTY2}":"${type}"]`;
+      // Search clause for a TYP key. A list (unregistered key "[A, B]") has no
+      // exact syntax, so it searches notes carrying all its items. Also used by
+      // openSubtypSearch(), which can receive an unregistered (unclean) TYP key.
+      typClause(typ) {
+        const raw = this.plugin.typIndex.rawValueOf(typ);
+        return Array.isArray(raw) ? raw.map((v) => `["${TYP_PROPERTY2}":"${String(v ?? "").trim()}"]`).join(" ") : `["${TYP_PROPERTY2}":"${typ}"]`;
       }
-      // typeKey kommt 1:1 aus den tatsächlichen Frontmatter-Werten (siehe
-      // unregisteredRows in render() und typeKeyOf in typ-index.js) - kann also
-      // klein geschrieben sein, Randleerzeichen tragen oder eine Liste sein. TYPen
-      // werden aber immer als sauberer Einzelwert in Großbuchstaben geführt -
-      // registriert wird deshalb die bereinigte Form (siehe normalizeRawType), und
-      // die betroffenen Notizen werden gleich mit umgeschrieben, damit sie nicht
-      // weiterhin als "nicht registriert" auftauchen.
-      async registerType(typeKey) {
-        const result = await this.applyTypeRegistration(typeKey);
+      // typKey comes straight from frontmatter values (see unregisteredRows in
+      // render() and typKeyOf) - possibly lowercase, padded or a list. TYP entries
+      // are always clean uppercase values, so the cleaned form is registered (see
+      // normalizeRawTyp) and the affected notes are rewritten right away, so they
+      // no longer show up as unregistered.
+      async registerTyp(typKey) {
+        const result = await this.applyTypRegistration(typKey);
         if (!result) return;
         await this.plugin.saveSettings();
         this.render();
         this.plugin.refreshTypColors?.();
         if (result.renamed > 0) {
-          new Notice(`TYP ${result.type} registriert, ${result.renamed} Notiz(en) angepasst.`);
+          new Notice(`TYP ${result.typ} registered, ${plural(result.renamed, "note")} updated.`);
         }
       }
-      // Der eigentliche Vorgang aus registerType(), ohne Speichern, Neuzeichnen
-      // und Notice: so kann registerTypeWithSubtype() TYP und Subtyp nacheinander
-      // eintragen und danach EINMAL speichern und EINE Notice zeigen, statt zweimal.
-      // Liefert { type, renamed } oder null, wenn nichts Brauchbares übrig bleibt.
-      async applyTypeRegistration(typeKey) {
-        const raw = this.plugin.typIndex.rawValueOf(typeKey);
-        const normalized = normalizeRawType(raw === void 0 ? typeKey : raw);
+      // The core of registerTyp() without saving, re-rendering and notice, so
+      // registerTypWithSubtyp() can register TYP and Subtyp in turn and then save
+      // and notify ONCE. Returns { typ, renamed }, or null if nothing usable is
+      // left.
+      async applyTypRegistration(typKey) {
+        const raw = this.plugin.typIndex.rawValueOf(typKey);
+        const normalized = normalizeRawTyp(raw === void 0 ? typKey : raw);
         if (!normalized) return null;
-        if (!this.plugin.settings.types.includes(normalized)) {
-          this.plugin.settings.types.push(normalized);
+        if (!this.plugin.settings.typs.includes(normalized)) {
+          this.plugin.settings.typs.push(normalized);
         }
-        const renamed = normalized !== typeKey ? await renameTypeInNotes(this.plugin, typeKey, normalized) : 0;
-        return { type: normalized, renamed };
+        const renamed = normalized !== typKey ? await renameTypInNotes(this.plugin, typKey, normalized) : 0;
+        return { typ: normalized, renamed };
       }
-      // Neues, leeres Tree-Item anlegen und sofort in den Editier-Modus versetzen -
-      // wie bei Obsidians eigenen Views (z. B. neue Bookmark-Gruppe).
+      // A new, empty tree item straight in edit mode - like Obsidian's own views
+      // (a new bookmark group, say).
       startAdd() {
         if (this.isEditing) return;
         const treeItem = this.listEl.createDiv({ cls: "tree-item" });
@@ -2870,10 +2764,10 @@ var require_typ_view = __commonJS({
         const inner = self.createDiv({ cls: "tree-item-inner" });
         this.startEditing(null, self, inner);
       }
-      // Wie Obsidians eigene Tree-Items: kein zusätzliches Input-Element, sondern
-      // das bestehende Text-Element wird selbst editierbar (contenteditable).
-      // type === null → neuer Eintrag, sonst Umbenennen des übergebenen Typs.
-      startEditing(type, self, inner) {
+      // Like Obsidian's tree items: no extra input, the text element itself
+      // becomes contenteditable. typ === null means a new entry, otherwise a
+      // rename of that TYP.
+      startEditing(typ, self, inner) {
         if (this.isEditing) return;
         this.isEditing = true;
         self.addClass("is-being-renamed");
@@ -2890,42 +2784,42 @@ var require_typ_view = __commonJS({
           if (done) return;
           done = true;
           this.isEditing = false;
-          const value = normalizeTypeName(inner.textContent);
-          if (commit && value && value !== type) {
-            const exists = this.plugin.settings.types.some(
-              (t) => t.toLowerCase() === value.toLowerCase() && t !== type
+          const value = normalizeTypName(inner.textContent);
+          if (commit && value && value !== typ) {
+            const exists = this.plugin.settings.typs.some(
+              (t) => t.toLowerCase() === value.toLowerCase() && t !== typ
             );
             if (!exists) {
-              if (type === null) {
-                this.plugin.settings.types.push(value);
+              if (typ === null) {
+                this.plugin.settings.typs.push(value);
               } else {
-                const idx = this.plugin.settings.types.indexOf(type);
-                if (idx !== -1) this.plugin.settings.types[idx] = value;
-                if (this.plugin.settings.typeColors[type] !== void 0) {
-                  this.plugin.settings.typeColors[value] = this.plugin.settings.typeColors[type];
-                  delete this.plugin.settings.typeColors[type];
+                const idx = this.plugin.settings.typs.indexOf(typ);
+                if (idx !== -1) this.plugin.settings.typs[idx] = value;
+                if (this.plugin.settings.typColors[typ] !== void 0) {
+                  this.plugin.settings.typColors[value] = this.plugin.settings.typColors[typ];
+                  delete this.plugin.settings.typColors[typ];
                 }
-                if (this.plugin.settings.typeDescriptions[type] !== void 0) {
-                  this.plugin.settings.typeDescriptions[value] = this.plugin.settings.typeDescriptions[type];
-                  delete this.plugin.settings.typeDescriptions[type];
+                if (this.plugin.settings.typDescriptions[typ] !== void 0) {
+                  this.plugin.settings.typDescriptions[value] = this.plugin.settings.typDescriptions[typ];
+                  delete this.plugin.settings.typDescriptions[typ];
                 }
-                if (this.plugin.settings.typeDefaultFrontmatter[type] !== void 0) {
-                  this.plugin.settings.typeDefaultFrontmatter[value] = this.plugin.settings.typeDefaultFrontmatter[type];
-                  delete this.plugin.settings.typeDefaultFrontmatter[type];
+                if (this.plugin.settings.typDefaultFrontmatter[typ] !== void 0) {
+                  this.plugin.settings.typDefaultFrontmatter[value] = this.plugin.settings.typDefaultFrontmatter[typ];
+                  delete this.plugin.settings.typDefaultFrontmatter[typ];
                 }
-                if (this.plugin.settings.typeFloatingKeys[type] !== void 0) {
-                  this.plugin.settings.typeFloatingKeys[value] = this.plugin.settings.typeFloatingKeys[type];
-                  delete this.plugin.settings.typeFloatingKeys[type];
+                if (this.plugin.settings.typFloatingKeys[typ] !== void 0) {
+                  this.plugin.settings.typFloatingKeys[value] = this.plugin.settings.typFloatingKeys[typ];
+                  delete this.plugin.settings.typFloatingKeys[typ];
                 }
-                if (this.plugin.settings.typeShortcuts[type] !== void 0) {
-                  this.plugin.settings.typeShortcuts[value] = this.plugin.settings.typeShortcuts[type];
-                  delete this.plugin.settings.typeShortcuts[type];
+                if (this.plugin.settings.typShortcuts[typ] !== void 0) {
+                  this.plugin.settings.typShortcuts[value] = this.plugin.settings.typShortcuts[typ];
+                  delete this.plugin.settings.typShortcuts[typ];
                 }
-                if (this.ensureTypeManual()[type] !== void 0) {
-                  this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
-                  delete this.plugin.settings.typeManual[type];
+                if (this.ensureTypManual()[typ] !== void 0) {
+                  this.plugin.settings.typManual[value] = this.plugin.settings.typManual[typ];
+                  delete this.plugin.settings.typManual[typ];
                 }
-                moveTypeSubtypes(this.plugin.settings, type, value);
+                moveTypSubtyps(this.plugin.settings, typ, value);
               }
               await this.plugin.saveSettings();
               this.plugin.refreshTypColors?.();
@@ -2944,21 +2838,19 @@ var require_typ_view = __commonJS({
         });
         inner.addEventListener("blur", () => finish(true));
       }
-      openTypeSettings(type) {
-        this.selectedType = type;
+      openTypSettings(typ) {
+        this.selectedTyp = typ;
         this.render();
       }
-      closeTypeSettings() {
-        this.selectedType = null;
+      closeTypSettings() {
+        this.selectedTyp = null;
         this.render();
       }
-      // Wird als Component-Child geladen (siehe mountFrontmatterEditor) und muss
-      // deshalb vor jedem Neuaufbau der Detail-Ansicht explizit entladen werden -
-      // contentEl.empty() allein würde nur die DOM-Elemente entfernen, nicht aber
-      // den darauf registrierten metadataTypeManager-Listener der Editor-Instanz.
-      // frontmatterBlocks ist die Steuerung über alle Blöcke (u. a. für den
-      // Befehl "Standard-Property hinzufügen"), frontmatterEditors alle Editoren
-      // der Detailansicht inkl. der Subtyp-Blöcke.
+      // The editors are component children (see mountFrontmatterEditor) and must
+      // be unloaded before every rebuild - contentEl.empty() alone would remove the
+      // DOM but leave each editor's metadataTypeManager listener behind.
+      // frontmatterBlocks controls all blocks (used by "Add TYP-Frontmatter
+      // property"), frontmatterEditors holds every editor incl. Subtyp blocks.
       destroyFrontmatterEditor() {
         for (const editor of this.frontmatterEditors ?? []) this.removeChild(editor);
         this.frontmatterEditors = [];
@@ -2969,70 +2861,70 @@ var require_typ_view = __commonJS({
         this._rendering = true;
         try {
           this.destroyFrontmatterEditor();
-          if (this.selectedType !== null) {
-            this.renderTypeSettings(this.selectedType);
+          if (this.selectedTyp !== null) {
+            this.renderTypSettings(this.selectedTyp);
             return;
           }
           const { contentEl } = this;
           contentEl.empty();
-          const { counts, noType } = this.plugin.typIndex.typeCounts();
-          const registered = this.plugin.settings.types;
-          const typeColors = this.plugin.settings.typeColors;
+          const { counts, noTyp } = this.plugin.typIndex.typCounts();
+          const registered = this.plugin.settings.typs;
+          const typColors = this.plugin.settings.typColors;
           const sortOrder = this.plugin.settings.typSortOrder ?? DEFAULT_SORT_ORDER2;
           const isManualSort = sortOrder === "manual";
-          const byCurrentOrder = (a, b) => compareTypes(sortOrder, a, b, counts, typeColors);
+          const byCurrentOrder = (a, b) => compareTyps(sortOrder, a, b, counts, typColors);
           this.renderListHeader(contentEl);
-          const unregisteredRows = [...counts.keys()].filter((type) => !registered.includes(type)).sort(byCurrentOrder).map((type) => ({ type, count: counts.get(type) ?? 0 }));
-          const unregisteredSubtypeRows = this.unregisteredSubtypeRows();
-          const listCls = "fred-typ-list nav-files-container" + (this.secondaryMode() === "none" ? " fred-typ-list-no-secondary" : "");
+          const unregisteredRows = [...counts.keys()].filter((typ) => !registered.includes(typ)).sort(byCurrentOrder).map((typ) => ({ typ, count: counts.get(typ) ?? 0 }));
+          const unregisteredSubtypRows = this.unregisteredSubtypRows();
+          const listCls = "typ-list nav-files-container" + (this.secondaryMode() === "none" ? " typ-list-no-secondary" : "");
           this.listEl = contentEl.createDiv({ cls: listCls });
           this.separatorEl = null;
-          const registeredOrder = sortTypesByMode2(registered, sortOrder, counts, typeColors);
-          registeredOrder.forEach((type, index) => {
-            this.renderRegisteredItem(type, counts.get(type) ?? 0, { draggable: isManualSort, index });
+          const registeredOrder = sortTypsByMode2(registered, sortOrder, counts, typColors);
+          registeredOrder.forEach((typ, index) => {
+            this.renderRegisteredItem(typ, counts.get(typ) ?? 0, { draggable: isManualSort, index });
           });
           const separator = () => {
-            const el = this.listEl.createDiv({ cls: "fred-typ-separator" });
+            const el = this.listEl.createDiv({ cls: "typ-separator" });
             this.separatorEl = this.separatorEl ?? el;
           };
-          if (unregisteredRows.length > 0 || unregisteredSubtypeRows.length > 0 || noType > 0) separator();
-          for (const row of unregisteredRows) this.renderUnregisteredItem(row.type, row.count);
-          if (unregisteredSubtypeRows.length > 0) {
+          if (unregisteredRows.length > 0 || unregisteredSubtypRows.length > 0 || noTyp > 0) separator();
+          for (const row of unregisteredRows) this.renderUnregisteredItem(row.typ, row.count);
+          if (unregisteredSubtypRows.length > 0) {
             if (unregisteredRows.length > 0) separator();
-            for (const row of unregisteredSubtypeRows) this.renderUnregisteredSubtypeItem(row);
+            for (const row of unregisteredSubtypRows) this.renderUnregisteredSubtypItem(row);
           }
-          if (noType > 0) this.renderNoTypeItem(noType);
+          if (noTyp > 0) this.renderNoTypItem(noTyp);
         } finally {
           this._rendering = false;
         }
       }
-      // Wie der "Change sort order"-Button in Obsidians Tags- bzw. All-Properties-View.
+      // Like the "Change sort order" button in Obsidian's tags and all-properties
+      // views.
       renderListHeader(contentEl) {
         const header = contentEl.createDiv({ cls: "nav-header" });
         const buttonsContainer = header.createDiv({ cls: "nav-buttons-container" });
         const addBtn = buttonsContainer.createDiv({
           cls: "clickable-icon nav-action-button",
-          attr: { "aria-label": "Neuen Typ hinzuf\xFCgen" }
+          attr: { "aria-label": "Add TYP" }
         });
         setIcon(addBtn, "plus");
         addBtn.addEventListener("click", () => this.startAdd());
         const sortBtn = buttonsContainer.createDiv({
           cls: "clickable-icon nav-action-button",
-          attr: { "aria-label": "Sortierreihenfolge \xE4ndern" }
+          attr: { "aria-label": "Change sort order" }
         });
         setIcon(sortBtn, "lucide-sort-asc");
         sortBtn.addEventListener("click", (event) => this.showSortMenu(event));
         const current = SECONDARY_MODES[this.secondaryIndex()];
         const secondaryBtn = buttonsContainer.createDiv({
           cls: "clickable-icon nav-action-button",
-          attr: { "aria-label": `Neben dem Namen: ${current.title}` }
+          attr: { "aria-label": `Next to name: ${current.title}` }
         });
         setIcon(secondaryBtn, current.icon);
         secondaryBtn.addEventListener("click", () => this.cycleSecondary());
       }
-      // settings.typListSecondary, aber immer ein gueltiger Modus - Bestandsdaten
-      // kennen den Schluessel noch nicht (siehe migrateTypListSecondary in main.js),
-      // und ein spaeter entfernter Modus soll die Liste nicht leer lassen.
+      // settings.typListSecondary, but always a valid mode - older data may lack
+      // the key, and a mode removed later shouldn't leave the list empty.
       secondaryMode() {
         const mode = this.plugin.settings.typListSecondary;
         return SECONDARY_MODES.some((entry) => entry.mode === mode) ? mode : DEFAULT_SECONDARY;
@@ -3070,10 +2962,10 @@ var require_typ_view = __commonJS({
         addGroup(5, 7);
         menu.showAtMouseEvent(event);
       }
-      renderNoTypeItem(count) {
+      renderNoTypItem(count) {
         const treeItem = this.listEl.createDiv({ cls: "tree-item" });
-        const self = treeItem.createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
-        self.createDiv({ cls: "tree-item-inner", text: "[KEIN TYP]" });
+        const self = treeItem.createDiv({ cls: "tree-item-self is-clickable typ-unregistered" });
+        self.createDiv({ cls: "tree-item-inner", text: "[NO TYP]" });
         this.renderCountFlair(self, count);
         self.addEventListener("click", () => this.openSearch(null));
         self.addEventListener("contextmenu", (event) => {
@@ -3082,86 +2974,78 @@ var require_typ_view = __commonJS({
           this.openSearch(null);
         });
       }
-      // Chromiums input[type=color] hat einen eigenen Mindest-Swatch, der sich nicht
-      // unter Textgröße skalieren lässt - daher nur als unsichtbaren Picker-Trigger
-      // über dem frei skalierbaren Punkt platzieren. Ohne eigene Farbe steht der
-      // Punkt als hohler grauer Ring da (siehe paintColorDot); mit showReset
-      // (Detailansicht) nennt ein Tooltip den Zustand, und der Zurücksetzen-Button
-      // ist dann ausgegraut.
-      renderColorPicker(parent, type, onChange, { showReset = false } = {}) {
-        const currentColor = this.plugin.settings.typeColors[type] ?? DEFAULT_TYPE_COLOR;
-        const colorWrap = parent.createDiv({ cls: "fred-typ-color-wrap" });
-        const colorDot = colorWrap.createDiv({ cls: "fred-typ-color-dot" });
+      // Chromium's input[type=color] has a minimum swatch that won't scale below
+      // text size, so it is only an invisible trigger over a freely scalable dot.
+      // Without a color the dot is a hollow gray ring (see paintColorDot); with
+      // showReset (detail view) a tooltip names the state and the reset button is
+      // grayed out.
+      renderColorPicker(parent, typ, onChange, { showReset = false } = {}) {
+        const currentColor = this.plugin.settings.typColors[typ] ?? DEFAULT_TYP_COLOR;
+        const colorWrap = parent.createDiv({ cls: "typ-color-wrap" });
+        const colorDot = colorWrap.createDiv({ cls: "typ-color-dot" });
         let resetBtn = null;
         const showState = (color, isDefault) => {
           paintColorDot(colorDot, color, isDefault);
           if (!showReset) return;
-          colorWrap.setAttribute("aria-label", isDefault ? "Standard (keine Farbe)" : "Farbe \xE4ndern");
+          colorWrap.setAttribute("aria-label", isDefault ? "Default (no color)" : "Change color");
           resetBtn?.toggleClass("is-disabled", isDefault);
         };
-        const colorInput = colorWrap.createEl("input", { type: "color", cls: "fred-typ-color-input" });
+        const colorInput = colorWrap.createEl("input", { type: "color", cls: "typ-color-input" });
         colorInput.value = currentColor;
         colorInput.addEventListener("click", (event) => event.stopPropagation());
         colorInput.addEventListener("input", async () => {
           showState(colorInput.value, false);
-          this.plugin.settings.typeColors[type] = colorInput.value;
+          this.plugin.settings.typColors[typ] = colorInput.value;
           await this.plugin.saveSettings();
           onChange?.(colorInput.value);
         });
         colorInput.addEventListener("change", () => this.plugin.refreshTypColors?.());
         if (showReset) {
           resetBtn = parent.createDiv({
-            cls: "clickable-icon fred-typ-color-reset",
-            attr: { "aria-label": "Farbe zur\xFCcksetzen" }
+            cls: "clickable-icon typ-color-reset",
+            attr: { "aria-label": "Reset color" }
           });
           setIcon(resetBtn, "rotate-ccw");
           resetBtn.addEventListener("click", async () => {
-            delete this.plugin.settings.typeColors[type];
-            colorInput.value = DEFAULT_TYPE_COLOR;
-            showState(DEFAULT_TYPE_COLOR, true);
+            delete this.plugin.settings.typColors[typ];
+            colorInput.value = DEFAULT_TYP_COLOR;
+            showState(DEFAULT_TYP_COLOR, true);
             await this.plugin.saveSettings();
             this.plugin.refreshTypColors?.();
-            onChange?.(DEFAULT_TYPE_COLOR);
+            onChange?.(DEFAULT_TYP_COLOR);
           });
         }
-        showState(currentColor, this.plugin.settings.typeColors[type] === void 0);
+        showState(currentColor, this.plugin.settings.typColors[typ] === void 0);
         return colorWrap;
       }
-      // Fängt Bestandsinstallationen ab, deren settings-Objekt schon vor Einführung
-      // von typeManual geladen wurde (z. B. laufende Session vor einem vollständigen
-      // Plugin-Reload nach Hot-Reload) - ohne das würde jeder Zugriff unten mit
-      // "Cannot read properties of undefined" abbrechen und dabei den gesamten
-      // restlichen renderTypeSettings()-Aufruf (Farbe, Beschreibung, Frontmatter)
-      // mit sich reißen, da der Fehler synchron mitten in der Funktion auftritt.
-      ensureTypeManual() {
-        if (!this.plugin.settings.typeManual) this.plugin.settings.typeManual = {};
-        return this.plugin.settings.typeManual;
+      // Guards settings objects loaded before typManual existed (a running
+      // session across a hot reload, say) - otherwise every access below would
+      // throw and take the rest of renderTypSettings() down with it.
+      ensureTypManual() {
+        if (!this.plugin.settings.typManual) this.plugin.settings.typManual = {};
+        return this.plugin.settings.typManual;
       }
-      // Gemeinsamer "Manuell erstellbar"-Knopf von TYP (renderManualToggle) und
-      // Subtyp (renderSubtypeManualToggle), jeweils zwischen Umbenennen und
-      // Löschen: ein Icon-Knopf statt eines beschrifteten Schalters - die
-      // Einstellung ist zu klein, um mit Label und Toggle eine eigene Zeile zu
-      // bekommen, und in der Reihe der übrigen Icon-Knöpfe fällt sie nicht mehr
-      // auf als diese. Zustand wie bei ihnen über eine Klasse (is-active, siehe
-      // styles.css), der Sinn steht im Tooltip - role/aria-checked halten ihn
-      // trotzdem als Schalter lesbar.
+      // The shared "Manually creatable" button of TYP (renderManualToggle) and
+      // Subtyp (renderSubtypManualToggle), each between rename and delete. An
+      // icon button rather than a labeled toggle - too small a setting for its own
+      // row. State via a class (is-active, see styles.css), meaning in the tooltip;
+      // role/aria-checked keep it readable as a switch.
       //
-      // onToggle bekommt den neuen Zustand, speichert ihn und zieht die abhängigen
-      // Knöpfe nach (siehe syncManualToggles) - das Anzeigen übernimmt bewusst
-      // nicht der Klick selbst, da eine Umschaltung hier nie nur diesen einen
-      // Knopf betrifft.
+      // onToggle gets the new state, saves it and updates the dependent buttons
+      // (see syncManualToggles) - the click doesn't paint itself, since a toggle
+      // here never affects just this one button.
       renderManualIcon(parent, cls, isOn, onToggle) {
         const btn = parent.createDiv({
-          cls: `clickable-icon fred-typ-manual-icon ${cls}`,
+          cls: `clickable-icon typ-manual-icon ${cls}`,
           attr: { tabindex: "0", role: "checkbox" }
         });
         setIcon(btn, "file-pen-line");
-        btn.fredShowManualState = (on) => {
+        btn.typShowManualState = (on) => {
           btn.toggleClass("is-active", on);
           btn.setAttribute("aria-checked", String(on));
-          btn.setAttribute("aria-label", on ? "Manuell erstellbar" : "Nicht manuell erstellbar");
+          btn.setAttribute("aria-label", on ? "Manually creatable" : "Not manually creatable");
         };
-        btn.fredShowManualState(isOn);
+        btn.typShowManualState(isOn);
         const toggle = () => onToggle(!btn.hasClass("is-active"));
         btn.addEventListener("click", toggle);
         btn.addEventListener("keydown", (event) => {
@@ -3172,82 +3056,74 @@ var require_typ_view = __commonJS({
         });
         return btn;
       }
-      // "Manuell erstellbar" des TYPs, in der Kopfzeile der Detailansicht zwischen
-      // Umbenennen und Löschen.
+      // The TYP's "Manually creatable", in the detail header between rename and
+      // delete. On by default, so only "off" (false) is stored. Decides whether
+      // getTyps() (main.js) returns the TYP.
       //
-      // Standardmäßig an - daher wird (wie bei den anderen typeXxx-Dicts) nur die
-      // Abweichung vom Default gespeichert, hier also nur "aus" (false); fehlender
-      // Eintrag bzw. true bedeuten "an". Steuert, ob ein TYP in getTypes() (siehe
-      // main.js) exportiert wird, siehe dortiger Kommentar.
-      //
-      // Der TYP zieht seine Subtypen dabei immer mit: der Picker führt nur über
-      // ihn zu ihnen, ein abgeschalteter TYP würde seine angeschalteten Subtypen
-      // also stumm unerreichbar machen (siehe setAllSubtypesManual in subtypes.js).
-      renderManualToggle(parent, type) {
-        return this.renderManualIcon(parent, "fred-typ-manual-type", this.ensureTypeManual()[type] !== false, async (on) => {
-          if (on) delete this.ensureTypeManual()[type];
-          else this.ensureTypeManual()[type] = false;
-          setAllSubtypesManual(this.plugin.settings, type, on);
+      // The TYP always takes its Subtyps along: the picker only reaches them
+      // through it, so a TYP switched off would silently make them unreachable
+      // (see setAllSubtypsManual in subtyps.js).
+      renderManualToggle(parent, typ) {
+        return this.renderManualIcon(parent, "typ-manual-typ", this.ensureTypManual()[typ] !== false, async (on) => {
+          if (on) delete this.ensureTypManual()[typ];
+          else this.ensureTypManual()[typ] = false;
+          setAllSubtypsManual(this.plugin.settings, typ, on);
           await this.plugin.saveSettings();
-          this.syncManualToggles(type);
+          this.syncManualToggles(typ);
         });
       }
-      // "Manuell erstellbar" eines Subtyps, in den Aktionen im Abschluss seines
-      // Blocks zwischen Umbenennen und Löschen (siehe renderSectionFooter). Anders
-      // als der TYP-Knopf zieht er nur in eine Richtung mit: ein angeschalteter Subtyp schaltet seinen TYP mit
-      // an (sonst wäre er im Picker nicht zu erreichen), die übrigen Subtypen
-      // bleiben aber, wie sie sind - genau dafür ist der Knopf da.
-      renderSubtypeManualToggle(parent, type, subtype) {
+      // A Subtyp's "Manually creatable", in its block footer between rename and
+      // delete (see renderSectionFooter). Unlike the TYP button it pulls only one
+      // way: switching a Subtyp on also switches its TYP on (else it would be
+      // unreachable), the other Subtyps stay as they are - that is the point.
+      renderSubtypManualToggle(parent, typ, subtyp) {
         const btn = this.renderManualIcon(
           parent,
-          "fred-typ-manual-subtype",
-          isSubtypeManual2(this.plugin.settings, type, subtype),
+          "typ-manual-subtyp",
+          isSubtypManual2(this.plugin.settings, typ, subtyp),
           async (on) => {
-            setSubtypeManual(this.plugin.settings, type, subtype, on);
-            if (on) delete this.ensureTypeManual()[type];
+            setSubtypManual(this.plugin.settings, typ, subtyp, on);
+            if (on) delete this.ensureTypManual()[typ];
             await this.plugin.saveSettings();
-            this.syncManualToggles(type);
+            this.syncManualToggles(typ);
           }
         );
-        btn.fredSubtype = subtype;
+        btn.typSubtyp = subtyp;
         return btn;
       }
-      // Zeigt alle Manuell-Knöpfe der Detailansicht neu an, nachdem einer von ihnen
-      // die anderen mitgezogen hat. Bewusst nur die Knöpfe statt eines render():
-      // ein Neuaufbau nimmt die Frontmatter-Editoren aller Blöcke mit (siehe
-      // destroyFrontmatterEditor), samt einer gerade bearbeiteten Zeile, obwohl
-      // sich an ihnen nichts geändert hat. Gefunden werden die Knöpfe wie die
-      // Farbpunkte der Subtyp-Blöcke über das DOM der Ansicht (siehe
-      // openSubtypeColorPopover): den Abschluss eines Blocks baut
-      // frontmatter-blocks.js auf, eine Liste davon liegt hier nicht.
-      syncManualToggles(type) {
-        this.contentEl.querySelector(".fred-typ-manual-type")?.fredShowManualState(this.ensureTypeManual()[type] !== false);
-        for (const el of this.contentEl.querySelectorAll(".fred-typ-manual-subtype")) {
-          el.fredShowManualState(isSubtypeManual2(this.plugin.settings, type, el.fredSubtype));
+      // Repaints every manual button of the detail view after one changed the
+      // others. Only the buttons, not render(): a rebuild would recreate every
+      // block's editors, including a row being edited. Found via the DOM like the
+      // Subtyp color dots - frontmatter-blocks.js builds the footers, no list of
+      // them lives here.
+      syncManualToggles(typ) {
+        this.contentEl.querySelector(".typ-manual-typ")?.typShowManualState(this.ensureTypManual()[typ] !== false);
+        for (const el of this.contentEl.querySelectorAll(".typ-manual-subtyp")) {
+          el.typShowManualState(isSubtypManual2(this.plugin.settings, typ, el.typSubtyp));
         }
       }
-      renderRegisteredItem(type, count, { draggable = false, index = -1 } = {}) {
+      renderRegisteredItem(typ, count, { draggable = false, index = -1 } = {}) {
         const treeItem = this.listEl.createDiv({ cls: "tree-item" });
         const self = treeItem.createDiv({ cls: "tree-item-self is-clickable" });
         let nameEl;
-        this.renderColorPicker(self, type, (newColor) => {
+        this.renderColorPicker(self, typ, (newColor) => {
           if (nameEl && this.plugin.settings.colorViews.typList) nameEl.style.color = newColor;
         });
-        nameEl = self.createDiv({ cls: "tree-item-inner", text: type });
-        const color = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
+        nameEl = self.createDiv({ cls: "tree-item-inner", text: typ });
+        const color = this.plugin.settings.colorViews.typList ? this.plugin.settings.typColors[typ] : null;
         if (color) nameEl.style.color = color;
         const secondary = this.secondaryMode();
-        if (secondary === "description") this.renderDescriptionInput(self, type);
-        else if (secondary === "subtypes") this.renderSubtypePreview(self, type);
+        if (secondary === "description") this.renderDescriptionInput(self, typ);
+        else if (secondary === "subtyps") this.renderSubtypPreview(self, typ);
         this.renderCountFlair(self, count);
         self.addEventListener("click", () => {
           if (this.isEditing) return;
-          this.openTypeSettings(type);
+          this.openTypSettings(typ);
         });
         self.addEventListener("contextmenu", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          this.openSearch(type);
+          this.openSearch(typ);
         });
         if (draggable) {
           self.draggable = true;
@@ -3273,342 +3149,321 @@ var require_typ_view = __commonJS({
             if (Number.isNaN(fromIndex) || fromIndex === index) return;
             let insertBefore = isAfter ? index + 1 : index;
             if (fromIndex < insertBefore) insertBefore -= 1;
-            const types = this.plugin.settings.types;
-            const [moved] = types.splice(fromIndex, 1);
-            types.splice(insertBefore, 0, moved);
+            const typs = this.plugin.settings.typs;
+            const [moved] = typs.splice(fromIndex, 1);
+            typs.splice(insertBefore, 0, moved);
             await this.plugin.saveSettings();
             this.render();
           });
         }
       }
-      // Echtes Text-Input statt nur Anzeige: die Beschreibung ist direkt in der
-      // Liste bearbeitbar, ohne dafür erst die Detailansicht öffnen zu müssen.
-      // click hier muss die Zeile selbst gezielt NICHT auslösen
-      // (self.addEventListener("click", ...) in renderRegisteredItem öffnet sonst
-      // die Detailansicht), daher stopPropagation.
-      renderDescriptionInput(self, type) {
+      // A real input, so the description can be edited right in the list. Its
+      // click must NOT trigger the row (which would open the detail view).
+      renderDescriptionInput(self, typ) {
         const descInput = self.createEl("input", {
           type: "text",
-          cls: "fred-typ-list-description-input"
+          cls: "typ-list-description-input"
         });
-        descInput.value = this.plugin.settings.typeDescriptions[type] ?? "";
+        descInput.value = this.plugin.settings.typDescriptions[typ] ?? "";
         descInput.addEventListener("click", (event) => event.stopPropagation());
         descInput.addEventListener("change", async () => {
           const value = descInput.value.trim();
-          if (value) this.plugin.settings.typeDescriptions[type] = value;
-          else delete this.plugin.settings.typeDescriptions[type];
+          if (value) this.plugin.settings.typDescriptions[typ] = value;
+          else delete this.plugin.settings.typDescriptions[typ];
           await this.plugin.saveSettings();
         });
       }
-      // "(Subtyp 1, Subtyp 2)" statt der Beschreibung - dieselbe Darstellung wie
-      // die Subtyp-Vorschau im separaten TYP-Picker (renderSubtypePreview in
-      // type-picker.js, gemeinsame Farbgrundlage nameColor in type-colors.js):
-      // Klammern und Kommas muted, jeder Name in seiner eigenen Subtyp-Farbe; ohne
-      // "TYP View einfärben" bleibt die Vorschau wie der TYP-Name selbst ungefärbt,
-      // und ohne dessen Unter-Schalter "Subtyp" stehen alle in der TYP-Farbe.
-      // Bewusst nur die erfassten Subtypen und ohne Notiz-Anzahl: nicht erfasste
-      // Werte haben weder Farbe noch Definition, und Zahlen je Name würden die
-      // Zeile so verlängern, dass bei mehreren Subtypen nichts mehr davon zu lesen
-      // wäre. Reine Anzeige - Klick und Rechtsklick gehören weiter der ganzen
-      // Zeile (Detailansicht bzw. Suche). Ob die Liste links hinter dem Namen
-      // beginnt oder rechtsbündig vor der Anzahl endet, ist hier bewusst nicht
-      // abgefragt: das schaltet Style Settings über eine body-Klasse (siehe den
-      // @settings-Block und .fred-typ-list-subtypes in styles.css), das Markup
-      // bleibt in beiden Fällen dasselbe.
-      renderSubtypePreview(self, type) {
-        const subtypes = getSubtypeNames2(this.plugin.settings, type);
-        if (subtypes.length === 0) return;
+      // "(Subtyp 1, Subtyp 2)" instead of the description - the same look as the
+      // preview in the separate TYP-Picker (shared nameColor in typ-colors.js):
+      // brackets and commas muted, each name in its Subtyp color. Only registered
+      // Subtyps and no counts - unregistered values have no color, and counts
+      // would make the row unreadable. Display only; click and right-click belong
+      // to the row. Left or right alignment is a Style Settings body class (see
+      // @settings and .typ-list-subtyps in styles.css); the markup is the same.
+      renderSubtypPreview(self, typ) {
+        const subtyps = getSubtypNames2(this.plugin.settings, typ);
+        if (subtyps.length === 0) return;
         const colorize = this.plugin.settings.colorViews.typList;
-        const wrap = self.createSpan({ cls: "fred-typ-list-subtypes" });
+        const wrap = self.createSpan({ cls: "typ-list-subtyps" });
         wrap.appendText("(");
-        subtypes.forEach((subtype, index) => {
+        subtyps.forEach((subtyp, index) => {
           if (index > 0) wrap.appendText(", ");
-          const span = wrap.createSpan({ text: subtype });
-          if (colorize) span.style.color = nameColor(this.plugin.settings, type, subtype).color;
+          const span = wrap.createSpan({ text: subtyp });
+          if (colorize) span.style.color = nameColor(this.plugin.settings, typ, subtyp).color;
         });
         wrap.appendText(")");
       }
-      renderUnregisteredItem(type, count) {
+      renderUnregisteredItem(typ, count) {
         const treeItem = this.listEl.createDiv({ cls: "tree-item" });
-        const self = treeItem.createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
-        self.createDiv({ cls: "tree-item-inner", text: displayTypeKey(type) });
+        const self = treeItem.createDiv({ cls: "tree-item-self is-clickable typ-unregistered" });
+        self.createDiv({ cls: "tree-item-inner", text: displayTypKey(typ) });
         this.renderCountFlair(self, count);
-        self.addEventListener("click", () => this.registerType(type));
+        self.addEventListener("click", () => this.registerTyp(typ));
         self.addEventListener("contextmenu", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          this.openSearch(type);
+          this.openSearch(typ);
         });
       }
-      // Alle SUBTYP-Werte, die in Notizen vorkommen, aber unter ihrem TYP nicht
-      // erfasst sind - über den ganzen Vault, nicht nur für einen TYP wie
-      // renderUnregisteredSubtypes() in der Detailansicht. Der Index führt seine
-      // Buckets über ALLE TYP-Schlüssel, also auch über nicht erfasste; deren
-      // Subtypen kommen daher mit (Klick erfasst dann beides, siehe
-      // registerTypeWithSubtype).
+      // Every SUBTYP value that occurs in notes but isn't registered under its TYP
+      // - across the vault, unlike renderUnregisteredSubtyps() in the detail view.
+      // The index keeps buckets for ALL TYP keys, unregistered ones included, so
+      // their Subtyps come along (a click then registers both, see
+      // registerTypWithSubtyp).
       //
-      // Sortiert nach Anzahl, dann nach dem Zeilentext von links nach rechts (erst
-      // TYP, dann Subtyp) - dieselbe Regel wie in der Detailansicht, wo das
-      // Häufigste oben steht. Bewusst NICHT nach dem Sortier-Button der Liste:
-      // "Farbe" und "Manuell" haben für nicht erfasste Werte keine Bedeutung.
+      // Sorted by count, then by row text (TYP, then Subtyp) - like the detail
+      // view. Deliberately NOT by the list's sort button: "color" and "manual"
+      // mean nothing for unregistered values.
       //
-      // Eine Notiz ohne TYP bleibt außen vor - der Index verwirft ihren SUBTYP
-      // schon beim Zählen (siehe aggregate() in typ-index.js), ein SUBTYP ohne TYP
-      // hat keinen Kontext.
-      unregisteredSubtypeRows() {
-        const registered = this.plugin.settings.types;
+      // A note without a TYP is left out: the index drops its SUBTYP already (see
+      // aggregate() in typ-index.js), a SUBTYP without a TYP has no context.
+      unregisteredSubtypRows() {
+        const registered = this.plugin.settings.typs;
         const rows = [];
-        for (const [type, bucket] of this.plugin.typIndex.subtypeCounts()) {
-          const known = getSubtypeNames2(this.plugin.settings, type);
-          for (const [subtype, count] of bucket.counts) {
-            if (known.includes(subtype)) continue;
-            rows.push({ type, subtype, count, typeRegistered: registered.includes(type) });
+        for (const [typ, bucket] of this.plugin.typIndex.subtypCounts()) {
+          const known = getSubtypNames2(this.plugin.settings, typ);
+          for (const [subtyp, count] of bucket.counts) {
+            if (known.includes(subtyp)) continue;
+            rows.push({ typ, subtyp, count, typRegistered: registered.includes(typ) });
           }
         }
-        return rows.sort((a, b) => b.count - a.count || a.type.localeCompare(b.type) || a.subtype.localeCompare(b.subtype));
+        return rows.sort((a, b) => b.count - a.count || a.typ.localeCompare(b.typ) || a.subtyp.localeCompare(b.subtyp));
       }
-      // "NOTIZ / Kurz Geschichte" - der Subtyp allein wäre mehrdeutig, denselben
-      // Namen kann es unter mehreren TYPen geben. Ist der TYP bereits erfasst,
-      // trägt sein Teil der Zeile seine Farbe (bzw. einen Farbpunkt davor, je nach
-      // Einstellung "TYP View einfärben") - abgeschwächt über das Style Setting
-      // "Farbe erfasster TYPen in dieser Liste", damit die Zeilen trotz Farbe
-      // hinter den erfassten TYPen oben zurückbleiben. Ist auch der TYP nicht
-      // erfasst, bleibt die ganze Zeile muted wie die Einträge darüber.
-      renderUnregisteredSubtypeItem({ type, subtype, count, typeRegistered }) {
+      // "NOTIZ / Kurz Geschichte" - the Subtyp alone would be ambiguous, the same
+      // name can exist under several TYP entries. If the TYP is registered, its
+      // part carries its color (or a dot, depending on "TYP-Pane" coloring),
+      // toned down by the Style Setting "Color in unregistered Subtyp rows" so
+      // these rows stay behind the registered entries above. If the TYP isn't
+      // registered either, the whole row is muted like the entries above it.
+      renderUnregisteredSubtypItem({ typ, subtyp, count, typRegistered }) {
         const treeItem = this.listEl.createDiv({ cls: "tree-item" });
-        const self = treeItem.createDiv({ cls: "tree-item-self is-clickable fred-typ-unregistered" });
+        const self = treeItem.createDiv({ cls: "tree-item-self is-clickable typ-unregistered" });
         const colorize = this.plugin.settings.colorViews.typList;
-        const { color, isDefault } = nameColor(this.plugin.settings, type);
-        if (typeRegistered && !colorize) {
-          const wrap = self.createDiv({ cls: "fred-typ-color-wrap fred-typ-unregistered-subtype-color" });
-          paintColorDot(wrap.createDiv({ cls: "fred-typ-color-dot" }), color, isDefault);
+        const { color, isDefault } = nameColor(this.plugin.settings, typ);
+        if (typRegistered && !colorize) {
+          const wrap = self.createDiv({ cls: "typ-color-wrap typ-unregistered-subtyp-color" });
+          paintColorDot(wrap.createDiv({ cls: "typ-color-dot" }), color, isDefault);
         }
         const inner = self.createDiv({ cls: "tree-item-inner" });
-        const typeEl = inner.createSpan({ cls: "fred-typ-unregistered-subtype-type", text: displayTypeKey(type) });
-        if (typeRegistered && colorize && !isDefault) {
-          typeEl.style.color = color;
-          typeEl.addClass("fred-typ-unregistered-subtype-color");
+        const typEl = inner.createSpan({ cls: "typ-unregistered-subtyp-typ", text: displayTypKey(typ) });
+        if (typRegistered && colorize && !isDefault) {
+          typEl.style.color = color;
+          typEl.addClass("typ-unregistered-subtyp-color");
         }
-        inner.createSpan({ cls: "fred-typ-unregistered-subtype-slash", text: " / " });
-        inner.createSpan({ text: displayTypeKey(subtype) });
+        inner.createSpan({ cls: "typ-unregistered-subtyp-slash", text: " / " });
+        inner.createSpan({ text: displayTypKey(subtyp) });
         this.renderCountFlair(self, count);
-        self.addEventListener("click", () => this.registerTypeWithSubtype(type, subtype));
+        self.addEventListener("click", () => this.registerTypWithSubtyp(typ, subtyp));
         self.addEventListener("contextmenu", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          this.openSubtypeSearch(type, subtype);
+          this.openSubtypSearch(typ, subtyp);
         });
       }
-      // Klick auf eine solche Zeile: erfasst den Subtyp - und, falls nötig, seinen
-      // TYP gleich mit. Reihenfolge zwingend erst TYP, dann Subtyp: das Erfassen
-      // eines TYPs kann dessen Wert in den Notizen bereinigen (" buch" → "BUCH"),
-      // danach muss der Subtyp-Abgleich schon den NEUEN TYP-Namen verwenden, sonst
-      // findet renameSubtypeInNotes() keine Datei mehr.
+      // Clicking such a row registers the Subtyp and, if needed, its TYP. TYP
+      // first, then Subtyp - necessarily: registering a TYP can clean its value in
+      // the notes (" buch" -> "BUCH"), and the Subtyp pass must then use the NEW
+      // TYP name or renameSubtypInNotes() finds no file.
       //
-      // Beides zusammen wird direkt ausgeführt, ohne Bestätigung: es ist eine
-      // reine Erfassung. Notizen ändern sich nur, wenn der Rohwert unsauber war und
-      // dabei bereinigt wird - ein sauberer Wert fasst keine einzige Datei an.
-      async registerTypeWithSubtype(typeKey, subtypeKey) {
-        const bucket = this.plugin.typIndex.subtypeBucket(typeKey);
-        const typeResult = this.plugin.settings.types.includes(typeKey) ? { type: typeKey, renamed: 0 } : await this.applyTypeRegistration(typeKey);
-        if (!typeResult) return;
-        const subtypeResult = await this.applySubtypeRegistration(typeResult.type, subtypeKey, bucket);
+      // No confirmation: it only registers. Notes change only when a raw value was
+      // unclean and gets cleaned - a clean value touches no file.
+      async registerTypWithSubtyp(typKey, subtypKey) {
+        const bucket = this.plugin.typIndex.subtypBucket(typKey);
+        const typResult = this.plugin.settings.typs.includes(typKey) ? { typ: typKey, renamed: 0 } : await this.applyTypRegistration(typKey);
+        if (!typResult) return;
+        const subtypResult = await this.applySubtypRegistration(typResult.typ, subtypKey, bucket);
         await this.plugin.saveSettings();
         this.render();
         this.plugin.refreshTypColors?.();
-        if (!subtypeResult) return;
+        if (!subtypResult) return;
         const parts = [];
-        if (typeResult.type !== typeKey) parts.push(`TYP ${typeResult.type}`);
-        parts.push(`SUBTYP ${subtypeResult.subtype}`);
-        const changed = typeResult.renamed + subtypeResult.renamed;
-        new Notice(`${parts.join(" und ")} registriert${changed > 0 ? `, ${changed} Notiz(en) angepasst` : ""}.`);
+        if (typResult.typ !== typKey) parts.push(`TYP ${typResult.typ}`);
+        parts.push(`Subtyp ${subtypResult.subtyp}`);
+        const changed = typResult.renamed + subtypResult.renamed;
+        new Notice(`${joinAnd(parts)} registered${changed > 0 ? `, ${plural(changed, "note")} updated` : ""}.`);
       }
-      renderTypeSettings(type) {
+      renderTypSettings(typ) {
         const { contentEl } = this;
         contentEl.empty();
-        const header = contentEl.createDiv({ cls: "fred-typ-detail-header" });
-        const backBtn = header.createDiv({ cls: "clickable-icon fred-typ-back", attr: { "aria-label": "Zur\xFCck" } });
+        const header = contentEl.createDiv({ cls: "typ-detail-header" });
+        const backBtn = header.createDiv({ cls: "clickable-icon typ-back", attr: { "aria-label": "Back" } });
         setIcon(backBtn, "arrow-left");
-        backBtn.addEventListener("click", () => this.closeTypeSettings());
-        const titleEl = header.createDiv({ cls: "fred-typ-detail-title", text: type });
-        const titleColor = this.plugin.settings.colorViews.typList ? this.plugin.settings.typeColors[type] : null;
-        if (titleColor) titleEl.style.setProperty("--fred-typ-name-color", titleColor);
-        this.makeSearchable(titleEl, () => this.openSearch(type));
-        const { counts } = this.plugin.typIndex.typeCounts();
-        header.createSpan({ cls: "fred-typ-detail-count", text: String(counts.get(type) ?? 0) });
+        backBtn.addEventListener("click", () => this.closeTypSettings());
+        const titleEl = header.createDiv({ cls: "typ-detail-title", text: typ });
+        const titleColor = this.plugin.settings.colorViews.typList ? this.plugin.settings.typColors[typ] : null;
+        if (titleColor) titleEl.style.setProperty("--typ-name-color", titleColor);
+        this.makeSearchable(titleEl, () => this.openSearch(typ));
+        const { counts } = this.plugin.typIndex.typCounts();
+        header.createSpan({ cls: "typ-detail-count", text: String(counts.get(typ) ?? 0) });
         const renameWithNotesBtn = header.createDiv({
-          cls: "clickable-icon fred-typ-detail-rename-notes",
-          attr: { "aria-label": "Umbenennen (inkl. Notizen anpassen)" }
+          cls: "clickable-icon typ-detail-rename-notes",
+          attr: { "aria-label": "Rename and update notes" }
         });
         setIcon(renameWithNotesBtn, "pencil");
-        renameWithNotesBtn.addEventListener("click", () => this.startDetailRename(type, titleEl, { updateNotes: true }));
-        const renameBtn = header.createDiv({ cls: "clickable-icon fred-typ-detail-rename", attr: { "aria-label": "Umbenennen" } });
+        renameWithNotesBtn.addEventListener("click", () => this.startDetailRename(typ, titleEl, { updateNotes: true }));
+        const renameBtn = header.createDiv({ cls: "clickable-icon typ-detail-rename", attr: { "aria-label": "Rename" } });
         setIcon(renameBtn, "pencil");
-        renameBtn.addEventListener("click", () => this.startDetailRename(type, titleEl));
-        this.renderManualToggle(header, type);
-        const deleteBtn = header.createDiv({ cls: "clickable-icon fred-typ-detail-delete", attr: { "aria-label": "L\xF6schen" } });
+        renameBtn.addEventListener("click", () => this.startDetailRename(typ, titleEl));
+        this.renderManualToggle(header, typ);
+        const deleteBtn = header.createDiv({ cls: "clickable-icon typ-detail-delete", attr: { "aria-label": "Delete" } });
         setIcon(deleteBtn, "trash");
-        deleteBtn.addEventListener("click", () => this.showDeleteConfirm(type));
-        const body = contentEl.createDiv({ cls: "fred-typ-detail-body" });
-        const optionsHeader = body.createDiv({ cls: "fred-typ-frontmatter-header fred-typ-options-header" });
-        const colorRow = optionsHeader.createDiv({ cls: "fred-typ-detail-color-row" });
+        deleteBtn.addEventListener("click", () => this.showDeleteConfirm(typ));
+        const body = contentEl.createDiv({ cls: "typ-detail-body" });
+        const optionsHeader = body.createDiv({ cls: "typ-frontmatter-header typ-options-header" });
+        const colorRow = optionsHeader.createDiv({ cls: "typ-detail-color-row" });
         this.renderColorPicker(
           colorRow,
-          type,
+          typ,
           (newColor) => {
             if (!this.plugin.settings.colorViews.typList) return;
-            titleEl.style.setProperty("--fred-typ-name-color", newColor);
+            titleEl.style.setProperty("--typ-name-color", newColor);
           },
           { showReset: true }
         );
         const descInput = optionsHeader.createEl("input", {
           type: "text",
-          cls: "fred-typ-description-input",
-          attr: { placeholder: "Beschreibung" }
+          cls: "typ-description-input",
+          attr: { placeholder: "Description" }
         });
-        descInput.value = this.plugin.settings.typeDescriptions[type] ?? "";
+        descInput.value = this.plugin.settings.typDescriptions[typ] ?? "";
         descInput.addEventListener("change", async () => {
           const value = descInput.value.trim();
-          if (value) this.plugin.settings.typeDescriptions[type] = value;
-          else delete this.plugin.settings.typeDescriptions[type];
+          if (value) this.plugin.settings.typDescriptions[typ] = value;
+          else delete this.plugin.settings.typDescriptions[typ];
           await this.plugin.saveSettings();
         });
-        body.createDiv({ cls: "fred-typ-detail-separator" });
-        const bucket = this.plugin.typIndex.subtypeBucket(type);
-        this.frontmatterBlocks = mountFrontmatterBlocks(this, body, type, {
-          renderHeader: (section, el, blocks) => this.renderSectionHeader(el, type, section, bucket, blocks),
+        body.createDiv({ cls: "typ-detail-separator" });
+        const bucket = this.plugin.typIndex.subtypBucket(typ);
+        this.frontmatterBlocks = mountFrontmatterBlocks(this, body, typ, {
+          renderHeader: (section, el, blocks) => this.renderSectionHeader(el, typ, section, bucket, blocks),
           renderFooter: (section, el) => {
-            if (section !== null) this.renderSectionFooter(el, type, section);
+            if (section !== null) this.renderSectionFooter(el, typ, section);
           },
           onMoveSection: async (order) => {
-            reorderSubtypes(this.plugin.settings, type, order);
+            reorderSubtyps(this.plugin.settings, typ, order);
             await this.plugin.saveSettings();
             this.render();
           }
         });
         this.frontmatterEditors.push(...this.frontmatterBlocks.editors);
-        this.subtypeAddBtnEl = body.createEl("button", { cls: "mod-cta fred-typ-subtype-add" });
-        setIcon(this.subtypeAddBtnEl.createSpan({ cls: "fred-typ-subtype-add-icon" }), "plus");
-        this.subtypeAddBtnEl.createSpan({ text: "Subtyp hinzuf\xFCgen" });
-        this.subtypeAddBtnEl.addEventListener("click", () => this.startAddSubtype(type));
-        this.renderUnregisteredSubtypes(body, type, bucket);
-        body.createDiv({ cls: "fred-typ-detail-separator" });
+        this.subtypAddBtnEl = body.createEl("button", { cls: "mod-cta typ-subtyp-add" });
+        setIcon(this.subtypAddBtnEl.createSpan({ cls: "typ-subtyp-add-icon" }), "plus");
+        this.subtypAddBtnEl.createSpan({ text: "Add Subtyp" });
+        this.subtypAddBtnEl.addEventListener("click", () => this.startAddSubtyp(typ));
+        this.renderUnregisteredSubtyps(body, typ, bucket);
+        body.createDiv({ cls: "typ-detail-separator" });
         this.renderFloatingHint(body);
         this.plugin.refreshFrontmatterHighlight?.();
       }
-      // Überschrift eines Blocks (siehe frontmatter-blocks.js): Titel mit
-      // Notiz-Anzahl (beim TYP-Frontmatter die Notizen ohne SUBTYP - für die gilt
-      // nur dieser Block), Suche per Klick auf den Titel, und die beiden
-      // "Property hinzufügen"-Buttons, die eine Leerzeile in genau diesem Block
-      // anlegen.
-      renderSectionHeader(el, type, section, bucket, blocks) {
-        const titleGroup = el.createDiv({ cls: "fred-typ-frontmatter-title-group" });
-        const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: section ?? `${type}-Frontmatter` });
-        const count = section === null ? bucket.noSubtype : bucket.counts.get(section) ?? 0;
-        titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(count) });
-        this.makeSearchable(titleEl, () => this.openSubtypeSearch(type, section));
-        const addButtons = el.createDiv({ cls: "fred-typ-frontmatter-add-group" });
+      // A block's heading (see frontmatter-blocks.js): title with note count (for
+      // the TYP-Frontmatter the notes without SUBTYP, the only ones it applies to
+      // alone), search on click, and the two add buttons for a blank row in this
+      // block.
+      renderSectionHeader(el, typ, section, bucket, blocks) {
+        const titleGroup = el.createDiv({ cls: "typ-frontmatter-title-group" });
+        const titleEl = titleGroup.createDiv({ cls: "typ-detail-section-title", text: section ?? `${typ}-Frontmatter` });
+        const count = section === null ? bucket.noSubtyp : bucket.counts.get(section) ?? 0;
+        titleGroup.createSpan({ cls: "typ-subtyp-count", text: String(count) });
+        this.makeSearchable(titleEl, () => this.openSubtypSearch(typ, section));
+        const addButtons = el.createDiv({ cls: "typ-frontmatter-add-group" });
         const addFloatingPropertyBtn = addButtons.createDiv({
-          cls: "clickable-icon fred-typ-frontmatter-add-floating",
-          attr: { "aria-label": "Floating Property hinzuf\xFCgen" }
+          cls: "clickable-icon typ-frontmatter-add-floating",
+          attr: { "aria-label": "Add floating property" }
         });
         setIcon(addFloatingPropertyBtn, "plus");
         addFloatingPropertyBtn.addEventListener("click", () => blocks.addBlank(section, true));
         const addPropertyBtn = addButtons.createDiv({
-          cls: "clickable-icon fred-typ-frontmatter-add",
-          attr: { "aria-label": "Property hinzuf\xFCgen" }
+          cls: "clickable-icon typ-frontmatter-add",
+          attr: { "aria-label": "Add property" }
         });
         setIcon(addPropertyBtn, "plus");
         addPropertyBtn.addEventListener("click", () => blocks.addBlank(section, false));
       }
-      // Abschluss eines Subtyp-Blocks: links die Farbe des Subtyps (Farbpunkt, der
-      // die Regler öffnet, daneben Zurücksetzen), rechts dieselben Aktionen in
-      // derselben Reihenfolge wie im Kopf der TYP-Detailansicht (Umbenennen inkl.
-      // Notizen, Umbenennen, "manuell erstellbar", Löschen). Das TYP-Frontmatter
-      // hat keinen Abschluss. Der Titel wird erst beim Klick gesucht - Überschrift und
-      // Abschluss entstehen bei jedem synchronize() neu.
-      renderSectionFooter(el, type, subtype) {
-        el.addClass("fred-typ-subtype-actions");
-        const colorGroup = el.createDiv({ cls: "fred-typ-subtype-color-group" });
-        const ownColor = subtypeHasOwnColor(this.plugin.settings, type, subtype);
-        const typeHasColor = !!this.plugin.settings.typeColors[type];
+      // Footer of a Subtyp block: on the left the Subtyp color (a dot opening the
+      // sliders, reset next to it), on the right the same actions in the same order
+      // as the detail header (rename and update notes, rename, manually creatable,
+      // delete). The TYP-Frontmatter has no footer. The title is looked up on
+      // click - heading and footer are rebuilt on every synchronize().
+      renderSectionFooter(el, typ, subtyp) {
+        el.addClass("typ-subtyp-actions");
+        const colorGroup = el.createDiv({ cls: "typ-subtyp-color-group" });
+        const ownColor = subtypHasOwnColor(this.plugin.settings, typ, subtyp);
+        const typHasColor = !!this.plugin.settings.typColors[typ];
         const colorDot = colorGroup.createDiv({
-          cls: "fred-typ-subtype-color-dot",
-          attr: { "aria-label": !typeHasColor ? "TYP hat keine Farbe" : ownColor ? "Farbe anpassen" : "\xDCbernimmt TYP-Farbe" }
+          cls: "typ-subtyp-color-dot",
+          attr: { "aria-label": !typHasColor ? "TYP has no color" : ownColor ? "Adjust color" : "Uses TYP color" }
         });
-        colorDot.fredSubtype = subtype;
-        paintColorDot(colorDot, subtypeColor(this.plugin.settings, type, subtype) ?? DEFAULT_TYPE_COLOR, !ownColor || !typeHasColor);
-        colorDot.addEventListener("click", () => this.openSubtypeColorPopover(colorDot, type, subtype));
-        const resetBtn = colorGroup.createDiv({ cls: "clickable-icon fred-typ-color-reset", attr: { "aria-label": "Farbe zur\xFCcksetzen" } });
+        colorDot.typSubtyp = subtyp;
+        paintColorDot(colorDot, subtypColor(this.plugin.settings, typ, subtyp) ?? DEFAULT_TYP_COLOR, !ownColor || !typHasColor);
+        colorDot.addEventListener("click", () => this.openSubtypColorPopover(colorDot, typ, subtyp));
+        const resetBtn = colorGroup.createDiv({ cls: "clickable-icon typ-color-reset", attr: { "aria-label": "Reset color" } });
         resetBtn.toggleClass("is-disabled", !ownColor);
         setIcon(resetBtn, "rotate-ccw");
         resetBtn.addEventListener("click", async () => {
-          const data = getSubtype2(this.plugin.settings, type, subtype);
+          const data = getSubtyp2(this.plugin.settings, typ, subtyp);
           if (!data?.color) return;
           delete data.color;
           await this.plugin.saveSettings();
           this.plugin.refreshTypColors?.();
           this.render();
         });
-        const actions = el.createDiv({ cls: "fred-typ-subtype-action-group" });
+        const actions = el.createDiv({ cls: "typ-subtyp-action-group" });
         const titleEl = () => {
           let sibling = el.previousElementSibling;
-          while (sibling && !sibling.hasClass("fred-typ-section-header")) sibling = sibling.previousElementSibling;
-          return sibling?.querySelector(".fred-typ-detail-section-title") ?? null;
+          while (sibling && !sibling.hasClass("typ-section-header")) sibling = sibling.previousElementSibling;
+          return sibling?.querySelector(".typ-detail-section-title") ?? null;
         };
         const rename = (updateNotes) => {
           const target = titleEl();
-          if (target) this.startSubtypeRename(type, subtype, target, { updateNotes });
+          if (target) this.startSubtypRename(typ, subtyp, target, { updateNotes });
         };
         const renameWithNotesBtn = actions.createDiv({
-          cls: "clickable-icon fred-typ-detail-rename-notes",
-          attr: { "aria-label": "Umbenennen (inkl. Notizen anpassen)" }
+          cls: "clickable-icon typ-detail-rename-notes",
+          attr: { "aria-label": "Rename and update notes" }
         });
         setIcon(renameWithNotesBtn, "pencil");
         renameWithNotesBtn.addEventListener("click", () => rename(true));
-        const renameBtn = actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename", attr: { "aria-label": "Umbenennen" } });
+        const renameBtn = actions.createDiv({ cls: "clickable-icon typ-detail-rename", attr: { "aria-label": "Rename" } });
         setIcon(renameBtn, "pencil");
         renameBtn.addEventListener("click", () => rename(false));
-        this.renderSubtypeManualToggle(actions, type, subtype);
-        const deleteBtn = actions.createDiv({ cls: "clickable-icon fred-typ-detail-delete", attr: { "aria-label": "L\xF6schen" } });
+        this.renderSubtypManualToggle(actions, typ, subtyp);
+        const deleteBtn = actions.createDiv({ cls: "clickable-icon typ-detail-delete", attr: { "aria-label": "Delete" } });
         setIcon(deleteBtn, "trash");
-        deleteBtn.addEventListener("click", () => this.deleteSubtypeWithConfirm(type, subtype));
+        deleteBtn.addEventListener("click", () => this.deleteSubtypWithConfirm(typ, subtyp));
       }
-      // Popover unter dem Farbpunkt eines Subtyp-Blocks: je ein Regler für
-      // Farbton, Sättigung und Helligkeit, begrenzt auf die in den Einstellungen
-      // festgelegte Abweichung (siehe type-colors.js). Die Leiste jedes Reglers
-      // zeigt als Verlauf die Farben, die er erreichen kann. Beim Ziehen ändert
-      // sich nur der Farbpunkt hier; gespeichert und in die übrigen Ansichten
-      // übernommen wird beim Schließen (Klick daneben oder Escape) - ein
-      // refreshTypColors() rendert u. a. diese Ansicht neu.
-      openSubtypeColorPopover(anchorEl, type, subtype) {
-        this.closeSubtypeColorPopover?.();
+      // Popover below a Subtyp block's dot: one slider per channel, limited to the
+      // range from the settings (see typ-colors.js), each track showing the colors
+      // it can reach. Dragging only updates the dot here; saving and updating the
+      // other views happens on close (click outside or Escape), since
+      // refreshTypColors() re-renders this view among others.
+      openSubtypColorPopover(anchorEl, typ, subtyp) {
+        this.closeSubtypColorPopover?.();
         const { settings } = this.plugin;
-        const data = getSubtype2(settings, type, subtype);
+        const data = getSubtyp2(settings, typ, subtyp);
         if (!data) return;
-        const typeColor = settings.typeColors[type] ?? DEFAULT_TYPE_COLOR;
-        const offset = clampedOffset(settings, data.color) ?? Object.fromEntries(SUBTYPE_COLOR_CHANNELS.map(({ key }) => [key, 0]));
+        const typColor = settings.typColors[typ] ?? DEFAULT_TYP_COLOR;
+        const offset = clampedOffset(settings, data.color) ?? Object.fromEntries(SUBTYP_COLOR_CHANNELS.map(({ key }) => [key, 0]));
         const doc = anchorEl.doc;
-        const popover = doc.body.createDiv({ cls: "menu fred-typ-subtype-color-popover" });
+        const popover = doc.body.createDiv({ cls: "menu typ-subtyp-color-popover" });
         const rows = [];
         const update = () => {
-          const color = applyColorOffset(typeColor, offset);
-          for (const el of this.contentEl.querySelectorAll(".fred-typ-subtype-color-dot")) {
-            if (el.fredSubtype === subtype) paintColorDot(el, color, !hasColorOffset(offset) || !settings.typeColors[type]);
+          const color = applyColorOffset(typColor, offset);
+          for (const el of this.contentEl.querySelectorAll(".typ-subtyp-color-dot")) {
+            if (el.typSubtyp === subtyp) paintColorDot(el, color, !hasColorOffset(offset) || !settings.typColors[typ]);
           }
           for (const row of rows) row();
         };
-        for (const { key, label, unit } of SUBTYPE_COLOR_CHANNELS) {
+        for (const { key, label, unit } of SUBTYP_COLOR_CHANNELS) {
           const [min, max] = channelBounds(settings, key);
-          const row = popover.createDiv({ cls: "fred-typ-subtype-color-row" });
-          row.createSpan({ cls: "fred-typ-subtype-color-label", text: label });
-          const input = row.createEl("input", { type: "range", cls: "slider fred-typ-subtype-color-slider" });
+          const row = popover.createDiv({ cls: "typ-subtyp-color-row" });
+          row.createSpan({ cls: "typ-subtyp-color-label", text: label });
+          const input = row.createEl("input", { type: "range", cls: "slider typ-subtyp-color-slider" });
           input.min = String(min);
           input.max = String(max);
           input.step = "1";
           input.value = String(offset[key]);
           input.disabled = min === max;
-          const valueEl = row.createSpan({ cls: "fred-typ-subtype-color-value" });
+          const valueEl = row.createSpan({ cls: "typ-subtyp-color-value" });
           input.addEventListener("input", () => {
             offset[key] = Number(input.value);
             update();
@@ -3617,9 +3472,9 @@ var require_typ_view = __commonJS({
             const steps = 8;
             const stops = [];
             for (let i = 0; i <= steps; i++) {
-              stops.push(applyColorOffset(typeColor, { ...offset, [key]: min + (max - min) * i / steps }));
+              stops.push(applyColorOffset(typColor, { ...offset, [key]: min + (max - min) * i / steps }));
             }
-            input.style.setProperty("--fred-track", `linear-gradient(to right, ${stops.join(", ")})`);
+            input.style.setProperty("--typ-track", `linear-gradient(to right, ${stops.join(", ")})`);
             valueEl.setText(`${offset[key] > 0 ? "+" : ""}${offset[key]}${unit}`);
           });
         }
@@ -3640,11 +3495,11 @@ var require_typ_view = __commonJS({
           close();
         };
         const close = async () => {
-          this.closeSubtypeColorPopover = null;
+          this.closeSubtypColorPopover = null;
           doc.removeEventListener("mousedown", onPointerDown, true);
           doc.removeEventListener("keydown", onKeyDown, true);
           popover.remove();
-          const current = getSubtype2(settings, type, subtype);
+          const current = getSubtyp2(settings, typ, subtyp);
           if (!current) return;
           if (hasColorOffset(offset)) current.color = { ...offset };
           else delete current.color;
@@ -3652,43 +3507,43 @@ var require_typ_view = __commonJS({
           this.plugin.refreshTypColors?.();
           this.render();
         };
-        this.closeSubtypeColorPopover = close;
+        this.closeSubtypColorPopover = close;
         doc.addEventListener("mousedown", onPointerDown, true);
         doc.addEventListener("keydown", onKeyDown, true);
       }
-      // Löscht den Subtyp-Block samt seiner Properties. Die Notizen behalten ihren
-      // SUBTYP-Wert (er erscheint danach unten als nicht erfasster Subtyp) - eine
-      // Bestätigung braucht es daher nur, wenn dabei Properties verloren gehen.
-      deleteSubtypeWithConfirm(type, subtype) {
+      // Deletes the Subtyp block with its properties. Notes keep their SUBTYP
+      // value (it then shows as unregistered below), so confirmation is only
+      // needed when properties would be lost.
+      deleteSubtypWithConfirm(typ, subtyp) {
         const apply = async () => {
-          deleteSubtype(this.plugin.settings, type, subtype);
+          deleteSubtyp(this.plugin.settings, typ, subtyp);
           await this.plugin.saveSettings();
           this.plugin.refreshTypColors?.();
           this.render();
         };
-        const keys = Object.keys(getSubtype2(this.plugin.settings, type, subtype)?.frontmatter ?? {}).filter((key) => key !== "");
+        const keys = Object.keys(getSubtyp2(this.plugin.settings, typ, subtyp)?.frontmatter ?? {}).filter((key) => key !== "");
         if (keys.length === 0) {
           apply();
           return;
         }
-        new ConfirmSubtypeModal(this.app, {
+        new ConfirmSubtypModal(this.app, {
           paragraphs: [
-            `Subtyp ${subtype} von ${type} wirklich l\xF6schen?`,
-            `${keys.length === 1 ? "Die Property" : `Die ${keys.length} Properties`} ${keys.join(", ")} ${keys.length === 1 ? "geht" : "gehen"} dabei verloren.`
+            `Delete Subtyp ${subtyp} of ${typ}?`,
+            keys.length === 1 ? `Its property ${keys[0]} will be lost.` : `Its ${keys.length} properties ${keys.join(", ")} will be lost.`
           ],
-          confirmText: "L\xF6schen",
+          confirmText: "Delete",
           confirmCls: "mod-warning",
           onConfirm: apply
         }).open();
       }
-      // Wie startDetailRename(), aber auf dem Titel eines Subtyp-Blocks. Der Block
-      // behält seine Position; updateNotes: true schreibt nach Bestätigung auch den
-      // SUBTYP der betroffenen Notizen um. Ein bereits vorhandener Name bietet
-      // stattdessen das Zusammenlegen an (schreibt die Notizen immer mit um).
-      startSubtypeRename(type, subtype, titleEl, { updateNotes = false } = {}) {
+      // Like startDetailRename(), on a Subtyp block's title. The block keeps its
+      // position; updateNotes: true also rewrites the SUBTYP of the affected notes
+      // after confirmation. An existing name offers a merge instead (which always
+      // rewrites the notes).
+      startSubtypRename(typ, subtyp, titleEl, { updateNotes = false } = {}) {
         if (this.isEditing) return;
         this.isEditing = true;
-        titleEl.addClass("fred-typ-subtype-name-input", "is-being-renamed");
+        titleEl.addClass("typ-subtyp-name-input", "is-being-renamed");
         titleEl.setAttribute("contenteditable", "true");
         titleEl.setAttribute("spellcheck", "false");
         titleEl.focus();
@@ -3697,13 +3552,13 @@ var require_typ_view = __commonJS({
         const selection = titleEl.win.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
-        const countOf = (name) => this.plugin.typIndex.subtypeBucket(type).counts.get(name) ?? 0;
+        const countOf = (name) => this.plugin.typIndex.subtypBucket(typ).counts.get(name) ?? 0;
         const applyRename = async (value, { withNotes }) => {
-          renameSubtype(this.plugin.settings, type, subtype, value);
+          renameSubtyp(this.plugin.settings, typ, subtyp, value);
           await this.plugin.saveSettings();
-          const renamed = withNotes ? await renameSubtypeInNotes(this.plugin, type, subtype, value) : 0;
+          const renamed = withNotes ? await renameSubtypInNotes(this.plugin, typ, subtyp, value) : 0;
           this.plugin.refreshTypColors?.();
-          if (withNotes) new Notice(`SUBTYP ${value}: ${renamed} Notiz(en) angepasst.`);
+          if (withNotes) new Notice(`Subtyp ${value}: ${plural(renamed, "note")} updated.`);
           this.render();
         };
         let done = false;
@@ -3711,28 +3566,28 @@ var require_typ_view = __commonJS({
           if (done) return;
           done = true;
           this.isEditing = false;
-          const value = normalizeSubtypeName(titleEl.textContent);
-          if (!commit || !value || value === subtype) {
+          const value = normalizeSubtypName(titleEl.textContent);
+          if (!commit || !value || value === subtyp) {
             this.render();
             return;
           }
-          const existing = getSubtypeNames2(this.plugin.settings, type).find(
-            (name) => name.toLowerCase() === value.toLowerCase() && name !== subtype
+          const existing = getSubtypNames2(this.plugin.settings, typ).find(
+            (name) => name.toLowerCase() === value.toLowerCase() && name !== subtyp
           );
           if (existing) {
-            new ConfirmSubtypeModal(this.app, {
+            new ConfirmSubtypModal(this.app, {
               paragraphs: [
-                `Subtyp ${existing} existiert bei ${type} bereits. ${subtype} damit zusammenlegen?`,
-                `${countOf(subtype)} Notiz(en) werden auf ${existing} umgestellt, die Properties von ${subtype} wandern in den Block ${existing}.`
+                `Subtyp ${existing} already exists in ${typ}. Merge ${subtyp} into it?`,
+                `${plural(countOf(subtyp), "note")} ${countOf(subtyp) === 1 ? "moves" : "move"} to ${existing}, and the properties of ${subtyp} move into the ${existing} block.`
               ],
-              confirmText: "Zusammenlegen",
+              confirmText: "Merge",
               confirmCls: "mod-warning",
               onConfirm: async () => {
-                mergeSubtypes(this.plugin.settings, type, subtype, existing);
+                mergeSubtyps(this.plugin.settings, typ, subtyp, existing);
                 await this.plugin.saveSettings();
-                const renamed = await renameSubtypeInNotes(this.plugin, type, subtype, existing);
+                const renamed = await renameSubtypInNotes(this.plugin, typ, subtyp, existing);
                 this.plugin.refreshTypColors?.();
-                new Notice(`Subtyp ${subtype} mit ${existing} zusammengelegt, ${renamed} Notiz(en) angepasst.`);
+                new Notice(`Subtyp ${subtyp} merged into ${existing}, ${plural(renamed, "note")} updated.`);
                 this.render();
               },
               onCancel: () => this.render()
@@ -3743,9 +3598,9 @@ var require_typ_view = __commonJS({
             await applyRename(value, { withNotes: false });
             return;
           }
-          new ConfirmSubtypeModal(this.app, {
-            paragraphs: [`Subtyp ${subtype} in ${value} umbenennen und ${countOf(subtype)} Notiz(en) entsprechend anpassen?`],
-            confirmText: "Umbenennen",
+          new ConfirmSubtypModal(this.app, {
+            paragraphs: [`Rename Subtyp ${subtyp} to ${value} and update ${plural(countOf(subtyp), "note")}?`],
+            confirmText: "Rename",
             confirmCls: "mod-cta",
             onConfirm: () => applyRename(value, { withNotes: true }),
             onCancel: () => this.render()
@@ -3763,111 +3618,102 @@ var require_typ_view = __commonJS({
         });
         titleEl.addEventListener("blur", () => finish(true));
       }
-      // Wie die unregistrierten Einträge der TYP-Liste: SUBTYP-Werte von Notizen
-      // dieses TYPs, die (noch) keinen eigenen Block haben (Notizen ganz ohne
-      // SUBTYP zählt stattdessen das TYP-Frontmatter). Dargestellt wie die
-      // Subtyp-Blöcke, aber nur mit Überschrift samt Anzahl. Ein Klick auf die
-      // Blockfläche übernimmt den Wert als Subtyp, ein Klick auf den Namen öffnet
-      // stattdessen die Suche - vor dem Erfassen nachzusehen, was in einem Wert
-      // eigentlich steckt, ist hier der häufige Fall. Der Name hebt sich beim
-      // Hovern in Akzentfarbe ab und zeigt damit selbst an, dass er etwas anderes
-      // tut als die Fläche um ihn herum.
-      renderUnregisteredSubtypes(parent, type, bucket) {
-        const registered = getSubtypeNames2(this.plugin.settings, type);
+      // Like the unregistered entries of the TYP-List: SUBTYP values of this TYP's
+      // notes that have no block yet (notes without any SUBTYP count for the
+      // TYP-Frontmatter instead). Shown like Subtyp blocks, but only heading and
+      // count. A click on the block registers the value; a click on the name opens
+      // the search instead - checking what a value holds before registering it is
+      // the common case. The name lights up in accent color on hover to show it
+      // does something different from the area around it.
+      renderUnregisteredSubtyps(parent, typ, bucket) {
+        const registered = getSubtypNames2(this.plugin.settings, typ);
         const unregistered = [...bucket.counts.keys()].filter((key) => !registered.includes(key)).sort((a, b) => bucket.counts.get(b) - bucket.counts.get(a) || a.localeCompare(b));
         if (unregistered.length === 0) return;
-        const listEl = parent.createDiv({ cls: "fred-typ-subtype-unregistered-list" });
+        const listEl = parent.createDiv({ cls: "typ-subtyp-unregistered-list" });
         for (const key of unregistered) {
-          const block = listEl.createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block fred-typ-subtype-unregistered" });
-          const header = block.createDiv({ cls: "fred-typ-frontmatter-header" });
-          const titleGroup = header.createDiv({ cls: "fred-typ-frontmatter-title-group" });
-          const titleEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title", text: displayTypeKey(key) });
-          titleGroup.createSpan({ cls: "fred-typ-subtype-count", text: String(bucket.counts.get(key)) });
-          block.addEventListener("click", () => this.registerSubtype(type, key, bucket));
-          this.makeSearchable(titleEl, () => this.openSubtypeSearch(type, key), { stopPropagation: true });
+          const block = listEl.createDiv({ cls: "typ-frontmatter-block typ-subtyp-block typ-subtyp-unregistered" });
+          const header = block.createDiv({ cls: "typ-frontmatter-header" });
+          const titleGroup = header.createDiv({ cls: "typ-frontmatter-title-group" });
+          const titleEl = titleGroup.createDiv({ cls: "typ-detail-section-title", text: displayTypKey(key) });
+          titleGroup.createSpan({ cls: "typ-subtyp-count", text: String(bucket.counts.get(key)) });
+          block.addEventListener("click", () => this.registerSubtyp(typ, key, bucket));
+          this.makeSearchable(titleEl, () => this.openSubtypSearch(typ, key), { stopPropagation: true });
         }
       }
-      // Ein Name, dessen Klick die Suche öffnet: Zeiger-Cursor und Akzentfarbe beim
-      // Hovern (siehe .fred-typ-searchable in styles.css), damit die Ansicht selbst
-      // zeigt, wo etwas passiert. Die Suche lag hier früher auf dem Rechtsklick -
-      // beim TYP-Frontmatter auf dem Titel, bei Subtyp-Blöcken auf der ganzen
-      // Blockfläche - und war damit praktisch unauffindbar: nichts deutete darauf
-      // hin, und ein Rechtsklick ist überall sonst ein Kontextmenü. Der Name ist
-      // der Ort, an dem man "zeig mir diese Notizen" erwartet, also hängt es jetzt
-      // genau dort. Während einer Umbenennung trägt dasselbe Element die Klasse
-      // is-being-renamed und ist ein Eingabefeld - dann darf ein Klick hinein den
-      // Cursor setzen und keine Suche auslösen.
+      // A name whose click opens the search: pointer cursor and accent color on
+      // hover (.typ-searchable), so the view itself shows where something happens.
+      // The name is where one expects "show me these notes". While renaming, the
+      // element is an input (is-being-renamed) and a click just places the cursor.
       makeSearchable(el, onSearch, { stopPropagation = false } = {}) {
-        el.addClass("fred-typ-searchable");
+        el.addClass("typ-searchable");
         el.addEventListener("click", (event) => {
           if (el.hasClass("is-being-renamed")) return;
           if (stopPropagation) event.stopPropagation();
           onSearch();
         });
       }
-      // subtypeKey === null → Notizen dieses TYPs ohne SUBTYP. Für eine Liste
-      // gibt es wie bei openSearch() keine exakte Suchsyntax - dann nach Notizen
-      // suchen, die alle ihre Einträge tragen.
-      openSubtypeSearch(type, subtypeKey) {
+      // subtypKey === null means notes of this TYP without SUBTYP. A list has no
+      // exact search syntax (as in openSearch()), so it searches notes carrying all
+      // its items.
+      openSubtypSearch(typ, subtypKey) {
         const globalSearch = this.plugin.app.internalPlugins.getPluginById("global-search");
         if (!globalSearch) return;
-        const typClause = this.typeClause(type);
+        const typClause = this.typClause(typ);
         let subtypClause;
-        if (subtypeKey === null) {
+        if (subtypKey === null) {
           subtypClause = `-["${SUBTYP_PROPERTY2}"]`;
         } else {
-          const raw = this.plugin.typIndex.subtypeBucket(type).rawByKey.get(subtypeKey);
-          subtypClause = Array.isArray(raw) ? raw.map((v) => `["${SUBTYP_PROPERTY2}":"${String(v ?? "").trim()}"]`).join(" ") : `["${SUBTYP_PROPERTY2}":"${subtypeKey}"]`;
+          const raw = this.plugin.typIndex.subtypBucket(typ).rawByKey.get(subtypKey);
+          subtypClause = Array.isArray(raw) ? raw.map((v) => `["${SUBTYP_PROPERTY2}":"${String(v ?? "").trim()}"]`).join(" ") : `["${SUBTYP_PROPERTY2}":"${subtypKey}"]`;
         }
         globalSearch.instance.openGlobalSearch(`${typClause} ${subtypClause}`);
       }
-      // Wie registerType(): übernimmt die bereinigte Form (Großbuchstaben, Liste
-      // als Einzelwert "A, B") als Subtyp dieses TYPs und schreibt den SUBTYP der
-      // betroffenen Notizen gleich mit um. Gibt es den Subtyp in anderer Schreib-
-      // weise schon, landen die Notizen dort.
-      async registerSubtype(type, subtypeKey, bucket) {
-        const result = await this.applySubtypeRegistration(type, subtypeKey, bucket);
+      // Like registerTyp(): registers the cleaned form (title case, a list as one
+      // value "A, B") as a Subtyp of this TYP and rewrites the SUBTYP of the
+      // affected notes. If the Subtyp exists in another spelling, the notes go
+      // there.
+      async registerSubtyp(typ, subtypKey, bucket) {
+        const result = await this.applySubtypRegistration(typ, subtypKey, bucket);
         if (!result) return;
         await this.plugin.saveSettings();
         this.plugin.refreshTypColors?.();
-        if (result.renamed > 0) new Notice(`SUBTYP ${result.subtype} registriert, ${result.renamed} Notiz(en) angepasst.`);
+        if (result.renamed > 0) new Notice(`Subtyp ${result.subtyp} registered, ${plural(result.renamed, "note")} updated.`);
       }
-      // Wie applyTypeRegistration für den TYP: der Vorgang ohne Speichern und
-      // Notice, damit registerTypeWithSubtype() ihn mit der TYP-Erfassung bündeln
-      // kann. Liefert { subtype, renamed } oder null.
-      async applySubtypeRegistration(type, subtypeKey, bucket) {
-        const raw = bucket.rawByKey.get(subtypeKey);
-        const normalized = normalizeRawType(raw === void 0 ? subtypeKey : raw, normalizeSubtypeName);
+      // Like applyTypRegistration: the core without saving and notice, so
+      // registerTypWithSubtyp() can bundle it. Returns { subtyp, renamed } or null.
+      async applySubtypRegistration(typ, subtypKey, bucket) {
+        const raw = bucket.rawByKey.get(subtypKey);
+        const normalized = normalizeRawTyp(raw === void 0 ? subtypKey : raw, normalizeSubtypName);
         if (!normalized) return null;
-        const existing = getSubtypeNames2(this.plugin.settings, type).find((name) => name.toLowerCase() === normalized.toLowerCase());
-        const subtype = existing ?? normalized;
-        ensureSubtype(this.plugin.settings, type, subtype);
-        const renamed = subtype !== subtypeKey ? await renameSubtypeInNotes(this.plugin, type, subtypeKey, subtype) : 0;
-        return { subtype, renamed };
+        const existing = getSubtypNames2(this.plugin.settings, typ).find((name) => name.toLowerCase() === normalized.toLowerCase());
+        const subtyp = existing ?? normalized;
+        ensureSubtyp(this.plugin.settings, typ, subtyp);
+        const renamed = subtyp !== subtypKey ? await renameSubtypInNotes(this.plugin, typ, subtypKey, subtyp) : 0;
+        return { subtyp, renamed };
       }
-      // Neuer, leerer Subtyp-Block direkt über dem "Subtyp hinzufügen"-Button,
-      // dessen Name sofort inline eingegeben wird (wie startAdd() in der Liste).
-      startAddSubtype(type) {
-        if (this.isEditing || !this.subtypeAddBtnEl) return;
+      // A new, empty Subtyp block right above the "Add Subtyp" button, its name
+      // typed inline (like startAdd() in the list).
+      startAddSubtyp(typ) {
+        if (this.isEditing || !this.subtypAddBtnEl) return;
         this.isEditing = true;
-        const block = createDiv({ cls: "fred-typ-frontmatter-block fred-typ-subtype-block fred-typ-subtype-pending" });
-        this.subtypeAddBtnEl.parentElement.insertBefore(block, this.subtypeAddBtnEl);
-        const header = block.createDiv({ cls: "fred-typ-frontmatter-header" });
-        const titleGroup = header.createDiv({ cls: "fred-typ-frontmatter-title-group" });
-        const nameEl = titleGroup.createDiv({ cls: "fred-typ-detail-section-title fred-typ-subtype-name-input is-being-renamed" });
-        const addButtons = header.createDiv({ cls: "fred-typ-frontmatter-add-group" });
-        setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add-floating" }), "plus");
-        setIcon(addButtons.createDiv({ cls: "clickable-icon fred-typ-frontmatter-add" }), "plus");
-        const footer = block.createDiv({ cls: "fred-typ-section-footer fred-typ-subtype-actions" });
-        const colorGroup = footer.createDiv({ cls: "fred-typ-subtype-color-group" });
-        paintColorDot(colorGroup.createDiv({ cls: "fred-typ-subtype-color-dot" }), this.plugin.settings.typeColors[type] ?? DEFAULT_TYPE_COLOR, true);
-        setIcon(colorGroup.createDiv({ cls: "clickable-icon fred-typ-color-reset is-disabled" }), "rotate-ccw");
-        const actions = footer.createDiv({ cls: "fred-typ-subtype-action-group" });
-        setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename-notes" }), "pencil");
-        setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-rename" }), "pencil");
-        const manualCls = "clickable-icon fred-typ-manual-icon" + (this.ensureTypeManual()[type] !== false ? " is-active" : "");
+        const block = createDiv({ cls: "typ-frontmatter-block typ-subtyp-block typ-subtyp-pending" });
+        this.subtypAddBtnEl.parentElement.insertBefore(block, this.subtypAddBtnEl);
+        const header = block.createDiv({ cls: "typ-frontmatter-header" });
+        const titleGroup = header.createDiv({ cls: "typ-frontmatter-title-group" });
+        const nameEl = titleGroup.createDiv({ cls: "typ-detail-section-title typ-subtyp-name-input is-being-renamed" });
+        const addButtons = header.createDiv({ cls: "typ-frontmatter-add-group" });
+        setIcon(addButtons.createDiv({ cls: "clickable-icon typ-frontmatter-add-floating" }), "plus");
+        setIcon(addButtons.createDiv({ cls: "clickable-icon typ-frontmatter-add" }), "plus");
+        const footer = block.createDiv({ cls: "typ-section-footer typ-subtyp-actions" });
+        const colorGroup = footer.createDiv({ cls: "typ-subtyp-color-group" });
+        paintColorDot(colorGroup.createDiv({ cls: "typ-subtyp-color-dot" }), this.plugin.settings.typColors[typ] ?? DEFAULT_TYP_COLOR, true);
+        setIcon(colorGroup.createDiv({ cls: "clickable-icon typ-color-reset is-disabled" }), "rotate-ccw");
+        const actions = footer.createDiv({ cls: "typ-subtyp-action-group" });
+        setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-rename-notes" }), "pencil");
+        setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-rename" }), "pencil");
+        const manualCls = "clickable-icon typ-manual-icon" + (this.ensureTypManual()[typ] !== false ? " is-active" : "");
         setIcon(actions.createDiv({ cls: manualCls }), "file-pen-line");
-        setIcon(actions.createDiv({ cls: "clickable-icon fred-typ-detail-delete" }), "trash");
+        setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-delete" }), "trash");
         nameEl.setAttribute("contenteditable", "true");
         nameEl.setAttribute("spellcheck", "false");
         nameEl.focus();
@@ -3876,13 +3722,13 @@ var require_typ_view = __commonJS({
           if (done) return;
           done = true;
           this.isEditing = false;
-          const value = normalizeSubtypeName(nameEl.textContent);
+          const value = normalizeSubtypName(nameEl.textContent);
           if (commit && value) {
-            const existing = getSubtypeNames2(this.plugin.settings, type).find((name) => name.toLowerCase() === value.toLowerCase());
+            const existing = getSubtypNames2(this.plugin.settings, typ).find((name) => name.toLowerCase() === value.toLowerCase());
             if (existing) {
-              new Notice(`Subtyp ${existing} gibt es bei ${type} bereits.`);
+              new Notice(`${typ} already has Subtyp ${existing}.`);
             } else {
-              ensureSubtype(this.plugin.settings, type, value);
+              ensureSubtyp(this.plugin.settings, typ, value);
               await this.plugin.saveSettings();
             }
           }
@@ -3901,28 +3747,26 @@ var require_typ_view = __commonJS({
         });
         nameEl.addEventListener("blur", () => finish(true));
       }
-      showDeleteConfirm(type) {
-        new ConfirmDeleteTypeModal(this.plugin, type, async () => {
-          this.plugin.settings.types = this.plugin.settings.types.filter((t) => t !== type);
-          delete this.plugin.settings.typeColors[type];
-          delete this.plugin.settings.typeDescriptions[type];
-          delete this.plugin.settings.typeDefaultFrontmatter[type];
-          delete this.plugin.settings.typeFloatingKeys[type];
-          delete this.plugin.settings.typeShortcuts[type];
-          delete this.ensureTypeManual()[type];
-          deleteTypeSubtypes(this.plugin.settings, type);
-          this.closeTypeSettings();
+      showDeleteConfirm(typ) {
+        new ConfirmDeleteTypModal(this.plugin, typ, async () => {
+          this.plugin.settings.typs = this.plugin.settings.typs.filter((t) => t !== typ);
+          delete this.plugin.settings.typColors[typ];
+          delete this.plugin.settings.typDescriptions[typ];
+          delete this.plugin.settings.typDefaultFrontmatter[typ];
+          delete this.plugin.settings.typFloatingKeys[typ];
+          delete this.plugin.settings.typShortcuts[typ];
+          delete this.ensureTypManual()[typ];
+          deleteTypSubtyps(this.plugin.settings, typ);
+          this.closeTypSettings();
           await this.plugin.saveSettings();
           this.plugin.refreshTypColors?.();
         }).open();
       }
-      // Wie startEditing(), aber auf dem freistehenden Titel-Element der Detail-Ansicht
-      // statt auf einem Tree-Item - und mit resultierendem selectedType-Wechsel statt
-      // eines schlichten Re-Renders der Liste. updateNotes: true (zweiter, hervor-
-      // gehobener Button) schreibt nach Bestätigung zusätzlich den TYP-Wert aller
-      // betroffenen Notizen um (siehe renameTypeInNotes), statt nur die Plugin-
-      // Einstellungen zu migrieren.
-      startDetailRename(type, titleEl, { updateNotes = false } = {}) {
+      // Like startEditing(), but on the detail view's title, switching
+      // selectedTyp instead of just re-rendering the list. updateNotes: true (the
+      // highlighted button) also rewrites the TYP of every affected note after
+      // confirmation (see renameTypInNotes) instead of only the settings.
+      startDetailRename(typ, titleEl, { updateNotes = false } = {}) {
         if (this.isEditing) return;
         this.isEditing = true;
         titleEl.addClass("is-being-renamed");
@@ -3935,34 +3779,34 @@ var require_typ_view = __commonJS({
         selection.removeAllRanges();
         selection.addRange(range);
         const applyRename = async (value) => {
-          const idx = this.plugin.settings.types.indexOf(type);
-          if (idx !== -1) this.plugin.settings.types[idx] = value;
-          if (this.plugin.settings.typeColors[type] !== void 0) {
-            this.plugin.settings.typeColors[value] = this.plugin.settings.typeColors[type];
-            delete this.plugin.settings.typeColors[type];
+          const idx = this.plugin.settings.typs.indexOf(typ);
+          if (idx !== -1) this.plugin.settings.typs[idx] = value;
+          if (this.plugin.settings.typColors[typ] !== void 0) {
+            this.plugin.settings.typColors[value] = this.plugin.settings.typColors[typ];
+            delete this.plugin.settings.typColors[typ];
           }
-          if (this.plugin.settings.typeDescriptions[type] !== void 0) {
-            this.plugin.settings.typeDescriptions[value] = this.plugin.settings.typeDescriptions[type];
-            delete this.plugin.settings.typeDescriptions[type];
+          if (this.plugin.settings.typDescriptions[typ] !== void 0) {
+            this.plugin.settings.typDescriptions[value] = this.plugin.settings.typDescriptions[typ];
+            delete this.plugin.settings.typDescriptions[typ];
           }
-          if (this.plugin.settings.typeDefaultFrontmatter[type] !== void 0) {
-            this.plugin.settings.typeDefaultFrontmatter[value] = this.plugin.settings.typeDefaultFrontmatter[type];
-            delete this.plugin.settings.typeDefaultFrontmatter[type];
+          if (this.plugin.settings.typDefaultFrontmatter[typ] !== void 0) {
+            this.plugin.settings.typDefaultFrontmatter[value] = this.plugin.settings.typDefaultFrontmatter[typ];
+            delete this.plugin.settings.typDefaultFrontmatter[typ];
           }
-          if (this.plugin.settings.typeFloatingKeys[type] !== void 0) {
-            this.plugin.settings.typeFloatingKeys[value] = this.plugin.settings.typeFloatingKeys[type];
-            delete this.plugin.settings.typeFloatingKeys[type];
+          if (this.plugin.settings.typFloatingKeys[typ] !== void 0) {
+            this.plugin.settings.typFloatingKeys[value] = this.plugin.settings.typFloatingKeys[typ];
+            delete this.plugin.settings.typFloatingKeys[typ];
           }
-          if (this.plugin.settings.typeShortcuts[type] !== void 0) {
-            this.plugin.settings.typeShortcuts[value] = this.plugin.settings.typeShortcuts[type];
-            delete this.plugin.settings.typeShortcuts[type];
+          if (this.plugin.settings.typShortcuts[typ] !== void 0) {
+            this.plugin.settings.typShortcuts[value] = this.plugin.settings.typShortcuts[typ];
+            delete this.plugin.settings.typShortcuts[typ];
           }
-          if (this.ensureTypeManual()[type] !== void 0) {
-            this.plugin.settings.typeManual[value] = this.plugin.settings.typeManual[type];
-            delete this.plugin.settings.typeManual[type];
+          if (this.ensureTypManual()[typ] !== void 0) {
+            this.plugin.settings.typManual[value] = this.plugin.settings.typManual[typ];
+            delete this.plugin.settings.typManual[typ];
           }
-          moveTypeSubtypes(this.plugin.settings, type, value);
-          this.selectedType = value;
+          moveTypSubtyps(this.plugin.settings, typ, value);
+          this.selectedTyp = value;
           await this.plugin.saveSettings();
           this.plugin.refreshTypColors?.();
         };
@@ -3971,16 +3815,16 @@ var require_typ_view = __commonJS({
           if (done) return;
           done = true;
           this.isEditing = false;
-          const value = normalizeTypeName(titleEl.textContent);
-          if (!commit || !value || value === type) {
+          const value = normalizeTypName(titleEl.textContent);
+          if (!commit || !value || value === typ) {
             this.render();
             return;
           }
-          const existing = this.plugin.settings.types.find(
-            (t) => t.toLowerCase() === value.toLowerCase() && t !== type
+          const existing = this.plugin.settings.typs.find(
+            (t) => t.toLowerCase() === value.toLowerCase() && t !== typ
           );
           if (existing) {
-            this.showMergeConfirm(type, existing);
+            this.showMergeConfirm(typ, existing);
             return;
           }
           if (!updateNotes) {
@@ -3988,16 +3832,16 @@ var require_typ_view = __commonJS({
             this.render();
             return;
           }
-          const { counts } = this.plugin.typIndex.typeCounts();
-          new ConfirmRenameTypeModal(
+          const { counts } = this.plugin.typIndex.typCounts();
+          new ConfirmRenameTypModal(
             this.plugin,
-            type,
+            typ,
             value,
-            counts.get(type) ?? 0,
+            counts.get(typ) ?? 0,
             async () => {
               await applyRename(value);
-              const renamed = await renameTypeInNotes(this.plugin, type, value);
-              new Notice(`TYP ${value}: ${renamed} Notiz(en) angepasst.`);
+              const renamed = await renameTypInNotes(this.plugin, typ, value);
+              new Notice(`TYP ${value}: ${plural(renamed, "note")} updated.`);
               this.render();
             },
             () => this.render()
@@ -4017,86 +3861,74 @@ var require_typ_view = __commonJS({
         titleEl.addEventListener("blur", () => finish(true));
       }
       showMergeConfirm(source, target) {
-        const { counts } = this.plugin.typIndex.typeCounts();
-        new ConfirmMergeTypeModal(
+        const { counts } = this.plugin.typIndex.typCounts();
+        new ConfirmMergeTypModal(
           this.plugin,
           source,
           target,
           counts.get(source) ?? 0,
-          () => this.mergeType(source, target),
+          () => this.mergeTyp(source, target),
           () => this.render()
         ).open();
       }
-      // Legt source in target auf: Notizen werden auf target umgeschrieben,
-      // source verschwindet aus der TYP-Liste samt eigener Einstellungen (target
-      // behält seine). Die Subtypen von source werden übernommen, gleichnamige
-      // Blöcke zusammengeführt (siehe mergeTypeSubtypes in subtypes.js).
+      // Merges source into target: notes are rewritten to target, source leaves
+      // the list with its settings (target keeps its own). Source's Subtyps move
+      // over, same-named blocks are combined (see mergeTypSubtyps in subtyps.js).
       //
-      // "Manuell erstellbar" ist der eine Fall, in dem das Zusammenlegen nicht nur
-      // Daten umhängt: die übernommenen Subtypen bringen ihren eigenen Schalter
-      // mit, der von source stammt, geraten aber unter den Schalter von target.
-      // War source an und target aus, stünden sie danach als angeschaltete
-      // Subtypen unter einem abgeschalteten TYP - im Picker unerreichbar, da er
-      // nur über den TYP zu ihnen führt. Ein abgeschaltetes target zieht sie
-      // deshalb mit ab, genau wie sein eigener Knopf es täte (siehe
-      // renderManualToggle). Ist target an, bleiben sie, wie sie waren - ein
-      // abgeschalteter Subtyp unter einem angeschalteten TYP ist der Normalfall,
-      // und das ist, was bei source eingestellt war.
-      async mergeType(source, target) {
+      // "Manually creatable" is where a merge does more than move data: the moved
+      // Subtyps bring source's toggles but end up under target's. With source on
+      // and target off they would be switched-on Subtyps under a switched-off TYP,
+      // unreachable in the picker. So a switched-off target switches them off too,
+      // as its own button would (see renderManualToggle). With target on they stay
+      // as they were.
+      async mergeTyp(source, target) {
         const settings = this.plugin.settings;
-        const renamed = await renameTypeInNotes(this.plugin, source, target);
-        settings.types = settings.types.filter((t) => t !== source);
-        delete settings.typeColors[source];
-        delete settings.typeDescriptions[source];
-        delete settings.typeDefaultFrontmatter[source];
-        delete settings.typeFloatingKeys[source];
-        delete settings.typeShortcuts[source];
-        delete this.ensureTypeManual()[source];
-        mergeTypeSubtypes(settings, source, target);
-        if (this.ensureTypeManual()[target] === false) setAllSubtypesManual(settings, target, false);
-        this.selectedType = target;
+        const renamed = await renameTypInNotes(this.plugin, source, target);
+        settings.typs = settings.typs.filter((t) => t !== source);
+        delete settings.typColors[source];
+        delete settings.typDescriptions[source];
+        delete settings.typDefaultFrontmatter[source];
+        delete settings.typFloatingKeys[source];
+        delete settings.typShortcuts[source];
+        delete this.ensureTypManual()[source];
+        mergeTypSubtyps(settings, source, target);
+        if (this.ensureTypManual()[target] === false) setAllSubtypsManual(settings, target, false);
+        this.selectedTyp = target;
         await this.plugin.saveSettings();
         this.plugin.refreshTypColors?.();
-        new Notice(`TYP ${source} mit ${target} zusammengelegt, ${renamed} Notiz(en) angepasst.`);
+        new Notice(`TYP ${source} merged into ${target}, ${plural(renamed, "note")} updated.`);
         this.render();
       }
       renderCountFlair(self, count) {
         const flairOuter = self.createDiv({ cls: "tree-item-flair-outer" });
         flairOuter.createSpan({ cls: "tree-item-flair", text: String(count) });
       }
-      // Rein informativ, unter dem TYP-Frontmatter-Editor: erklärt den
-      // Floating-Property-Toggle (Rechtsklick auf eine Property oben, siehe
-      // ensurePropertyMenuPatch in type-frontmatter-editor.js). Bewusst ohne eigene
-      // Überschrift, da direkt unter der Property-Liste ohnehin klar ist, worauf
-      // sich der Hinweis bezieht.
-      //
-      // Hier stand früher zusätzlich eine feste Liste der Platzhalter-Token. Die
-      // ist mit dem Shortcut-Knopf je Property-Zeile entfallen: dessen Auswahl
-      // (shortcut-picker.js) führt dieselben Token, aber am Ort der Verwendung,
-      // durchsuchbar und bei Skripten samt deren eigener Beschreibung.
+      // Explains the floating toggle (right-click on a property above, see
+      // ensurePropertyMenuPatch). No heading - right below the list it is clear
+      // what it refers to.
       renderFloatingHint(parent) {
-        const section = parent.createDiv({ cls: "fred-typ-floating-hint-section" });
+        const section = parent.createDiv({ cls: "typ-floating-hint-section" });
         section.createDiv({
-          cls: "fred-typ-floating-hint",
-          text: "You can change a property to floating in the right-click menu."
+          cls: "typ-floating-hint",
+          text: "Right-click a property to make it floating."
         });
       }
     };
-    function registerTypView2(plugin) {
-      plugin.registerView(VIEW_TYPE_TYP, (leaf) => new TypView(leaf, plugin));
+    function registerTypPane2(plugin) {
+      plugin.registerView(VIEW_TYPE_TYP_PANE, (leaf) => new TypPane(leaf, plugin));
       plugin.addCommand({
-        id: "typ-view-oeffnen",
-        name: "TYP-View \xF6ffnen",
-        callback: () => activateTypView(plugin)
+        id: "open-typ-pane",
+        name: "Open TYP-Pane",
+        callback: () => activateTypPane(plugin)
       });
       plugin.addCommand({
-        id: "typ-property-hinzufuegen",
-        name: "TYP-Property hinzuf\xFCgen",
+        id: "add-typ-property",
+        name: "Add TYP-Frontmatter property",
         callback: () => addTypPropertyCommand(plugin)
       });
-      plugin.app.workspace.onLayoutReady(() => activateTypView(plugin, false, false));
+      plugin.app.workspace.onLayoutReady(() => activateTypPane(plugin, false, false));
       const refresh = () => {
-        for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_TYP)) {
+        for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_TYP_PANE)) {
           leaf.view?.render?.();
         }
       };
@@ -4105,12 +3937,12 @@ var require_typ_view = __commonJS({
       plugin.registerEvent(plugin.app.vault.on("config-changed", debouncedRefresh));
       return refresh;
     }
-    async function activateTypView(plugin, reveal = true, createIfMissing = true) {
+    async function activateTypPane(plugin, reveal = true, createIfMissing = true) {
       const app = plugin.app;
       const { workspace } = app;
       const candidates = [];
       workspace.iterateAllLeaves((leaf2) => {
-        if (leaf2 === app.__fredTypLeaf || leaf2.view && leaf2.view.getViewType() === VIEW_TYPE_TYP) {
+        if (leaf2 === app.__typSystemLeaf || leaf2.view && leaf2.view.getViewType() === VIEW_TYPE_TYP_PANE) {
           candidates.push(leaf2);
         }
       });
@@ -4119,39 +3951,41 @@ var require_typ_view = __commonJS({
       if (!leaf) {
         if (!createIfMissing) return;
         leaf = workspace.getLeftLeaf(false);
-        await leaf.setViewState({ type: VIEW_TYPE_TYP, active: true });
-      } else if (!(leaf.view instanceof TypView)) {
-        await leaf.setViewState({ type: VIEW_TYPE_TYP, active: false });
+        await leaf.setViewState({ type: VIEW_TYPE_TYP_PANE, active: true });
+      } else if (!(leaf.view instanceof TypPane)) {
+        await leaf.setViewState({ type: VIEW_TYPE_TYP_PANE, active: false });
       }
-      app.__fredTypLeaf = leaf;
+      app.__typSystemLeaf = leaf;
       if (reveal) workspace.revealLeaf(leaf);
     }
     async function addTypPropertyCommand(plugin) {
       const app = plugin.app;
-      const activeTypView = app.workspace.getActiveViewOfType(TypView);
-      if (activeTypView && activeTypView.selectedType !== null) {
-        activeTypView.frontmatterBlocks?.addBlank(null);
+      const activeTypPane = app.workspace.getActiveViewOfType(TypPane);
+      if (activeTypPane && activeTypPane.selectedTyp !== null) {
+        activeTypPane.frontmatterBlocks?.addBlank(null);
         return;
       }
       const file = app.workspace.getActiveFile();
-      const type = plugin.typIndex.typeOf(file);
-      if (!type) {
-        const openLeaf = app.workspace.getLeavesOfType(VIEW_TYPE_TYP).find((leaf) => leaf.view instanceof TypView && leaf.view.selectedType !== null);
+      const typ = plugin.typIndex.typOf(file);
+      if (!typ) {
+        const openLeaf = app.workspace.getLeavesOfType(VIEW_TYPE_TYP_PANE).find((leaf) => leaf.view instanceof TypPane && leaf.view.selectedTyp !== null);
         if (openLeaf) {
           await app.workspace.revealLeaf(openLeaf);
           openLeaf.view.frontmatterBlocks?.addBlank(null);
           return;
         }
-        new Notice(file ? "Aktive Notiz hat keinen TYP und in der TYP-View ist kein TYP ge\xF6ffnet." : "Keine Notiz offen und in der TYP-View ist kein TYP ge\xF6ffnet.");
+        new Notice(
+          file ? "The active note has no TYP, and no TYP is open in the TYP-Pane." : "No note is open, and no TYP is open in the TYP-Pane."
+        );
         return;
       }
-      await activateTypView(plugin);
-      const view = app.__fredTypLeaf?.view;
-      if (!(view instanceof TypView)) return;
-      view.openTypeSettings(type);
+      await activateTypPane(plugin);
+      const view = app.__typSystemLeaf?.view;
+      if (!(view instanceof TypPane)) return;
+      view.openTypSettings(typ);
       view.frontmatterBlocks?.addBlank(null);
     }
-    module2.exports = { registerTypView: registerTypView2, VIEW_TYPE_TYP, compareTypes, sortTypesByMode: sortTypesByMode2, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2, DEFAULT_TYPE_COLOR };
+    module2.exports = { registerTypPane: registerTypPane2, VIEW_TYPE_TYP_PANE, compareTyps, sortTypsByMode: sortTypsByMode2, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2, DEFAULT_TYP_COLOR };
   }
 });
 
@@ -4159,7 +3993,7 @@ var require_typ_view = __commonJS({
 var require_file_explorer_colors = __commonJS({
   "src/file-explorer-colors.js"(exports2, module2) {
     var { TFile, TFolder } = require("obsidian");
-    var { colorForFile } = require_type_colors();
+    var { colorForFile } = require_typ_colors();
     var FILE_EXPLORER_VIEW_TYPE = "file-explorer";
     var FOLDER_NOTES_PLUGIN_ID = "folder-notes";
     function getFolderNoteFile(plugin, folder) {
@@ -4224,14 +4058,14 @@ var require_file_explorer_colors = __commonJS({
 // src/graph-colors.js
 var require_graph_colors = __commonJS({
   "src/graph-colors.js"(exports2, module2) {
-    var { colorForFile } = require_type_colors();
+    var { colorForFile } = require_typ_colors();
     var GRAPH_VIEW_TYPES = ["graph", "localgraph"];
     function hexToInt(hex) {
       return parseInt(hex.replace("#", ""), 16);
     }
     function patchRenderer(plugin, renderer) {
-      if (renderer.__fredTypColorPatched) return;
-      renderer.__fredTypColorPatched = true;
+      if (renderer.__typSystemColorPatched) return;
+      renderer.__typSystemColorPatched = true;
       const original = renderer.setData;
       renderer.setData = function(data) {
         for (const path in data.nodes) {
@@ -4252,12 +4086,12 @@ var require_graph_colors = __commonJS({
       };
       plugin.register(() => {
         renderer.setData = original;
-        delete renderer.__fredTypColorPatched;
+        delete renderer.__typSystemColorPatched;
       });
     }
     function getGraphLeaves(app) {
       const leaves = [];
-      for (const type of GRAPH_VIEW_TYPES) leaves.push(...app.workspace.getLeavesOfType(type));
+      for (const viewType of GRAPH_VIEW_TYPES) leaves.push(...app.workspace.getLeavesOfType(viewType));
       return leaves;
     }
     function registerGraphColors2(plugin) {
@@ -4279,7 +4113,7 @@ var require_graph_colors = __commonJS({
 // src/search-colors.js
 var require_search_colors = __commonJS({
   "src/search-colors.js"(exports2, module2) {
-    var { colorForFile } = require_type_colors();
+    var { colorForFile } = require_typ_colors();
     var SEARCH_VIEW_TYPE = "search";
     function applySearchColors(plugin) {
       for (const leaf of plugin.app.workspace.getLeavesOfType(SEARCH_VIEW_TYPE)) {
@@ -4323,7 +4157,7 @@ var require_search_colors = __commonJS({
 // src/recent-files-colors.js
 var require_recent_files_colors = __commonJS({
   "src/recent-files-colors.js"(exports2, module2) {
-    var { colorForFile } = require_type_colors();
+    var { colorForFile } = require_typ_colors();
     var RECENT_FILES_VIEW_TYPE = "recent-files";
     function applyRecentFilesColors(plugin) {
       for (const leaf of plugin.app.workspace.getLeavesOfType(RECENT_FILES_VIEW_TYPE)) {
@@ -4368,7 +4202,7 @@ var require_recent_files_colors = __commonJS({
 // src/backlink-colors.js
 var require_backlink_colors = __commonJS({
   "src/backlink-colors.js"(exports2, module2) {
-    var { colorForFile } = require_type_colors();
+    var { colorForFile } = require_typ_colors();
     var BACKLINK_VIEW_TYPE = "backlink";
     function getResultDomLookups(view) {
       const renderer = view?.backlink;
@@ -4442,7 +4276,7 @@ var require_backlink_colors = __commonJS({
 // src/bookmark-colors.js
 var require_bookmark_colors = __commonJS({
   "src/bookmark-colors.js"(exports2, module2) {
-    var { colorForFile } = require_type_colors();
+    var { colorForFile } = require_typ_colors();
     var BOOKMARKS_VIEW_TYPE = "bookmarks";
     var BOOKMARKS_PLUGIN_ID = "bookmarks";
     function forEachFileBookmark(items, callback) {
@@ -4497,57 +4331,57 @@ var require_bookmark_colors = __commonJS({
 var require_active_title_colors = __commonJS({
   "src/active-title-colors.js"(exports2, module2) {
     var { TFile } = require("obsidian");
-    var { colorForFile, subtypeColor, subtypeHasOwnColor } = require_type_colors();
-    var { getSubtype: getSubtype2 } = require_subtypes();
-    var DOT_CLASS = "fred-typ-title-dot";
-    var DOT_HOLLOW_CLASS = "fred-typ-title-dot-hollow";
+    var { colorForFile, subtypColor, subtypHasOwnColor } = require_typ_colors();
+    var { getSubtyp: getSubtyp2 } = require_subtyps();
+    var DOT_CLASS = "typ-title-dot";
+    var DOT_HOLLOW_CLASS = "typ-title-dot-hollow";
     var DEFAULT_DOT_COLOR = "#888888";
-    var BADGE_CLASS = "fred-typ-title-badge";
-    var BADGE_PLAIN_CLASS = "fred-typ-title-badge-plain";
-    var COLOR_VAR = "--fred-typ-title-color";
-    var BLOCK_BADGE_CLASS = "fred-typ-block-badge";
-    var BLOCK_BADGE_PLAIN_CLASS = "fred-typ-block-badge-plain";
-    var BLOCK_ALIGN_TOP_CLASS = "fred-typ-block-badge-top";
-    var BLOCK_ALIGN_BOTTOM_CLASS = "fred-typ-block-badge-bottom";
-    var BLOCK_COLOR_VAR = "--fred-typ-block-color";
+    var BADGE_CLASS = "typ-title-badge";
+    var BADGE_PLAIN_CLASS = "typ-title-badge-plain";
+    var COLOR_VAR = "--typ-title-color";
+    var BLOCK_BADGE_CLASS = "typ-block-badge";
+    var BLOCK_BADGE_PLAIN_CLASS = "typ-block-badge-plain";
+    var BLOCK_ALIGN_TOP_CLASS = "typ-block-badge-top";
+    var BLOCK_ALIGN_BOTTOM_CLASS = "typ-block-badge-bottom";
+    var BLOCK_COLOR_VAR = "--typ-block-color";
     function resolveMarker(plugin, file) {
       const style = plugin.settings.noteTitleStyle;
       if (style === "none") return { kind: "none" };
       if (style === "dot") return { kind: "dot", ...resolveDot(plugin, file) };
       const { settings } = plugin;
-      const type = plugin.typIndex.typeOf(file);
-      if (!type) return { kind: "none" };
+      const typ = plugin.typIndex.typOf(file);
+      if (!typ) return { kind: "none" };
       const colored = settings.noteTitleBadgeColored;
-      if (colored && !settings.typeColors[type] && !settings.types.includes(type)) return { kind: "none" };
-      const typeColor = settings.typeColors[type] ?? DEFAULT_DOT_COLOR;
-      const label = badgeLabel(plugin, file, type);
+      if (colored && !settings.typColors[typ] && !settings.typs.includes(typ)) return { kind: "none" };
+      const typColor = settings.typColors[typ] ?? DEFAULT_DOT_COLOR;
+      const label = badgeLabel(plugin, file, typ);
       if (!label) return { kind: "none" };
-      const { text, useSubtypeColor, subtype } = label;
-      const color = colored ? useSubtypeColor ? subtypeColor(settings, type, subtype) ?? typeColor : typeColor : null;
+      const { text, useSubtypColor, subtyp } = label;
+      const color = colored ? useSubtypColor ? subtypColor(settings, typ, subtyp) ?? typColor : typColor : null;
       const position = settings.noteTitleBadgePosition;
-      return { kind: position === "block" ? "block-badge" : "title-badge", colored, color, typeName: text };
+      return { kind: position === "block" ? "block-badge" : "title-badge", colored, color, typName: text };
     }
-    function badgeLabel(plugin, file, type) {
+    function badgeLabel(plugin, file, typ) {
       const { settings } = plugin;
-      const subtype = plugin.typIndex.subtypeOf(file);
-      const mode = settings.noteTitleBadgeLabel ?? "type";
-      if (mode === "subtype") return subtype ? { text: subtype, useSubtypeColor: true, subtype } : null;
-      if (!subtype || mode === "type") return { text: type, useSubtypeColor: false, subtype };
-      return { text: `${type}/${subtype}`, useSubtypeColor: !!settings.colorViews.noteTitleMarkerSubtyp, subtype };
+      const subtyp = plugin.typIndex.subtypOf(file);
+      const mode = settings.noteTitleBadgeLabel ?? "typ";
+      if (mode === "subtyp") return subtyp ? { text: subtyp, useSubtypColor: true, subtyp } : null;
+      if (!subtyp || mode === "typ") return { text: typ, useSubtypColor: false, subtyp };
+      return { text: `${typ}/${subtyp}`, useSubtypColor: !!settings.colorViews.noteTitleMarkerSubtyp, subtyp };
     }
     function resolveDot(plugin, file) {
-      const type = plugin.typIndex.typeOf(file);
-      if (!type) return { color: null, hollow: false };
+      const typ = plugin.typIndex.typOf(file);
+      if (!typ) return { color: null, hollow: false };
       const { settings } = plugin;
-      const typeColor = settings.typeColors[type];
-      if (!typeColor) {
-        return settings.types.includes(type) ? { color: DEFAULT_DOT_COLOR, hollow: true } : { color: null, hollow: false };
+      const typColor = settings.typColors[typ];
+      if (!typColor) {
+        return settings.typs.includes(typ) ? { color: DEFAULT_DOT_COLOR, hollow: true } : { color: null, hollow: false };
       }
-      const subtype = plugin.typIndex.subtypeOf(file);
-      if (settings.colorViews.noteTitleMarkerSubtyp && subtype && getSubtype2(settings, type, subtype)) {
-        return { color: subtypeColor(settings, type, subtype), hollow: !subtypeHasOwnColor(settings, type, subtype) };
+      const subtyp = plugin.typIndex.subtypOf(file);
+      if (settings.colorViews.noteTitleMarkerSubtyp && subtyp && getSubtyp2(settings, typ, subtyp)) {
+        return { color: subtypColor(settings, typ, subtyp), hollow: !subtypHasOwnColor(settings, typ, subtyp) };
       }
-      return { color: typeColor, hollow: false };
+      return { color: typColor, hollow: false };
     }
     function applyStyleToTitle(titleEl, marker) {
       const isDot = marker.kind === "dot" && !!marker.color;
@@ -4556,8 +4390,8 @@ var require_active_title_colors = __commonJS({
       titleEl.classList.toggle(DOT_HOLLOW_CLASS, isDot && !!marker.hollow);
       titleEl.classList.toggle(BADGE_CLASS, isBadge && marker.colored);
       titleEl.classList.toggle(BADGE_PLAIN_CLASS, isBadge && !marker.colored);
-      if (isBadge) titleEl.dataset.fredTyp = marker.typeName;
-      else delete titleEl.dataset.fredTyp;
+      if (isBadge) titleEl.dataset.typ = marker.typName;
+      else delete titleEl.dataset.typ;
       const markerColor = isDot && marker.color || isBadge && marker.colored && marker.color ? marker.color : null;
       if (markerColor) titleEl.style.setProperty(COLOR_VAR, markerColor);
       else titleEl.style.removeProperty(COLOR_VAR);
@@ -4569,8 +4403,8 @@ var require_active_title_colors = __commonJS({
       const align = plugin.settings.noteTitleVerticalAlign;
       blockEl.classList.toggle(BLOCK_ALIGN_TOP_CLASS, isBlockBadge && align !== "bottom");
       blockEl.classList.toggle(BLOCK_ALIGN_BOTTOM_CLASS, isBlockBadge && align === "bottom");
-      if (isBlockBadge) blockEl.dataset.fredTyp = marker.typeName;
-      else delete blockEl.dataset.fredTyp;
+      if (isBlockBadge) blockEl.dataset.typ = marker.typName;
+      else delete blockEl.dataset.typ;
       const blockColor = isBlockBadge && marker.colored && marker.color ? marker.color : null;
       if (blockColor) blockEl.style.setProperty(BLOCK_COLOR_VAR, blockColor);
       else blockEl.style.removeProperty(BLOCK_COLOR_VAR);
@@ -4612,9 +4446,9 @@ var require_link_colors = __commonJS({
     var { ViewPlugin, Decoration } = require("@codemirror/view");
     var { Prec, RangeSetBuilder, StateEffect } = require("@codemirror/state");
     var { syntaxTree } = require("@codemirror/language");
-    var { colorForFile } = require_type_colors();
+    var { colorForFile } = require_typ_colors();
     var COLOR_VAR = "--link-color";
-    var SOURCE_ATTR = "data-fred-typ-src";
+    var SOURCE_ATTR = "data-typ-src";
     var WIKILINK_PATTERN = /(?<!!)\[\[([^[\]]+?)\]\]/g;
     function colorForLinktext(plugin, linktext, sourcePath) {
       const target = linktext.split(/\\?\|/)[0].trim();
@@ -4643,7 +4477,7 @@ var require_link_colors = __commonJS({
         let decoration = decorationsByColor.get(color);
         if (!decoration) {
           decoration = Decoration.mark({
-            class: "fred-typ-link",
+            class: "typ-link",
             attributes: { style: `${COLOR_VAR}: ${color};` }
           });
           decorationsByColor.set(color, decoration);
@@ -4672,8 +4506,8 @@ var require_link_colors = __commonJS({
           constructor(view) {
             this.decorations = build(view);
           }
-          // Der Parser arbeitet den sichtbaren Bereich ggf. erst nach und nach ab -
-          // ein neuer Syntaxbaum zählt daher ebenfalls als Anlass zum Neuaufbau.
+          // The parser may work through the visible range bit by bit, so a new
+          // syntax tree also triggers a rebuild.
           update(update) {
             if (update.docChanged || update.viewportChanged || syntaxTree(update.startState) !== syntaxTree(update.state) || update.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshEffect)))) {
               this.decorations = build(update.view);
@@ -4717,29 +4551,28 @@ var require_link_colors = __commonJS({
 // src/frontmatter-default-highlight.js
 var require_frontmatter_default_highlight = __commonJS({
   "src/frontmatter-default-highlight.js"(exports2, module2) {
-    var { getSubtypeNames: getSubtypeNames2, getSubtype: getSubtype2 } = require_subtypes();
-    var { subtypeColor } = require_type_colors();
-    var TYP_PROPERTY2 = "TYP";
-    var TYP_VIEW_TYPE = "fred-typ-view";
+    var { getSubtypNames: getSubtypNames2, getSubtyp: getSubtyp2 } = require_subtyps();
+    var { subtypColor } = require_typ_colors();
+    var { VIEW_TYPE_TYP_PANE } = require_typ_pane();
     var ALL_PROPERTIES_VIEW_TYPE = "all-properties";
-    var HIGHLIGHT_CLASS = "fred-typ-default-property";
-    var FLOATING_CLASS = "fred-typ-floating-property";
-    function rawKeysForType(type, defaults) {
-      if (!type || !defaults) return null;
-      const keys = Object.keys(defaults).filter((key) => key !== "" && key.toLowerCase() !== TYP_PROPERTY2.toLowerCase());
+    var HIGHLIGHT_CLASS = "typ-default-property";
+    var FLOATING_CLASS = "typ-floating-property";
+    function rawKeysForTyp(typ, defaults) {
+      if (!typ || !defaults) return null;
+      const keys = Object.keys(defaults).filter((key) => key !== "");
       return keys.length > 0 ? keys.map((key) => key.toLowerCase()) : null;
     }
-    var ALL_SUBTYPES = Symbol("all-subtypes");
+    var ALL_SUBTYPS = Symbol("all-subtyps");
     function blockOf(defaults, floatingKeys, section = null) {
-      const keys = rawKeysForType(true, defaults) ?? [];
+      const keys = rawKeysForTyp(true, defaults) ?? [];
       return { section, keys, floating: new Set((floatingKeys ?? []).map((key) => key.toLowerCase())) };
     }
-    function blocksForType(plugin, type, subtype) {
+    function blocksForTyp(plugin, typ, subtyp) {
       const { settings } = plugin;
-      const blocks = [blockOf(settings.typeDefaultFrontmatter[type], settings.typeFloatingKeys[type], null)];
-      const subtypeNames = subtype === ALL_SUBTYPES ? getSubtypeNames2(settings, type) : subtype ? [subtype] : [];
-      for (const name of subtypeNames) {
-        const data = getSubtype2(settings, type, name);
+      const blocks = [blockOf(settings.typDefaultFrontmatter[typ], settings.typFloatingKeys[typ], null)];
+      const subtypNames = subtyp === ALL_SUBTYPS ? getSubtypNames2(settings, typ) : subtyp ? [subtyp] : [];
+      for (const name of subtypNames) {
+        const data = getSubtyp2(settings, typ, name);
         if (data) blocks.push(blockOf(data.frontmatter, data.floatingKeys, name));
       }
       return blocks;
@@ -4758,33 +4591,33 @@ var require_frontmatter_default_highlight = __commonJS({
     function keysForFile(plugin, file) {
       const { colorViews } = plugin.settings;
       if (!colorViews.frontmatterDefaults) return NO_KEYS;
-      const type = plugin.typIndex.typeOf(file);
-      if (!type) return NO_KEYS;
-      const subtype = colorViews.frontmatterDefaultsSubtyp ? plugin.typIndex.subtypeOf(file) : null;
-      return splitKeys(blocksForType(plugin, type, subtype));
+      const typ = plugin.typIndex.typOf(file);
+      if (!typ) return NO_KEYS;
+      const subtyp = colorViews.frontmatterDefaultsSubtyp ? plugin.typIndex.subtypOf(file) : null;
+      return splitKeys(blocksForTyp(plugin, typ, subtyp));
     }
     function keysForStore(plugin, store) {
       const { colorViews } = plugin.settings;
       if (!colorViews.frontmatterDefaults || !store) return NO_KEYS;
-      if (store.subtype && !colorViews.frontmatterDefaultsSubtyp) return NO_KEYS;
+      if (store.subtyp && !colorViews.frontmatterDefaultsSubtyp) return NO_KEYS;
       return splitKeys([blockOf(store.getFrontmatter(), store.getFloating())]);
     }
-    function typesUsingKeyMap(plugin) {
+    function typsUsingKeyMap(plugin) {
       const map = /* @__PURE__ */ new Map();
       const { colorViews } = plugin.settings;
       if (!colorViews.allProperties) return map;
-      const types = /* @__PURE__ */ new Set([
-        ...Object.keys(plugin.settings.typeDefaultFrontmatter),
-        ...colorViews.allPropertiesSubtyp ? Object.keys(plugin.settings.typeSubtypes ?? {}) : []
+      const typs = /* @__PURE__ */ new Set([
+        ...Object.keys(plugin.settings.typDefaultFrontmatter),
+        ...colorViews.allPropertiesSubtyp ? Object.keys(plugin.settings.typSubtyps ?? {}) : []
       ]);
-      for (const type of types) {
-        const blocks = blocksForType(plugin, type, colorViews.allPropertiesSubtyp ? ALL_SUBTYPES : null);
+      for (const typ of typs) {
+        const blocks = blocksForTyp(plugin, typ, colorViews.allPropertiesSubtyp ? ALL_SUBTYPS : null);
         for (const { section, keys, floating } of blocks) {
           for (const key of keys) {
-            if (!map.has(key)) map.set(key, { types: /* @__PURE__ */ new Map(), allFloating: true });
+            if (!map.has(key)) map.set(key, { typs: /* @__PURE__ */ new Map(), allFloating: true });
             const entry = map.get(key);
-            if (!entry.types.has(type)) entry.types.set(type, []);
-            entry.types.get(type).push(section);
+            if (!entry.typs.has(typ)) entry.typs.set(typ, []);
+            entry.typs.get(typ).push(section);
             entry.allFloating = entry.allFloating && floating.has(key);
           }
         }
@@ -4803,7 +4636,7 @@ var require_frontmatter_default_highlight = __commonJS({
       }
     }
     function applyToAllPropertiesView(plugin) {
-      const usageMap = typesUsingKeyMap(plugin);
+      const usageMap = typsUsingKeyMap(plugin);
       for (const leaf of plugin.app.workspace.getLeavesOfType(ALL_PROPERTIES_VIEW_TYPE)) {
         const doms = leaf.view?.doms;
         if (!doms) continue;
@@ -4811,13 +4644,13 @@ var require_frontmatter_default_highlight = __commonJS({
           const titleEl = dom?.titleEl;
           if (!titleEl) continue;
           const entry = usageMap.get(key.toLowerCase());
-          const types = entry?.types;
-          const count = types ? types.size : 0;
+          const typs = entry?.typs;
+          const count = typs ? typs.size : 0;
           titleEl.classList.toggle(HIGHLIGHT_CLASS, count > 1);
           titleEl.classList.toggle(FLOATING_CLASS, count > 0 && entry.allFloating);
           if (count === 1) {
-            const [[onlyType, sections]] = types;
-            const color = plugin.settings.colorViews.allPropertiesSubtyp ? subtypeColor(plugin.settings, onlyType, sections.length === 1 ? sections[0] : null) : plugin.settings.typeColors[onlyType];
+            const [[onlyTyp, sections]] = typs;
+            const color = plugin.settings.colorViews.allPropertiesSubtyp ? subtypColor(plugin.settings, onlyTyp, sections.length === 1 ? sections[0] : null) : plugin.settings.typColors[onlyTyp];
             if (color) titleEl.style.setProperty("color", color, "important");
             else titleEl.style.removeProperty("color");
           } else {
@@ -4838,9 +4671,9 @@ var require_frontmatter_default_highlight = __commonJS({
         const { standard, floating } = keysForFile(plugin, file);
         applyToContainer(view?.metadataEditor?.containerEl, standard, floating);
       }
-      for (const leaf of plugin.app.workspace.getLeavesOfType(TYP_VIEW_TYPE)) {
+      for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_TYP_PANE)) {
         for (const editor of leaf.view?.frontmatterEditors ?? []) {
-          const { standard, floating } = keysForStore(plugin, editor.owner?.fredStore);
+          const { standard, floating } = keysForStore(plugin, editor.owner?.typStore);
           applyToContainer(editor.containerEl, standard, floating);
         }
       }
@@ -4863,10 +4696,10 @@ var require_frontmatter_default_highlight = __commonJS({
 var require_property_rename_sync = __commonJS({
   "src/property-rename-sync.js"(exports2, module2) {
     var { Notice } = require("obsidian");
-    var { typeStore, subtypeStore } = require_type_frontmatter_editor();
-    var { getSubtypeNames: getSubtypeNames2, isEmptyValue } = require_subtypes();
-    var TYP_PROPERTY2 = "TYP";
-    var SUBTYP_PROPERTY2 = "SUBTYP";
+    var { typStore, subtypStore } = require_typ_frontmatter_editor();
+    var { getSubtypNames: getSubtypNames2, isEmptyValue } = require_subtyps();
+    var { plural, joinAnd } = require_typ_utils();
+    var { TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
     function sameKey(a, b) {
       return a.toLowerCase() === b.toLowerCase();
     }
@@ -4917,56 +4750,56 @@ var require_property_rename_sync = __commonJS({
       if (oldKey === "" || newKey === "" || oldKey === newKey) return;
       if ([oldKey, newKey].some((key) => sameKey(key, TYP_PROPERTY2) || sameKey(key, SUBTYP_PROPERTY2))) return;
       const { settings } = plugin;
-      let typeCount = 0;
-      let subtypeCount = 0;
-      const count = (store) => store.subtype ? subtypeCount++ : typeCount++;
-      const types = /* @__PURE__ */ new Set([...Object.keys(settings.typeDefaultFrontmatter), ...Object.keys(settings.typeSubtypes ?? {})]);
-      for (const type of types) {
-        const stores = [typeStore(plugin, type), ...getSubtypeNames2(settings, type).map((subtype) => subtypeStore(plugin, type, subtype))];
+      let typCount = 0;
+      let subtypCount = 0;
+      const count = (store) => store.subtyp ? subtypCount++ : typCount++;
+      const typs = /* @__PURE__ */ new Set([...Object.keys(settings.typDefaultFrontmatter), ...Object.keys(settings.typSubtyps ?? {})]);
+      for (const typ of typs) {
+        const stores = [typStore(plugin, typ), ...getSubtypNames2(settings, typ).map((subtyp) => subtypStore(plugin, typ, subtyp))];
         for (const store of stores) {
           if (renameInStore(store, oldKey, newKey)) count(store);
         }
       }
       const orderChanged = renameInGlobalOrder(settings, oldKey, newKey);
-      if (typeCount === 0 && subtypeCount === 0 && !orderChanged) return;
+      if (typCount === 0 && subtypCount === 0 && !orderChanged) return;
       await plugin.saveSettings();
       plugin.refreshTypColors?.();
       const parts = [];
-      if (typeCount > 0) parts.push(`${typeCount} TYP${typeCount === 1 ? "" : "en"}`);
-      if (subtypeCount > 0) parts.push(`${subtypeCount} Subtyp${subtypeCount === 1 ? "" : "en"}`);
-      if (orderChanged) parts.push("globaler Reihenfolge");
-      new Notice(`TYP-System: \u201E${oldKey}\u201C \u2192 \u201E${newKey}\u201C in ${parts.join(" und ")} umbenannt.`);
+      if (typCount > 0) parts.push(plural(typCount, "TYP block"));
+      if (subtypCount > 0) parts.push(plural(subtypCount, "Subtyp block"));
+      if (orderChanged) parts.push("the global order");
+      new Notice(`TYP-System: renamed "${oldKey}" \u2192 "${newKey}" in ${joinAnd(parts)}.`);
     }
     function registerPropertyRenameSync2(plugin) {
       const fileManager = plugin.app.fileManager;
-      if (fileManager.__fredTypRenameSyncPatched) return;
-      fileManager.__fredTypRenameSyncPatched = true;
+      if (fileManager.__typSystemRenameSyncPatched) return;
+      fileManager.__typSystemRenameSyncPatched = true;
       const original = fileManager.renameProperty;
       fileManager.renameProperty = async function(oldKey, newKey, ...rest) {
         const result = await original.call(this, oldKey, newKey, ...rest);
         try {
           await syncRename(plugin, oldKey, newKey);
         } catch (error) {
-          console.error("TYP-System: Property-Umbenennung nicht \xFCbernommen", error);
-          new Notice(`TYP-System: Umbenennung von \u201E${oldKey}\u201C nicht \xFCbernommen \u2013 ${error.message}`);
+          console.error("TYP-System: property rename not applied", error);
+          new Notice(`TYP-System: rename of "${oldKey}" not applied \u2013 ${error.message}`);
         }
         return result;
       };
       plugin.register(() => {
         fileManager.renameProperty = original;
-        delete fileManager.__fredTypRenameSyncPatched;
+        delete fileManager.__typSystemRenameSyncPatched;
       });
     }
     module2.exports = { registerPropertyRenameSync: registerPropertyRenameSync2 };
   }
 });
 
-// src/type-picker.js
-var require_type_picker = __commonJS({
-  "src/type-picker.js"(exports2, module2) {
+// src/typ-picker.js
+var require_typ_picker = __commonJS({
+  "src/typ-picker.js"(exports2, module2) {
     var { FuzzySuggestModal, Notice, prepareFuzzySearch } = require("obsidian");
-    var { compareTypes, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2 } = require_typ_view();
-    var { nameColor, paintColorDot } = require_type_colors();
+    var { compareTyps, DEFAULT_SORT_ORDER: DEFAULT_SORT_ORDER2 } = require_typ_pane();
+    var { nameColor, paintColorDot } = require_typ_colors();
     var TypPickerModal = class extends FuzzySuggestModal {
       constructor(app, plugin, items, resolve) {
         super(app);
@@ -4974,112 +4807,100 @@ var require_type_picker = __commonJS({
         this.items = items;
         this.resolve = resolve;
         this.chosen = false;
-        this.setPlaceholder("ESC f\xFCr Abbruch");
+        this.setPlaceholder("ESC to cancel");
       }
       getItems() {
         return this.items;
       }
-      // Fuzzy-Suche greift auch auf die Beschreibung, nicht nur auf den TYP-Namen -
-      // und auf die Subtypen, wo sie in der Zeile stehen (showSubtypes, siehe
-      // typeItems): sie sind dann sichtbar, also erwartet man auch, sie tippen zu
-      // können, und im separaten Ablauf ist der TYP darüber der Weg zu ihnen.
+      // Search also covers the description and, where shown in the row
+      // (showSubtyps), the Subtyp names: what you see you expect to be able to type.
       getItemText(item) {
-        return [item.type, item.subtypes?.join(" "), item.description].filter(Boolean).join(" ");
+        return [item.typ, item.subtyps?.join(" "), item.description].filter(Boolean).join(" ");
       }
       renderSuggestion(match, el) {
         const item = match.item;
-        el.addClass("fred-typ-picker-suggestion");
-        if (item.unregistered) el.addClass("fred-typ-picker-unregistered");
+        el.addClass("typ-picker-suggestion");
+        if (item.unregistered) el.addClass("typ-picker-unregistered");
         if (item.unregistered) {
-          el.createSpan({ cls: "fred-typ-picker-name", text: item.type });
+          el.createSpan({ cls: "typ-picker-name", text: item.typ });
         } else {
-          this.renderColoredName(el, item.type, item.type);
+          this.renderColoredName(el, item.typ, item.typ);
         }
-        if (item.subtypes?.length) this.renderSubtypePreview(el, item);
+        if (item.subtyps?.length) this.renderSubtypPreview(el, item);
         if (item.description) {
-          el.createSpan({ cls: "fred-typ-picker-desc", text: item.description });
+          el.createSpan({ cls: "typ-picker-desc", text: item.description });
         }
-        el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
+        el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
       }
-      // Name in der Farbe von colorType (bzw. des Subtyps, siehe nameColor in
-      // type-colors.js - dieselbe Grundlage nutzt die Subtyp-Vorschau der TYP-Liste)
-      // - je nach Einstellung "TYP View einfärben" als eingefärbter Text oder mit
-      // vorangestelltem Farbpunkt.
-      renderColoredName(el, text, colorType, subtype = null) {
-        const { color, isDefault } = nameColor(this.plugin.settings, colorType, subtype);
+      // Name in the color of colorTyp (or of the Subtyp, see nameColor in
+      // typ-colors.js) - as colored text or with a dot before it, depending on
+      // the "TYP-Pane" coloring setting.
+      renderColoredName(el, text, colorTyp, subtyp = null) {
+        const { color, isDefault } = nameColor(this.plugin.settings, colorTyp, subtyp);
         if (this.plugin.settings.colorViews.typList) {
-          el.createSpan({ cls: "fred-typ-picker-name", text }).style.color = color;
+          el.createSpan({ cls: "typ-picker-name", text }).style.color = color;
         } else {
-          paintColorDot(el.createSpan({ cls: "fred-typ-picker-dot" }), color, isDefault);
-          el.createSpan({ cls: "fred-typ-picker-name", text });
+          paintColorDot(el.createSpan({ cls: "typ-picker-dot" }), color, isDefault);
+          el.createSpan({ cls: "typ-picker-name", text });
         }
       }
-      // "TYP (Subtyp 1, Subtyp 2)" - welche Subtypen unter dem TYP liegen, schon
-      // in der TYP-Auswahl des separaten Ablaufs (siehe pickTypeAndSubtype), wo
-      // der Subtyp-Picker erst danach kommt. Jeder Subtyp in seiner eigenen Farbe,
-      // Klammern und Kommas muted; ohne "TYP View einfärben" bleibt die Vorschau
-      // wie der Name selbst ungefärbt.
-      renderSubtypePreview(el, item) {
+      // "TYP (Subtyp 1, Subtyp 2)" - shows what lies below the TYP before the
+      // separate Subtyp-Picker comes. Each Subtyp in its own color, brackets and
+      // commas muted; uncolored like the name when "TYP-Pane" coloring is off.
+      renderSubtypPreview(el, item) {
         const colorize = this.plugin.settings.colorViews.typList;
-        const wrap = el.createSpan({ cls: "fred-typ-picker-subtypes" });
+        const wrap = el.createSpan({ cls: "typ-picker-subtyps" });
         wrap.appendText("(");
-        item.subtypes.forEach((subtype, index) => {
+        item.subtyps.forEach((subtyp, index) => {
           if (index > 0) wrap.appendText(", ");
-          const span = wrap.createSpan({ text: subtype });
-          if (colorize) span.style.color = nameColor(this.plugin.settings, item.type, subtype).color;
+          const span = wrap.createSpan({ text: subtyp });
+          if (colorize) span.style.color = nameColor(this.plugin.settings, item.typ, subtyp).color;
         });
         wrap.appendText(")");
       }
-      // Obsidians SuggestModal.selectSuggestion() ruft intern erst this.close()
-      // auf und danach erst onChooseSuggestion()/onChooseItem() - "chosen" hier zu
-      // setzen (statt in onChooseItem) ist daher nicht bloß Geschmackssache: würde
-      // es erst in onChooseItem gesetzt, hätte das close()-ausgelöste onClose()
-      // unten "chosen" noch als false gesehen und das Promise fälschlich schon mit
-      // null aufgelöst, bevor der eigentliche onChooseItem-Aufruf überhaupt lief -
-      // das zweite resolve() greift dann nicht mehr (ein Promise löst nur einmal
-      // auf), das Ergebnis war unabhängig von der Auswahl immer null.
+      // Obsidian's selectSuggestion() calls close() BEFORE onChooseItem(). Set
+      // "chosen" any later and onClose() resolves with null first - a promise only
+      // resolves once, so every choice would come back as null.
       selectSuggestion(item, evt) {
         this.chosen = true;
         this.query = this.inputEl.value.trim();
         super.selectSuggestion(item, evt);
       }
       onChooseItem(item) {
-        this.resolve(item.type);
+        this.resolve(item.typ);
       }
-      // ESC (oder Klick daneben) schließt das Modal ohne selectSuggestion - dann
-      // statt eines hängenden Promise mit null auflösen, analog zu
-      // tp.system.suggester.
+      // ESC or a click outside closes without selectSuggestion: resolve with null
+      // instead of leaving the promise hanging, like tp.system.suggester.
       onClose() {
         super.onClose();
         if (!this.chosen) this.resolve(null);
       }
     };
     var SubtypPickerModal = class extends TypPickerModal {
-      constructor(app, plugin, type, items, resolve, query = "") {
+      constructor(app, plugin, typ, items, resolve, query = "") {
         super(app, plugin, items, resolve);
-        this.type = type;
-        this.setPlaceholder(`Subtyp f\xFCr ${type} \u2013 ESC f\xFCr zur\xFCck`);
+        this.typ = typ;
+        this.setPlaceholder(`Subtyp for ${typ} \u2013 ESC to go back`);
         this.items = sortByQuery(items, query, (item) => this.getItemText(item));
       }
-      // Die "ohne Subtyp"-Zeile ist auch über den TYP-Namen zu finden, den sie
-      // zeigt - ein im TYP-Picker getipptes "ORGA" holt sie damit von allein
-      // wieder an den Anfang, obwohl dort der TYP und nicht ein Subtyp gemeint war.
+      // The "no Subtyp" row is also found by the TYP name it shows, so "ORGA"
+      // typed in the TYP-Picker brings it back to the top.
       getItemText(item) {
-        return item.none ? `${this.type} ${item.type}` : super.getItemText(item);
+        return item.none ? `${this.typ} ${item.typ}` : super.getItemText(item);
       }
       renderSuggestion(match, el) {
         const item = match.item;
-        el.addClass("fred-typ-picker-suggestion");
+        el.addClass("typ-picker-suggestion");
         if (item.none) {
-          this.renderColoredName(el, this.type, this.type);
-          el.createSpan({ cls: "fred-typ-picker-none", text: `(${item.type})` });
+          this.renderColoredName(el, this.typ, this.typ);
+          el.createSpan({ cls: "typ-picker-none", text: `(${item.typ})` });
         } else {
-          this.renderColoredName(el, item.type, this.type, item.type);
+          this.renderColoredName(el, item.typ, this.typ, item.typ);
         }
-        el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
+        el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
       }
       onChooseItem(item) {
-        this.resolve(item.none ? "" : item.type);
+        this.resolve(item.none ? "" : item.typ);
       }
     };
     var TypSubtypPickerModal = class extends TypPickerModal {
@@ -5091,15 +4912,15 @@ var require_type_picker = __commonJS({
         const search = query.trim() ? prepareFuzzySearch(query.trim()) : null;
         const noMatch = { score: 0, matches: [] };
         const results = [];
-        for (const { item, subtypes } of this.groups) {
-          const typeMatch = search ? search(this.getItemText(item)) : noMatch;
-          let subtypeMatches = subtypes.map((subtype) => ({ item: subtype, match: search ? search(subtype.subtype) : noMatch }));
-          if (!typeMatch) subtypeMatches = subtypeMatches.filter((entry) => entry.match);
-          if (!typeMatch && subtypeMatches.length === 0) continue;
-          const scores = [typeMatch, ...subtypeMatches.map((entry) => entry.match)].filter(Boolean).map((match) => match.score);
+        for (const { item, subtyps } of this.groups) {
+          const typMatch = search ? search(this.getItemText(item)) : noMatch;
+          let subtypMatches = subtyps.map((subtyp) => ({ item: subtyp, match: search ? search(subtyp.subtyp) : noMatch }));
+          if (!typMatch) subtypMatches = subtypMatches.filter((entry) => entry.match);
+          if (!typMatch && subtypMatches.length === 0) continue;
+          const scores = [typMatch, ...subtypMatches.map((entry) => entry.match)].filter(Boolean).map((match) => match.score);
           results.push({
             score: Math.max(...scores),
-            rows: [{ item, match: typeMatch ?? noMatch }, ...subtypeMatches.map((entry) => ({ item: entry.item, match: entry.match ?? noMatch }))]
+            rows: [{ item, match: typMatch ?? noMatch }, ...subtypMatches.map((entry) => ({ item: entry.item, match: entry.match ?? noMatch }))]
           });
         }
         if (search) results.sort((a, b) => b.score - a.score);
@@ -5107,16 +4928,16 @@ var require_type_picker = __commonJS({
       }
       renderSuggestion(match, el) {
         const item = match.item;
-        if (!item.subtype) {
+        if (!item.subtyp) {
           super.renderSuggestion(match, el);
           return;
         }
-        el.addClass("fred-typ-picker-suggestion", "fred-typ-picker-subtype");
-        this.renderColoredName(el, item.subtype, item.type, item.subtype);
-        el.createSpan({ cls: "fred-typ-picker-count", text: String(item.count) });
+        el.addClass("typ-picker-suggestion", "typ-picker-subtyp");
+        this.renderColoredName(el, item.subtyp, item.typ, item.subtyp);
+        el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
       }
       onChooseItem(item) {
-        this.resolve({ type: item.type, subtype: item.subtype ?? null });
+        this.resolve({ typ: item.typ, subtyp: item.subtyp ?? null });
       }
     };
     function sortByQuery(items, query, itemText) {
@@ -5130,66 +4951,66 @@ var require_type_picker = __commonJS({
       });
       return scored.map((entry) => entry.item);
     }
-    function pickSubtype(app, plugin, type, query = "", options = {}) {
+    function pickSubtyp(app, plugin, typ, query = "", options = {}) {
       return new Promise((resolve) => {
-        const items = plugin.getSubtypes(type, options).map(({ subtype, count }) => ({ type: subtype, description: "", count }));
+        const items = plugin.getSubtyps(typ, options).map(({ subtyp, count }) => ({ typ: subtyp, description: "", count }));
         if (items.length === 0) {
           resolve("");
           return;
         }
-        const noneCount = plugin.typIndex.subtypeBucket(type).noSubtype;
-        items.unshift({ type: "ohne Subtyp", description: "", count: noneCount, none: true });
-        new SubtypPickerModal(app, plugin, type, items, resolve, query).open();
+        const noneCount = plugin.typIndex.subtypBucket(typ).noSubtyp;
+        items.unshift({ typ: "no Subtyp", description: "", count: noneCount, none: true });
+        new SubtypPickerModal(app, plugin, typ, items, resolve, query).open();
       });
     }
     function unregisteredItems(app, plugin) {
-      const registered = new Set(plugin.settings.types);
-      const { counts } = plugin.typIndex.typeCounts();
+      const registered = new Set(plugin.settings.typs);
+      const { counts } = plugin.typIndex.typCounts();
       const sortOrder = plugin.settings.typSortOrder ?? DEFAULT_SORT_ORDER2;
-      return [...counts.keys()].filter((type) => !registered.has(type) && plugin.typIndex.isCleanKey(type)).sort((a, b) => compareTypes(sortOrder, a, b, counts, plugin.settings.typeColors)).map((type) => ({ type, description: "", count: counts.get(type) ?? 0, unregistered: true }));
+      return [...counts.keys()].filter((typ) => !registered.has(typ) && plugin.typIndex.isCleanKey(typ)).sort((a, b) => compareTyps(sortOrder, a, b, counts, plugin.settings.typColors)).map((typ) => ({ typ, description: "", count: counts.get(typ) ?? 0, unregistered: true }));
     }
-    function pickType(app, plugin, options = {}) {
-      return pickTypeEntry(app, plugin, options).then((entry) => entry?.type ?? null);
+    function pickTyp(app, plugin, options = {}) {
+      return pickTypEntry(app, plugin, options).then((entry) => entry?.typ ?? null);
     }
-    function pickTypeEntry(app, plugin, options = {}) {
+    function pickTypEntry(app, plugin, options = {}) {
       return new Promise((resolve) => {
-        const items = typeItems(app, plugin, options);
+        const items = typItems(app, plugin, options);
         if (!items) {
           resolve(null);
           return;
         }
-        const modal = new TypPickerModal(app, plugin, items, (type) => resolve(type === null ? null : { type, query: modal.query }));
+        const modal = new TypPickerModal(app, plugin, items, (typ) => resolve(typ === null ? null : { typ, query: modal.query }));
         modal.open();
       });
     }
-    function typeItems(app, plugin, { includeManualOff = false, includeUnregistered = false, showSubtypes = false } = {}) {
-      const items = plugin.getTypes({ includeManualOff }).map((item) => ({ ...item, unregistered: false }));
+    function typItems(app, plugin, { includeManualOff = false, includeUnregistered = false, showSubtyps = false } = {}) {
+      const items = plugin.getTyps({ includeManualOff }).map((item) => ({ ...item, unregistered: false }));
       if (includeUnregistered) items.push(...unregisteredItems(app, plugin));
-      if (showSubtypes) {
-        for (const item of items) item.subtypes = plugin.getSubtypes(item.type, { includeManualOff }).map(({ subtype }) => subtype);
+      if (showSubtyps) {
+        for (const item of items) item.subtyps = plugin.getSubtyps(item.typ, { includeManualOff }).map(({ subtyp }) => subtyp);
       }
       if (items.length > 0) return items;
-      new Notice("Keine TYPen vorhanden.");
+      new Notice("No TYP available.");
       return null;
     }
-    async function pickTypeAndSubtype(app, plugin, options = {}) {
-      if (plugin.settings.separateSubtypePicker) {
+    async function pickTypAndSubtyp(app, plugin, options = {}) {
+      if (plugin.settings.separateSubtypPicker) {
         while (true) {
-          const entry = await pickTypeEntry(app, plugin, { ...options, showSubtypes: true });
+          const entry = await pickTypEntry(app, plugin, { ...options, showSubtyps: true });
           if (!entry) return null;
-          const subtype = await pickSubtype(app, plugin, entry.type, entry.query, options);
-          if (subtype !== null) return { type: entry.type, subtype: subtype || null };
+          const subtyp = await pickSubtyp(app, plugin, entry.typ, entry.query, options);
+          if (subtyp !== null) return { typ: entry.typ, subtyp: subtyp || null };
         }
       }
-      const items = typeItems(app, plugin, options);
+      const items = typItems(app, plugin, options);
       if (!items) return null;
       const groups = items.map((item) => ({
         item,
-        subtypes: plugin.getSubtypes(item.type, options).map(({ subtype, count }) => ({ type: item.type, subtype, count }))
+        subtyps: plugin.getSubtyps(item.typ, options).map(({ subtyp, count }) => ({ typ: item.typ, subtyp, count }))
       }));
       return new Promise((resolve) => new TypSubtypPickerModal(app, plugin, groups, resolve).open());
     }
-    module2.exports = { pickType, pickSubtype, pickTypeAndSubtype };
+    module2.exports = { pickTyp, pickSubtyp, pickTypAndSubtyp };
   }
 });
 
@@ -5199,8 +5020,8 @@ var require_shortcut_scripts = __commonJS({
     var { TFile, Vault, debounce, normalizePath } = require("obsidian");
     var SHORTCUT_MARKER = /^[ \t]*(?:\/\/+|\/\*+|\*)[ \t]*@typ-shortcut\b(?:\(([^)]*)\))?[ \t]*(.*?)[ \t]*(?:\*\/)?[ \t]*$/m;
     function parseParams(raw) {
-      const namen = (raw ?? "").split(",").map((name) => name.trim()).filter((name) => name !== "");
-      return [...new Set(namen)];
+      const names = (raw ?? "").split(",").map((name) => name.trim()).filter((name) => name !== "");
+      return [...new Set(names)];
     }
     function registerShortcutScripts2(plugin) {
       const { app } = plugin;
@@ -5233,7 +5054,7 @@ var require_shortcut_scripts = __commonJS({
               });
             }
           } catch (e) {
-            console.error(`TYP-System: Templater-Skript ${file.path} nicht lesbar`, e);
+            console.error(`TYP-System: can't read Templater script ${file.path}`, e);
           }
         }
         if (folderPath !== scriptFolder) return;
@@ -5261,17 +5082,9 @@ var require_shortcut_scripts = __commonJS({
 var { Plugin } = require("obsidian");
 var { DEFAULT_SETTINGS, TypSystemSettingTab } = require_settings();
 var { registerCommands } = require_commands();
-var { registerTypView, sortTypesByMode, DEFAULT_SORT_ORDER } = require_typ_view();
+var { registerTypPane, sortTypsByMode, DEFAULT_SORT_ORDER } = require_typ_pane();
 var { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require_typ_index();
-var {
-  getSubtype,
-  getSubtypeNames,
-  isSubtypeManual,
-  migrateAboveStandard,
-  migrateSubtypeColorScale,
-  migrateSubtypeManual
-} = require_subtypes();
-var { DEFAULT_SUBTYPE_COLOR_RANGES } = require_type_colors();
+var { getSubtyp, getSubtypNames, isSubtypManual } = require_subtyps();
 var { registerFileExplorerColors } = require_file_explorer_colors();
 var { registerGraphColors } = require_graph_colors();
 var { registerSearchColors } = require_search_colors();
@@ -5282,37 +5095,15 @@ var { registerActiveTitleColors } = require_active_title_colors();
 var { registerLinkColors } = require_link_colors();
 var { registerFrontmatterDefaultHighlight } = require_frontmatter_default_highlight();
 var { registerPropertyRenameSync } = require_property_rename_sync();
+var { removePropertyMenuPatch } = require_typ_frontmatter_editor();
 var { normalizeGlobalOrder, sortFrontmatterFor, placePropertyFor } = require_frontmatter_sort();
 var { resolveShortcuts, scriptNameOf, resolveCallArgs } = require_shortcuts();
 var {
-  pickType: pickTypeModal,
-  pickSubtype: pickSubtypeModal,
-  pickTypeAndSubtype: pickTypeAndSubtypeModal
-} = require_type_picker();
+  pickTyp: pickTypModal,
+  pickSubtyp: pickSubtypModal,
+  pickTypAndSubtyp: pickTypAndSubtypModal
+} = require_typ_picker();
 var { registerShortcutScripts } = require_shortcut_scripts();
-function migrateFloatingFrontmatter(settings) {
-  if (!settings.typeFloatingFrontmatter) return;
-  for (const [type, floating] of Object.entries(settings.typeFloatingFrontmatter)) {
-    const keys = Object.keys(floating).filter((key) => key !== "");
-    if (keys.length === 0) continue;
-    settings.typeDefaultFrontmatter[type] = { ...settings.typeDefaultFrontmatter[type] ?? {}, ...floating };
-    settings.typeFloatingKeys[type] = [.../* @__PURE__ */ new Set([...settings.typeFloatingKeys[type] ?? [], ...keys])];
-  }
-  delete settings.typeFloatingFrontmatter;
-}
-function migrateTypListSecondary(settings, stored) {
-  if (stored?.typListDescriptionEnabled === void 0) return false;
-  if (stored.typListSecondary === void 0) {
-    settings.typListSecondary = stored.typListDescriptionEnabled ? "description" : "none";
-  }
-  delete settings.typListDescriptionEnabled;
-  return true;
-}
-function dropTypListSubtypesAlign(settings) {
-  if (settings.typListSubtypesRightAligned === void 0) return false;
-  delete settings.typListSubtypesRightAligned;
-  return true;
-}
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -5321,10 +5112,11 @@ module.exports = class TypSystemPlugin extends Plugin {
     registerCommands(this);
     this.addSettingTab(new TypSystemSettingTab(this.app, this));
     registerPropertyRenameSync(this);
+    this.register(removePropertyMenuPatch);
     this.getShortcutScripts = registerShortcutScripts(this);
     this.refreshFrontmatterHighlight = registerFrontmatterDefaultHighlight(this);
     const refreshFns = [
-      registerTypView(this),
+      registerTypPane(this),
       registerFileExplorerColors(this),
       registerGraphColors(this),
       registerSearchColors(this),
@@ -5341,50 +5133,35 @@ module.exports = class TypSystemPlugin extends Plugin {
   }
   onunload() {
   }
-  // Für _obsidian/templater-scripts/TYP.js: liefert die im TYP-View unter
-  // "TYP-Frontmatter" hinterlegten Properties für den gegebenen TYP, damit
-  // Templater sie beim Anlegen einer neuen Notiz übernehmen kann, statt sie dort
-  // ein zweites Mal zu pflegen. Kopie statt direkter Referenz, damit ein
-  // Aufrufer die zurückgegebenen Werte gefahrlos mutieren kann, ohne die
-  // Plugin-Settings zu verändern.
+  // For _obsidian/templater-scripts/TYP.js: the TYP-Frontmatter of a TYP, so
+  // Templater can apply it to a new note instead of keeping a second copy. A
+  // copy, so callers may change it freely.
   //
-  // Properties mit einem festen Shortcut (today/now/created, siehe
-  // shortcuts.js) tragen dessen erst hier aufgelösten Wert - nicht den beim
-  // Setzen gültigen, es kommt also bei jedem Aufruf frisch Berechnetes heraus.
-  // Properties mit einem Skript-Shortcut tragen null: die kann nur Templater
-  // auflösen, TYP.js holt sie sich über getTypeShortcuts() (unten) und setzt
-  // sie selbst ein. Key und Position bleiben in beiden Fällen erhalten.
+  // Properties with a fixed shortcut (today/now/created, see shortcuts.js)
+  // carry its value, computed fresh on each call. Properties with a script
+  // shortcut carry null: only Templater can resolve them, TYP.js gets them via
+  // getTypShortcuts() and fills them in. Key and position stay either way.
   //
-  // includeFloating (Standard: false) lässt die als "Floating Property"
-  // markierten Keys (typeFloatingKeys) in der Liste - anders als die übrigen
-  // Standard-Properties werden diese NICHT automatisch bei jeder neuen Notiz
-  // angelegt (sie zählen zwar für die Frontmatter-Sortierung mit, siehe
-  // orderedDefaultKeys in frontmatter-sort.js, sollen aber nur bei Bedarf
-  // explizit von einem Templater-Skript abgegriffen werden).
+  // includeFloating (default false) keeps floating keys in the result; they
+  // are not created for every new note, only when a script asks for them.
   //
-  // file (optional) wird an resolveShortcuts() durchgereicht - nur für den
-  // "created"-Shortcut relevant, der das Erstellungsdatum der Ziel-Datei statt
-  // des Aufrufzeitpunkts liefert.
+  // file (optional) goes to resolveShortcuts() for "created", which returns
+  // the file's creation date instead of the call time.
   //
-  // subtype (optional): ergänzt das TYP-Frontmatter um den Block dieses
-  // Subtyps (siehe subtypes.js), dessen Keys folgen dahinter (wichtig für die
-  // Reihenfolge der Skript-Shortcuts). Steht ein Key in BEIDEN Blöcken, behält
-  // er die Position des TYP-Frontmatters, Wert, Floating-Markierung und
-  // Shortcut kommen aber vom Subtyp - eine Zuweisung auf einen bereits vorhandenen
-  // Objektschlüssel überschreibt ihn, ohne ihn zu verschieben. Die
-  // Frontmatter-Sortierung muss dieselbe Regel verwenden, sonst würde sie
-  // eine gerade angelegte Notiz sofort wieder umsortieren (siehe
-  // orderedDefaultKeys in frontmatter-sort.js).
-  getTypeDefaults(type, { includeFloating = false, file, subtype = null } = {}) {
-    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
+  // subtyp (optional) appends that Subtyp's block. A key in BOTH blocks keeps
+  // the TYP-Frontmatter position, but value, floating flag and shortcut come
+  // from the Subtyp. Frontmatter sorting must use the same rule (see
+  // orderedDefaultKeys in frontmatter-sort.js), or it would re-sort a new note
+  // right away.
+  getTypDefaults(typ, { includeFloating = false, file, subtyp = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(typ, subtyp, includeFloating);
     return resolveShortcuts(defaults, shortcuts, { file, app: this.app });
   }
-  // Gemeinsame Grundlage von getTypeDefaults() und getTypeShortcuts(): das
-  // TYP-Frontmatter des Typs, ergänzt um den Block des Subtyps. Ein Key, der in
-  // BEIDEN Blöcken steht, behält die Position des TYP-Frontmatters; Wert,
-  // Floating-Markierung UND Shortcut kommen dann vom Subtyp - auch "kein
-  // Shortcut" gilt dabei als Angabe des Subtyps und hebt den des TYPs auf.
-  collectBlocks(type, subtype, includeFloating) {
+  // Shared base of getTypDefaults() and getTypShortcuts(): the TYP-Frontmatter
+  // plus the Subtyp's block. A key in BOTH keeps the TYP-Frontmatter position;
+  // value, floating flag AND shortcut come from the Subtyp - "no shortcut"
+  // counts as the Subtyp's choice too and cancels the TYP's.
+  collectBlocks(typ, subtyp, includeFloating) {
     const defaults = {};
     const shortcuts = {};
     const isFloating = /* @__PURE__ */ new Map();
@@ -5400,13 +5177,13 @@ module.exports = class TypSystemPlugin extends Plugin {
         else delete shortcuts[target];
       }
     };
-    const subtypeData = subtype ? getSubtype(this.settings, type, subtype) : null;
+    const subtypData = subtyp ? getSubtyp(this.settings, typ, subtyp) : null;
     addBlock(
-      this.settings.typeDefaultFrontmatter[type],
-      this.settings.typeFloatingKeys[type],
-      this.settings.typeShortcuts[type]
+      this.settings.typDefaultFrontmatter[typ],
+      this.settings.typFloatingKeys[typ],
+      this.settings.typShortcuts[typ]
     );
-    if (subtypeData) addBlock(subtypeData.frontmatter, subtypeData.floatingKeys, subtypeData.shortcuts);
+    if (subtypData) addBlock(subtypData.frontmatter, subtypData.floatingKeys, subtypData.shortcuts);
     if (!includeFloating) {
       for (const [key, floating] of isFloating) {
         if (!floating) continue;
@@ -5416,163 +5193,122 @@ module.exports = class TypSystemPlugin extends Plugin {
     }
     return { defaults, shortcuts };
   }
-  // Für _obsidian/templater-scripts/TYP.js: die Properties dieses TYPs, deren
-  // Wert beim Anlegen einer Notiz von einem Templater-Skript kommt -
-  // { [Property]: { name, args, fallback } }, in der Reihenfolge des
-  // TYP-Frontmatters (die Skripte laufen nacheinander und sehen die Ergebnisse
-  // der jeweils früheren).
+  // For TYP.js: the properties of this TYP whose value comes from a Templater
+  // script, as { [property]: { name, params, args, fallback } } in
+  // TYP-Frontmatter order (the scripts run in turn and see earlier results).
   //
-  //   name     Skriptname, also tp.user.<name> - ohne "tp."-Präfix
-  //   params   die im @typ-shortcut-Marker deklarierte Parameterliste des
-  //            Skripts (siehe shortcut-scripts.js), oder null bei einem Marker
-  //            ohne Klammern. Sie stammt aus dem aktuellen Scan, nicht aus dem
-  //            gespeicherten Record - eine geänderte Deklaration wirkt also
-  //            sofort. TYP.js macht daraus mit resolveShortcutArgs() unten die
-  //            Argumentliste des Aufrufs
-  //   args     die eingetippten Argumente, benannt nach den nicht reservierten
-  //            Parametern. Leeres Objekt, wenn keine gesetzt sind; ein leer
-  //            gelassenes Feld fehlt darin ganz, damit "args.x ?? fallback"
-  //            im Skript trägt
-  //   fallback der in der TYP-Ansicht hinterlegte feste Wert der Property. Nur
-  //            als RÜCKFALL gedacht: schlägt das Skript fehl (fehlt oder
-  //            wirft), schreibt TYP.js ihn statt eines leeren Werts. Ein
-  //            Skript, das bewusst null/"" liefert (z. B. ESC im Picker), ist
-  //            kein Fehlschlag - dort bleibt die Property leer.
+  //   name      script name without "tp.", i.e. tp.user.<name>
+  //   params    the parameter list declared in the @typ-shortcut marker, or
+  //             null without parentheses. Taken from the current scan, so a
+  //             changed declaration applies at once. TYP.js turns it into the
+  //             call's arguments with resolveShortcutArgs()
+  //   args      the typed arguments, named after the non-reserved parameters;
+  //             an empty field is missing so "args.x ?? fallback" works
+  //   fallback  the fixed value stored for the property. Only a FALLBACK:
+  //             TYP.js writes it if the script is missing or throws. A script
+  //             that deliberately returns null/"" (ESC in a picker) has not
+  //             failed - the property stays empty then.
   //
-  // Die festen Shortcuts (today/now/created) tauchen hier NICHT auf: die löst
-  // das Plugin selbst auf und liefert sie fertig über getTypeDefaults(). Dessen
-  // Rückgabe führt die Skript-Keys mit dem Wert null - Key und Position bleiben
-  // also erhalten, nur der Wert kommt von hier.
+  // Fixed shortcuts (today/now/created) don't appear here; getTypDefaults()
+  // already resolves them and returns the script keys as null.
   //
-  // Optionen wie bei getTypeDefaults(); includeFloating standardmäßig false,
-  // damit für eine Floating Property nicht ungefragt ein Skript läuft.
-  getTypeShortcuts(type, { includeFloating = false, subtype = null } = {}) {
-    const { defaults, shortcuts } = this.collectBlocks(type, subtype, includeFloating);
-    const skripte = this.getShortcutScripts?.() ?? [];
+  // Options as in getTypDefaults(); includeFloating defaults to false so no
+  // script runs unasked for a floating property.
+  getTypShortcuts(typ, { includeFloating = false, subtyp = null } = {}) {
+    const { defaults, shortcuts } = this.collectBlocks(typ, subtyp, includeFloating);
+    const scripts = this.getShortcutScripts?.() ?? [];
     const result = {};
     for (const [key, record] of Object.entries(shortcuts)) {
       const name = scriptNameOf(record.name);
       if (name === null) continue;
-      const skript = skripte.find((s) => s.name === name);
+      const script = scripts.find((s) => s.name === name);
       result[key] = {
         name,
-        params: skript?.params ?? null,
+        params: script?.params ?? null,
         args: { ...record.args ?? {} },
         fallback: defaults[key] ?? null
       };
     }
     return result;
   }
-  // Für _obsidian/templater-scripts/TYP.js: macht aus der Parameterliste eines
-  // Shortcuts die Argumente für den Aufruf tp.user.<name>(tp, ...) - siehe
-  // resolveCallArgs in shortcuts.js. Die Auflösung lebt hier statt in TYP.js,
-  // damit die Regeln (reservierte Namen, Punkt-Namen für Objekt-Argumente) nur
-  // an einer Stelle stehen; newFile und ctx kennt allerdings nur TYP.js und
-  // reicht sie deshalb herein.
+  // For TYP.js: turns a shortcut's parameter list into the arguments of
+  // tp.user.<name>(tp, ...) - see resolveCallArgs in shortcuts.js. Lives here
+  // so the rules (reserved names, dotted names) exist in one place; only
+  // TYP.js knows newFile and ctx, so it passes them in.
   resolveShortcutArgs(params, args, { newFile = null, ctx = null, key = null } = {}) {
     return resolveCallArgs(params, args, { newFile, ctx, key });
   }
-  // Für _obsidian/templater-scripts/TYP.js: registrierte Subtypen eines TYPs in
-  // der Reihenfolge ihrer Blöcke, samt Notiz-Anzahl.
-  //
-  // Subtypen mit abgeschaltetem "Manuell erstellbar" (Icon links neben dem
-  // Namen ihres Blocks, siehe renderSubtypeManualToggle in typ-view.js) bleiben
-  // wie die so abgeschalteten TYPen in getTypes() außen vor - außer
-  // includeManualOff ist gesetzt.
-  getSubtypes(type, { includeManualOff = false } = {}) {
-    const { counts } = this.typIndex.subtypeBucket(type);
-    return getSubtypeNames(this.settings, type).filter((subtype) => includeManualOff || isSubtypeManual(this.settings, type, subtype)).map((subtype) => ({ subtype, count: counts.get(subtype) ?? 0 }));
+  // For TYP.js: registered Subtyps of a TYP in block order, with note counts.
+  // Subtyps that aren't manually creatable are left out unless
+  // includeManualOff is set, like such TYP entries in getTyps().
+  getSubtyps(typ, { includeManualOff = false } = {}) {
+    const { counts } = this.typIndex.subtypBucket(typ);
+    return getSubtypNames(this.settings, typ).filter((subtyp) => includeManualOff || isSubtypManual(this.settings, typ, subtyp)).map((subtyp) => ({ subtyp, count: counts.get(subtyp) ?? 0 }));
   }
-  // Für _obsidian/templater-scripts/TYP.js: Subtyp-Picker (siehe
-  // type-picker.js). Löst mit dem gewählten Subtyp auf, mit "" für "Kein
-  // Subtyp" (bzw. ohne Picker, wenn der TYP keine Subtypen hat), oder mit
-  // null bei ESC (TYP.js kehrt dann zur TYP-Auswahl zurück). query (optional):
-  // eine schon getippte Suchanfrage, nach der die Liste vorsortiert steht.
-  // options wie bei getSubtypes (includeManualOff).
-  pickSubtype(type, query = "", options = {}) {
-    return pickSubtypeModal(this.app, this, type, query, options);
+  // For TYP.js: the Subtyp-Picker (see typ-picker.js). Resolves with the
+  // Subtyp, "" for "no Subtyp" (or without a picker if the TYP has none), or
+  // null on ESC (TYP.js then goes back to the TYP choice). query (optional):
+  // an already typed search that pre-sorts the list. options as in getSubtyps.
+  pickSubtyp(typ, query = "", options = {}) {
+    return pickSubtypModal(this.app, this, typ, query, options);
   }
-  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter:
-  // setzt TYP und SUBTYP in einheitlicher Schreibweise - eine abweichend
-  // geschriebene Property ("typ", "Subtyp") wird an ihrer Stelle umbenannt
-  // statt verdoppelt. subtype null entfernt einen vorhandenen SUBTYP.
-  applyTypeProperties(frontmatter, type, subtype) {
-    setCanonicalProperty(frontmatter, TYP_PROPERTY, type);
-    if (subtype) setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, subtype);
+  // For TYP.js, inside processFrontMatter: sets TYP and SUBTYP in canonical
+  // spelling - a variant like "typ" or "Subtyp" is renamed in place rather than
+  // duplicated. subtyp null removes an existing SUBTYP.
+  applyTypProperties(frontmatter, typ, subtyp) {
+    setCanonicalProperty(frontmatter, TYP_PROPERTY, typ);
+    if (subtyp) setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, subtyp);
     else deleteProperty(frontmatter, SUBTYP_PROPERTY);
   }
-  // Für _obsidian/templater-scripts/TYP.js, innerhalb von processFrontMatter
-  // und nach allen übrigen Änderungen: bringt das Frontmatter in die
-  // Reihenfolge der Frontmatter-Sortierung (globale Reihenfolge, TYP-
-  // Frontmatter samt Subtyp-Block) - sonst landen neu ergänzte Properties
-  // (z. B. SUBTYP in einer bestehenden Notiz) am Ende.
-  sortFrontmatter(frontmatter, type, subtype = null) {
-    return sortFrontmatterFor(this, frontmatter, type, subtype);
+  // For TYP.js, inside processFrontMatter and after all other changes: puts the
+  // frontmatter into sorting order, or newly added properties (SUBTYP in an
+  // existing note, say) would end up last.
+  sortFrontmatter(frontmatter, typ, subtyp = null) {
+    return sortFrontmatterFor(this, frontmatter, typ, subtyp);
   }
-  // Innerhalb von processFrontMatter: setzt nur die Property key an ihren
-  // Platz laut Frontmatter-Sortierung (TYP/SUBTYP aus dem Objekt selbst),
-  // alles Übrige bleibt, wie es ist - z. B. für Freds Property-Backlinking,
-  // damit eine neu angelegte Property nicht am Ende landet.
+  // Inside processFrontMatter: moves only property `key` to its sorted place
+  // (TYP/SUBTYP read from the object), everything else stays - for Fred's
+  // property backlinking, so a new property doesn't end up last.
   placeProperty(frontmatter, key) {
     return placePropertyFor(this, frontmatter, key);
   }
-  // Für _obsidian/templater-scripts/TYP.js: die im TYP-View registrierten TYPen
-  // samt ihrer dort gepflegten Beschreibung, statt sie aus _obsidian/Typen.md zu parsen -
-  // in derselben Reihenfolge, in der sie auch in der TYP-Liste selbst erscheinen
-  // (aktuelle Sortiereinstellung dort, z. B. Häufigkeit oder Name).
-  //
-  // TYPen mit abgeschaltetem "Manuell erstellbar" (Icon in der TYP-Detailansicht)
-  // sind nicht für die manuelle Auswahl gedacht (z. B. beim Anlegen einer neuen
-  // Notiz) und werden deshalb standardmäßig ausgeklammert - Aufrufer, die
-  // trotzdem alle TYPen brauchen, übergeben includeManualOff: true.
-  getTypes({ includeManualOff = false } = {}) {
-    const { counts } = this.typIndex.typeCounts();
+  // For TYP.js: the registered TYP entries with their descriptions, in the
+  // order of the TYP-List (its current sort setting). TYP entries that aren't
+  // manually creatable are left out unless includeManualOff is true.
+  getTyps({ includeManualOff = false } = {}) {
+    const { counts } = this.typIndex.typCounts();
     const sortOrder = this.settings.typSortOrder ?? DEFAULT_SORT_ORDER;
-    return sortTypesByMode(this.settings.types, sortOrder, counts, this.settings.typeColors).filter((type) => includeManualOff || (this.settings.typeManual ?? {})[type] !== false).map((type) => ({
-      type,
-      description: this.settings.typeDescriptions[type] ?? "",
-      count: counts.get(type) ?? 0
+    return sortTypsByMode(this.settings.typs, sortOrder, counts, this.settings.typColors).filter((typ) => includeManualOff || (this.settings.typManual ?? {})[typ] !== false).map((typ) => ({
+      typ,
+      description: this.settings.typDescriptions[typ] ?? "",
+      count: counts.get(typ) ?? 0
     }));
   }
-  // Für _obsidian/templater-scripts/TYP.js: nativer TYP-Picker (siehe
-  // type-picker.js) statt der reinen Text-Liste aus getTypes() +
-  // tp.system.suggester - mit TYP-Farbe/-Punkt, Beschreibung und Notiz-Anzahl
-  // je Zeile. includeManualOff wie bei getTypes(). Löst mit dem gewählten TYP
-  // auf, oder mit null bei Abbruch (ESC).
-  pickType(options) {
-    return pickTypeModal(this.app, this, options);
+  // For TYP.js: the native TYP-Picker (see typ-picker.js) with color,
+  // description and note count. includeManualOff as in getTyps(). Resolves
+  // with the TYP, or null on ESC.
+  pickTyp(options) {
+    return pickTypModal(this.app, this, options);
   }
-  // Für _obsidian/templater-scripts/TYP.js: TYP und Subtyp in einem Zug (siehe
-  // type-picker.js) - je nach Einstellung "Subtyp-Picker separat" ein einziger
-  // Picker mit eingerückten Subtypen oder beide Picker nacheinander. Optionen
-  // wie bei pickType(). Löst mit { type, subtype } auf (subtype null für "ohne
-  // Subtyp"), oder mit null bei Abbruch (ESC).
-  pickTypeAndSubtype(options) {
-    return pickTypeAndSubtypeModal(this.app, this, options);
+  // For TYP.js: TYP and Subtyp in one go (see typ-picker.js) - one picker with
+  // indented Subtyps or both pickers in turn, per "Separate Subtyp-Picker".
+  // Resolves with { typ, subtyp } (subtyp null for "no Subtyp"), or null on
+  // ESC.
+  pickTypAndSubtyp(options) {
+    return pickTypAndSubtypModal(this.app, this, options);
   }
   async loadSettings() {
-    const stored = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
-    migrateFloatingFrontmatter(this.settings);
-    migrateAboveStandard(this.settings);
-    const migrated = [
-      migrateSubtypeColorScale(this.settings, DEFAULT_SUBTYPE_COLOR_RANGES),
-      migrateTypListSecondary(this.settings, stored),
-      dropTypListSubtypesAlign(this.settings),
-      migrateSubtypeManual(this.settings)
-    ];
-    if (migrated.some(Boolean)) await this.saveSettings();
   }
   async saveSettings() {
     await this.saveData(this.settings);
   }
-  // Ruft Obsidian auf, wenn data.json von außen geändert wurde - in der Praxis
-  // durch Obsidian Sync von einem anderen Gerät. Ohne das behielte dieses Gerät
-  // seine alten Settings im Speicher und überschriebe die neuen beim nächsten
-  // saveSettings(). Einen offenen Settings-Tab baut Obsidian danach selbst neu
-  // auf (settingTab.update()); Einfärbungen und TYP-View hier.
+  // Called when data.json changes from outside, in practice through Obsidian
+  // Sync. Without it this device would keep its old settings in memory and
+  // overwrite the new ones on the next save. Obsidian rebuilds an open
+  // settings tab itself; colors and the TYP-Pane are refreshed here.
   async onExternalSettingsChange() {
     await this.loadSettings();
     this.refreshTypColors();

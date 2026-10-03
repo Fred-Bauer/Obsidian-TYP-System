@@ -1,15 +1,12 @@
-const { colorForFile } = require("./type-colors");
+const { colorForFile } = require("./typ-colors");
 
 const BOOKMARKS_VIEW_TYPE = "bookmarks";
 const BOOKMARKS_PLUGIN_ID = "bookmarks";
 
-// Bookmark-Zeilen tragen kein data-path-Attribut. Der View hält aber intern
-// eine WeakMap (view.itemDoms: Bookmark-Item -> Tree-Item-Dom mit .titleEl) -
-// darüber lässt sich jedes Item gezielt seiner Zeile zuordnen, ohne die (nicht
-// iterierbare) WeakMap selbst durchlaufen zu müssen: stattdessen rekursiv über
-// den Item-Baum des Bookmarks-Plugins selbst laufen (liegt unabhängig vom
-// Render-/Collapse-Zustand immer vollständig vor) und je Item per .get()
-// nachschlagen, ob (und wo) es aktuell gerendert ist.
+// Bookmark rows have no data-path. The view keeps a WeakMap (view.itemDoms:
+// item -> tree item with .titleEl), which can't be iterated, so we walk the
+// plugin's own item tree (always complete, whatever is collapsed) and look up
+// each item's row with .get().
 function forEachFileBookmark(items, callback) {
   for (const item of items ?? []) {
     if (item.type === "file") callback(item);
@@ -40,9 +37,7 @@ function applyBookmarksColors(plugin) {
 function registerBookmarksColors(plugin) {
   const refresh = () => applyBookmarksColors(plugin);
 
-  // Analog zu file-explorer-colors.js: Bookmarks rendert Zeilen beim
-  // Auf-/Zuklappen von Gruppen sowie beim Hinzufügen/Entfernen/Umsortieren
-  // dynamisch neu.
+  // Rows are re-rendered when groups expand/collapse or bookmarks change.
   const observer = new MutationObserver(refresh);
   const observeLeaves = () => {
     for (const leaf of plugin.app.workspace.getLeavesOfType(BOOKMARKS_VIEW_TYPE)) {

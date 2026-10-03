@@ -1,96 +1,86 @@
 const { TFile } = require("obsidian");
-const { colorForFile, subtypeColor, subtypeHasOwnColor } = require("./type-colors");
-const { getSubtype } = require("./subtypes");
+const { colorForFile, subtypColor, subtypHasOwnColor } = require("./typ-colors");
+const { getSubtyp } = require("./subtyps");
 
-const DOT_CLASS = "fred-typ-title-dot";
-const DOT_HOLLOW_CLASS = "fred-typ-title-dot-hollow";
-// Wie DEFAULT_TYPE_COLOR in typ-view.js (Farbe eines TYPs ohne eigene Farbe).
+const DOT_CLASS = "typ-title-dot";
+const DOT_HOLLOW_CLASS = "typ-title-dot-hollow";
+// Same as DEFAULT_TYP_COLOR in typ-pane.js (a TYP without its own color).
 const DEFAULT_DOT_COLOR = "#888888";
-const BADGE_CLASS = "fred-typ-title-badge";
-const BADGE_PLAIN_CLASS = "fred-typ-title-badge-plain";
-const COLOR_VAR = "--fred-typ-title-color";
+const BADGE_CLASS = "typ-title-badge";
+const BADGE_PLAIN_CLASS = "typ-title-badge-plain";
+const COLOR_VAR = "--typ-title-color";
 
-const BLOCK_BADGE_CLASS = "fred-typ-block-badge";
-const BLOCK_BADGE_PLAIN_CLASS = "fred-typ-block-badge-plain";
-const BLOCK_ALIGN_TOP_CLASS = "fred-typ-block-badge-top";
-const BLOCK_ALIGN_BOTTOM_CLASS = "fred-typ-block-badge-bottom";
-const BLOCK_COLOR_VAR = "--fred-typ-block-color";
+const BLOCK_BADGE_CLASS = "typ-block-badge";
+const BLOCK_BADGE_PLAIN_CLASS = "typ-block-badge-plain";
+const BLOCK_ALIGN_TOP_CLASS = "typ-block-badge-top";
+const BLOCK_ALIGN_BOTTOM_CLASS = "typ-block-badge-bottom";
+const BLOCK_COLOR_VAR = "--typ-block-color";
 
-// noteTitleStyle: "none" | "dot" | "badge". Bei "badge" bestimmen zwei
-// weitere Einstellungen Farbe (noteTitleBadgeColored) und Position
-// (noteTitleBadgePosition: "title" | "block") - siehe settings.js, dort nur
-// bei "badge" überhaupt angezeigt (progressive Offenlegung). "dot" sitzt
-// immer am Titel, "badge" je nach Position entweder am Titel oder am
-// Property-Block (dort zusätzlich per noteTitleVerticalAlign oben/unten).
-// colorViews.noteTitleColor (Titeltext selbst einfärben) ist davon unabhängig
-// und beliebig kombinierbar.
+// noteTitleStyle: "none" | "dot" | "badge". For "badge", noteTitleBadgeColored
+// and noteTitleBadgePosition ("title" | "block", plus noteTitleVerticalAlign
+// for "block") refine it. colorViews.noteTitleColor (the title text itself) is
+// independent and combines with any of these.
 function resolveMarker(plugin, file) {
   const style = plugin.settings.noteTitleStyle;
   if (style === "none") return { kind: "none" };
   if (style === "dot") return { kind: "dot", ...resolveDot(plugin, file) };
 
-  // style === "badge" - farbig bei einem registrierten TYP ohne eigene Farbe
-  // in der grauen Standardfarbe (wie der Ring von resolveDot); ein nicht
-  // registrierter TYP bekommt farbig keine Box, wie auch keinen Punkt.
+  // "badge": colored, a registered TYP without a color gets the gray default
+  // (like the ring in resolveDot); an unregistered TYP gets no colored badge,
+  // just as it gets no dot.
   const { settings } = plugin;
-  const type = plugin.typIndex.typeOf(file);
-  if (!type) return { kind: "none" };
+  const typ = plugin.typIndex.typOf(file);
+  if (!typ) return { kind: "none" };
   const colored = settings.noteTitleBadgeColored;
-  if (colored && !settings.typeColors[type] && !settings.types.includes(type)) return { kind: "none" };
-  const typeColor = settings.typeColors[type] ?? DEFAULT_DOT_COLOR;
+  if (colored && !settings.typColors[typ] && !settings.typs.includes(typ)) return { kind: "none" };
+  const typColor = settings.typColors[typ] ?? DEFAULT_DOT_COLOR;
 
-  const label = badgeLabel(plugin, file, type);
+  const label = badgeLabel(plugin, file, typ);
   if (!label) return { kind: "none" };
-  const { text, useSubtypeColor, subtype } = label;
-  const color = colored ? (useSubtypeColor ? subtypeColor(settings, type, subtype) ?? typeColor : typeColor) : null;
+  const { text, useSubtypColor, subtyp } = label;
+  const color = colored ? (useSubtypColor ? subtypColor(settings, typ, subtyp) ?? typColor : typColor) : null;
   const position = settings.noteTitleBadgePosition;
-  return { kind: position === "block" ? "block-badge" : "title-badge", colored, color, typeName: text };
+  return { kind: position === "block" ? "block-badge" : "title-badge", colored, color, typName: text };
 }
 
-// Beschriftung der Box (noteTitleBadgeLabel) samt der dazu passenden Farbe:
-// [TYP] in TYP-Farbe, [Subtyp] in Subtyp-Farbe (ohne Subtyp keine Box -
-// dann null), [TYP/Subtyp] je nach Schalter "Subtyp-Farbe"
-// (colorViews.noteTitleMarkerSubtyp). Ein nicht registrierter SUBTYP-Wert
-// steht als Text da, hat aber keine eigene Farbe (subtypeColor liefert dann
-// die des TYPs).
-function badgeLabel(plugin, file, type) {
+// Badge label (noteTitleBadgeLabel) with its color: [TYP] in the TYP color,
+// [Subtyp] in the Subtyp color (no badge without a Subtyp), [TYP/Subtyp]
+// depending on the "Subtyp color" toggle (colorViews.noteTitleMarkerSubtyp).
+// An unregistered SUBTYP value is shown but has no color of its own
+// (subtypColor then returns the TYP color).
+function badgeLabel(plugin, file, typ) {
   const { settings } = plugin;
-  const subtype = plugin.typIndex.subtypeOf(file);
-  const mode = settings.noteTitleBadgeLabel ?? "type";
-  if (mode === "subtype") return subtype ? { text: subtype, useSubtypeColor: true, subtype } : null;
-  if (!subtype || mode === "type") return { text: type, useSubtypeColor: false, subtype };
-  return { text: `${type}/${subtype}`, useSubtypeColor: !!settings.colorViews.noteTitleMarkerSubtyp, subtype };
+  const subtyp = plugin.typIndex.subtypOf(file);
+  const mode = settings.noteTitleBadgeLabel ?? "typ";
+  if (mode === "subtyp") return subtyp ? { text: subtyp, useSubtypColor: true, subtyp } : null;
+  if (!subtyp || mode === "typ") return { text: typ, useSubtypColor: false, subtyp };
+  return { text: `${typ}/${subtyp}`, useSubtypColor: !!settings.colorViews.noteTitleMarkerSubtyp, subtyp };
 }
 
-// Farbpunkt am Titel - wie die Farbpunkte der TYP-View (siehe paintColorDot
-// in type-colors.js) beim Standardwert als hohler Ring: ein registrierter TYP
-// ohne Farbe grau, ein Subtyp ohne eigene Einstellung (mit dem Unter-Schalter
-// "Subtyp") in der TYP-Farbe, die er übernimmt. Nicht registrierte TYPen
-// bleiben wie in der TYP-Liste ohne Punkt.
+// Dot at the title. Like the dots in the TYP-Pane (paintColorDot in
+// typ-colors.js), a default is shown as a hollow ring: gray for a registered
+// TYP without a color, the inherited TYP color for a Subtyp without its own.
+// Unregistered TYP values get no dot, as in the TYP-List.
 function resolveDot(plugin, file) {
-  const type = plugin.typIndex.typeOf(file);
-  if (!type) return { color: null, hollow: false };
+  const typ = plugin.typIndex.typOf(file);
+  if (!typ) return { color: null, hollow: false };
   const { settings } = plugin;
-  const typeColor = settings.typeColors[type];
-  if (!typeColor) {
-    return settings.types.includes(type) ? { color: DEFAULT_DOT_COLOR, hollow: true } : { color: null, hollow: false };
+  const typColor = settings.typColors[typ];
+  if (!typColor) {
+    return settings.typs.includes(typ) ? { color: DEFAULT_DOT_COLOR, hollow: true } : { color: null, hollow: false };
   }
-  const subtype = plugin.typIndex.subtypeOf(file);
-  if (settings.colorViews.noteTitleMarkerSubtyp && subtype && getSubtype(settings, type, subtype)) {
-    return { color: subtypeColor(settings, type, subtype), hollow: !subtypeHasOwnColor(settings, type, subtype) };
+  const subtyp = plugin.typIndex.subtypOf(file);
+  if (settings.colorViews.noteTitleMarkerSubtyp && subtyp && getSubtyp(settings, typ, subtyp)) {
+    return { color: subtypColor(settings, typ, subtyp), hollow: !subtypHasOwnColor(settings, typ, subtyp) };
   }
-  return { color: typeColor, hollow: false };
+  return { color: typColor, hollow: false };
 }
 
-// Titel der Notiz selbst (.inline-title, sichtbar sofern Obsidians eigene
-// Einstellung "Inline-Titel anzeigen" aktiv ist). Bewusst als ::before
-// realisiert (siehe styles.css) statt als eigenes DOM-Element oder Wrapper:
-// .inline-title hängt in mehreren Themes (u. a. Minimal) per Kind-Selektor
-// (">") direkt an seinem Eltern-Container (z. B. für max-width/margin) - ein
-// zusätzliches Element davor oder ein Wrapper darum würde diese Regeln
-// unterwandern. Farbe und TYP-Name lassen sich einem ::before nicht direkt
-// zuweisen, daher der Umweg über eine CSS-Variable bzw. ein data-Attribut,
-// die die ::before-Regeln auslesen (var()/attr()).
+// The note's inline title. Done as ::before (see styles.css), not as an extra
+// element or wrapper: several themes (Minimal among them) style .inline-title
+// with child selectors, which an extra element would break. A ::before can't
+// be given a color or text directly, hence the CSS variable and the data
+// attribute that its rules read (var()/attr()).
 function applyStyleToTitle(titleEl, marker) {
   const isDot = marker.kind === "dot" && !!marker.color;
   const isBadge = marker.kind === "title-badge";
@@ -100,22 +90,18 @@ function applyStyleToTitle(titleEl, marker) {
   titleEl.classList.toggle(BADGE_CLASS, isBadge && marker.colored);
   titleEl.classList.toggle(BADGE_PLAIN_CLASS, isBadge && !marker.colored);
 
-  if (isBadge) titleEl.dataset.fredTyp = marker.typeName;
-  else delete titleEl.dataset.fredTyp;
+  if (isBadge) titleEl.dataset.typ = marker.typName;
+  else delete titleEl.dataset.typ;
 
   const markerColor = (isDot && marker.color) || (isBadge && marker.colored && marker.color) ? marker.color : null;
   if (markerColor) titleEl.style.setProperty(COLOR_VAR, markerColor);
   else titleEl.style.removeProperty(COLOR_VAR);
 }
 
-// Property-Block der Notiz (.metadata-container). Die "block"-Position von
-// noteTitleBadgePosition: dieselbe Box wie am Titel, aber um 90° gedreht
-// (writing-mode statt transform:rotate() - dadurch wächst die Box mit der
-// Textlänge in der richtigen Richtung, ohne die Positionierung per
-// transform-origin von Hand nachrechnen zu müssen) und links am Property-Block
-// statt am Titel verankert, oben oder unten (noteTitleVerticalAlign). Bleibt
-// beim (Ein-/Aus-)Blenden des Blocks (siehe Property-Block.css) automatisch
-// mit verschwinden/erscheinen, da sie als ::before darauf sitzt.
+// The note's property block (.metadata-container), for position "block": the
+// same badge, turned 90° (writing-mode rather than rotate(), so it grows with
+// the text in the right direction) and anchored left at the block, top or
+// bottom. As a ::before it hides and shows with the block (Property-Block.css).
 function applyStyleToBlock(plugin, blockEl, marker) {
   const isBlockBadge = marker.kind === "block-badge";
 
@@ -126,8 +112,8 @@ function applyStyleToBlock(plugin, blockEl, marker) {
   blockEl.classList.toggle(BLOCK_ALIGN_TOP_CLASS, isBlockBadge && align !== "bottom");
   blockEl.classList.toggle(BLOCK_ALIGN_BOTTOM_CLASS, isBlockBadge && align === "bottom");
 
-  if (isBlockBadge) blockEl.dataset.fredTyp = marker.typeName;
-  else delete blockEl.dataset.fredTyp;
+  if (isBlockBadge) blockEl.dataset.typ = marker.typName;
+  else delete blockEl.dataset.typ;
 
   const blockColor = isBlockBadge && marker.colored && marker.color ? marker.color : null;
   if (blockColor) blockEl.style.setProperty(BLOCK_COLOR_VAR, blockColor);

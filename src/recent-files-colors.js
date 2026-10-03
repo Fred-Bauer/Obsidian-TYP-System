@@ -1,10 +1,9 @@
-const { colorForFile } = require("./type-colors");
+const { colorForFile } = require("./typ-colors");
 
 const RECENT_FILES_VIEW_TYPE = "recent-files";
 
-// Recent Files setzt kein data-path-Attribut auf seine Zeilen. Es rendert seine
-// Liste aber ohne übersprungene Einträge direkt aus data.recentFiles, daher
-// lässt sich die Zeile über den Index eindeutig dem Pfad zuordnen.
+// Recent Files rows have no data-path, but the list is rendered straight from
+// data.recentFiles without skipping entries, so the index maps row to path.
 function applyRecentFilesColors(plugin) {
   for (const leaf of plugin.app.workspace.getLeavesOfType(RECENT_FILES_VIEW_TYPE)) {
     const recentFiles = leaf.view?.data?.recentFiles;

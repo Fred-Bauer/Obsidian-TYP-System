@@ -1,27 +1,25 @@
 const { Notice, TFile, stringifyYaml } = require("obsidian");
-const { getSubtypeNames } = require("./subtypes");
+const { getSubtypNames } = require("./subtyps");
 const { normalizeGlobalOrder, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./frontmatter-sort");
 const { askColumnOptions, askRemovals } = require("./base-dialogs");
+const { plural } = require("./typ-utils");
 
 /* ============================================================
- * Bases aus einem TYP erzeugen
- * Legt für einen TYP (bzw. einen Subtyp-Namen) eine .base im
- * Vault-Root an: Filter auf TYP, eine Table-View je Subtyp, und
- * Spalten, die sich aus dem TYP-Frontmatter plus der globalen
- * Property-Reihenfolge ergeben. Der zweite Befehl bringt die
- * Spalten einer bereits vorhandenen View auf denselben Stand.
+ * Bases from a TYP
+ * Creates a .base in the vault root for a TYP (or a Subtyp name):
+ * a TYP filter, one table view per Subtyp, and columns from the
+ * TYP-Frontmatter plus the global property order. The second
+ * command brings the columns of an existing view up to date.
  *
- * Geschrieben wird ausschließlich über Obsidians eigene
- * Bases-Schnittstelle bzw. deren eigene Serialisierung (siehe
- * writeViews) - nie über selbst geparstes YAML, sonst überlebten
- * Formelblöcke und Sonderschlüssel den Round-Trip nicht sicher.
+ * Writes only through Obsidian's own Bases API and serialization
+ * (see appendViews), never through self-parsed YAML - formula
+ * blocks and special keys wouldn't reliably survive the round trip.
  * ============================================================ */
 
-// Property-IDs einer View: im Speicher voll qualifiziert ("note.Titel",
-// "file.name", "formula.X"), in der Datei dagegen ohne das "note."-Präfix
-// ("Titel"). cfg.setOrder() erwartet die qualifizierte Form, ein selbst
-// gebautes View-Objekt für die Datei die verkürzte - serializeId() macht aus
-// der einen die andere.
+// View property ids are fully qualified in memory ("note.Titel", "file.name",
+// "formula.X") but stored without "note." in the file. cfg.setOrder() wants
+// the qualified form, a view object built for the file the short one -
+// serializeId() converts.
 const FILE_NAME_ID = "file.name";
 const NOTE_PREFIX = "note.";
 const TAGS_PROPERTY = "tags";
@@ -39,21 +37,18 @@ function sameId(a, b) {
   return a.toLowerCase() === b.toLowerCase();
 }
 
-// Ein Filter-Ausdruck, wie Bases ihn selbst schreibt: TYP == "MEDIA".
-// JSON.stringify liefert dabei die korrekt gequotete Zeichenkette - ein
-// Anführungszeichen im Namen (theoretisch möglich) bliebe sonst stehen und
-// machte den Ausdruck unlesbar.
+// A filter expression the way Bases writes it: TYP == "MEDIA". JSON.stringify
+// quotes correctly even if the name contains a quote.
 function equalsFilter(property, value) {
   return `${property} == ${JSON.stringify(String(value))}`;
 }
 
-/* --- TYP/Subtyp aus einem vorhandenen Filter lesen -----------------------
- * Eine generierte View trägt ihren TYP im Root- oder im View-Filter; der
- * Aktualisieren-Befehl liest ihn von dort, statt danach zu fragen. Gelesen
- * wird nur, was eindeutig ist: eine reine und-Verknüpfung mit genau einem
- * TYP- bzw. SUBTYP-Vergleich. Eine oder-Gruppe schränkt nicht zwingend ein
- * und ein zweiter, anderer Wert wäre widersprüchlich - beides führt zu null,
- * der Befehl fragt dann nach (siehe updateActiveView).
+/* --- Reading TYP/Subtyp from an existing filter --------------------------
+ * A generated view carries its TYP in the root or view filter; the update
+ * command reads it from there instead of asking. Only unambiguous filters
+ * count: a pure AND with exactly one TYP or SUBTYP comparison. An OR group
+ * doesn't necessarily restrict, and a second, different value contradicts -
+ * both give null and the command asks instead (see updateActiveView).
  * --------------------------------------------------------------------- */
 const EQUALS_PATTERN = new RegExp(`^\\s*(${TYP_PROPERTY}|${SUBTYP_PROPERTY})\\s*==\\s*(.+?)\\s*$`, "i");
 
@@ -82,51 +77,49 @@ function collectEquals(node, found) {
     for (const entry of node) collectEquals(entry, found);
     return;
   }
-  // Nur und-Verknüpfungen: was in einer oder-/nicht-Gruppe steht, sagt über
-  // den TYP der Treffer nichts Verlässliches aus.
+  // AND only: an OR/NOT group says nothing reliable about the TYP of the hits.
   if (node.and) collectEquals(node.and, found);
 }
 
 function readTarget(...filterGroups) {
   const found = { [TYP_PROPERTY]: new Set(), [SUBTYP_PROPERTY]: new Set() };
   for (const group of filterGroups) collectEquals(group, found);
-  const types = [...found[TYP_PROPERTY]];
-  const subtypes = [...found[SUBTYP_PROPERTY]];
-  if (types.length > 1 || subtypes.length > 1) return null;
-  if (types.length === 0 && subtypes.length === 0) return null;
-  return { type: types[0] ?? null, subtype: subtypes[0] ?? null };
+  const typs = [...found[TYP_PROPERTY]];
+  const subtyps = [...found[SUBTYP_PROPERTY]];
+  if (typs.length > 1 || subtyps.length > 1) return null;
+  if (typs.length === 0 && subtyps.length === 0) return null;
+  return { typ: typs[0] ?? null, subtyp: subtyps[0] ?? null };
 }
 
-/* --- Spalten eines Ziels ------------------------------------------------- */
+/* --- Columns of a target ------------------------------------------------- */
 
-// TYP und SUBTYP selbst werden nie Spalten (Filter bzw. Gruppierung sagen sie
-// ohnehin); die leere Platzhalter-Zeile des Frontmatter-Editors ebenso wenig.
+// TYP and SUBTYP never become columns (filter and grouping already show
+// them), nor does the editor's blank row.
 function isSystemKey(key) {
   return key === "" || sameId(key, TYP_PROPERTY) || sameId(key, SUBTYP_PROPERTY);
 }
 
-// Die Properties eines Blocks in ihrer gespeicherten Reihenfolge. Läuft über
-// collectBlocks() (main.js) und erbt damit dessen Regeln: der Subtyp-Block
-// folgt hinter dem TYP-Frontmatter, ein Key aus beiden behält die Position des
-// TYP-Frontmatters, und die Floating-Markierung des Subtyps schlägt die des
-// TYPs - ein Subtyp kann eine Standard-Property so gezielt abschalten.
-function blockKeys(plugin, type, subtype, includeFloating) {
-  const { defaults } = plugin.collectBlocks(type, subtype, includeFloating);
+// A block's properties in stored order, via collectBlocks() (main.js), so the
+// same rules apply: the Subtyp block follows the TYP-Frontmatter, a key in both
+// keeps the TYP-Frontmatter position, and the Subtyp's floating flag wins - a
+// Subtyp can keep a standard property out of its view that way.
+function blockKeys(plugin, typ, subtyp, includeFloating) {
+  const { defaults } = plugin.collectBlocks(typ, subtyp, includeFloating);
   return Object.keys(defaults).filter((key) => !isSystemKey(key));
 }
 
-// Alle TYPen, die einen Subtyp dieses Namens führen - in der Reihenfolge der
-// TYP-Liste. Derselbe Subtyp-Name darf unter mehreren TYPen vorkommen; eine
-// eigenständige Subtyp-Base filtert nur nach SUBTYP und zeigt sie deshalb alle.
-function typesForSubtype(plugin, subtype) {
-  return plugin.settings.types.filter((type) => getSubtypeNames(plugin.settings, type).includes(subtype));
+// Every TYP that has a Subtyp of this name, in TYP-List order. The same
+// Subtyp name may exist under several TYP entries; a standalone Subtyp Base
+// filters by SUBTYP only and so shows all of them.
+function typsForSubtyp(plugin, subtyp) {
+  return plugin.settings.typs.filter((typ) => getSubtypNames(plugin.settings, typ).includes(subtyp));
 }
 
-// Ein Ziel ist { type, subtype }:
-//   { type, subtype: null }  - der TYP selbst
-//   { type, subtype }        - ein Subtyp innerhalb seines TYPs
-//   { type: null, subtype }  - ein Subtyp-Name ohne TYP-Bindung (eigenständige
-//                              Subtyp-Base, Spalten als Vereinigung aller TYPen)
+// A target is { typ, subtyp }:
+//   { typ, subtyp: null }  - the TYP itself
+//   { typ, subtyp }        - a Subtyp within its TYP
+//   { typ: null, subtyp }  - a Subtyp name not bound to a TYP (standalone
+//                            Subtyp Base, columns merged across TYP entries)
 function targetKeys(plugin, target, options) {
   const seen = new Set();
   const main = [];
@@ -140,35 +133,32 @@ function targetKeys(plugin, target, options) {
     }
   };
 
-  if (!target.type) {
-    for (const type of typesForSubtype(plugin, target.subtype)) {
-      add(main, blockKeys(plugin, type, target.subtype, options.floating));
+  if (!target.typ) {
+    for (const typ of typsForSubtyp(plugin, target.subtyp)) {
+      add(main, blockKeys(plugin, typ, target.subtyp, options.floating));
     }
     return { main, others };
   }
 
-  add(main, blockKeys(plugin, target.type, target.subtype, options.floating));
-  // "Alle Subtyp-Properties" gilt nur für die TYP-View: in einer Subtyp-View
-  // blieben die Properties der übrigen Subtypen durchweg leer, eine Notiz hat
-  // ja höchstens einen SUBTYP. Die Keys des TYP-Frontmatters stehen schon in
-  // main und fallen über "seen" hier von selbst weg.
-  if (options.allSubtypes && !target.subtype) {
-    for (const subtype of getSubtypeNames(plugin.settings, target.type)) {
-      add(others, blockKeys(plugin, target.type, subtype, options.floating));
+  add(main, blockKeys(plugin, target.typ, target.subtyp, options.floating));
+  // Only for the TYP view: in a Subtyp view the other blocks would stay empty,
+  // since a note has at most one SUBTYP. Keys already in main drop out via
+  // "seen".
+  if (options.allSubtyps && !target.subtyp) {
+    for (const subtyp of getSubtypNames(plugin.settings, target.typ)) {
+      add(others, blockKeys(plugin, target.typ, subtyp, options.floating));
     }
   }
   return { main, others };
 }
 
-// Die fertige Spaltenliste: file.name zuerst, danach die globale
-// Property-Reihenfolge als Gerüst (siehe globalPropertyOrder in settings.js).
-// Deren Platzhalter bedeuten hier:
-//   "typ"                     - TYP-Frontmatter samt Subtyp-Block des Ziels
-//   "other"                   - die Properties der übrigen Subtyp-Blöcke
-//   "typValue"/"subtypValue"  - übersprungen, TYP/SUBTYP werden keine Spalten
-// Fest platzierte Einzel-Properties werden nur für tags berücksichtigt (und
-// nur, wenn im Dialog angehakt): cssclasses oder aliases sind als Spalte einer
-// Übersichtstabelle nicht gemeint.
+// The final column list: file.name first, then the global property order as
+// the frame. Its placeholders mean here:
+//   "typ"                     - TYP-Frontmatter plus the target's Subtyp block
+//   "other"                   - the properties of the other Subtyp blocks
+//   "typValue"/"subtypValue"  - skipped, TYP/SUBTYP are no columns
+// Of the pinned properties only tags counts (and only when checked):
+// cssclasses or aliases make no sense as columns of an overview table.
 function columnIds(plugin, target, options) {
   const { main, others } = targetKeys(plugin, target, options);
   const ids = [];
@@ -194,65 +184,63 @@ function columnIds(plugin, target, options) {
       for (const key of others) push(noteId(key));
     }
   }
-  // Sicherheitsnetz: steht tags gar nicht in der globalen Reihenfolge, landet
-  // es trotzdem am Ende, statt trotz gesetzter Option zu fehlen.
+  // Safety net: if tags isn't in the global order, it still goes last.
   if (options.tags && !tagsPlaced) push(noteId(TAGS_PROPERTY));
   return ids;
 }
 
-/* --- Views eines Ziels --------------------------------------------------- */
+/* --- Views of a target --------------------------------------------------- */
 
-// scoped: ob jede View ihren vollen Filter selbst tragen muss. In einer frisch
-// angelegten Base steht der TYP im Root-Filter und die Subtyp-Views ergänzen
-// nur SUBTYP; werden Views dagegen in eine bestehende, fremde Base ergänzt,
-// bleibt deren Root-Filter unangetastet und jede neue View filtert selbst.
+// scoped: whether each view must carry its full filter. In a new Base the TYP
+// sits in the root filter and Subtyp views only add SUBTYP. Views appended to
+// an existing Base leave its root filter alone and filter themselves.
 function targetViews(plugin, target, options, { scoped }) {
-  if (!target.type) {
+  if (!target.typ) {
     const view = {
       type: "table",
-      name: target.subtype,
+      name: target.subtyp,
       order: columnIds(plugin, target, options),
     };
-    if (scoped) view.filters = { and: [equalsFilter(SUBTYP_PROPERTY, target.subtype)] };
-    // Mehrere TYPen mit demselben Subtyp-Namen: die Gruppierung trennt sie,
-    // ohne dass die Base je TYP eine eigene View bräuchte.
-    if (typesForSubtype(plugin, target.subtype).length > 1) {
+    if (scoped) view.filters = { and: [equalsFilter(SUBTYP_PROPERTY, target.subtyp)] };
+    // Several TYP entries with this Subtyp name: grouping separates them
+    // without a view per TYP.
+    if (typsForSubtyp(plugin, target.subtyp).length > 1) {
       view.groupBy = { property: noteId(TYP_PROPERTY), direction: "ASC" };
     }
     return [view];
   }
 
-  const type = target.type;
-  const subtypes = getSubtypeNames(plugin.settings, type);
+  const typ = target.typ;
+  const subtyps = getSubtypNames(plugin.settings, typ);
   const main = {
     type: "table",
-    name: type,
-    order: columnIds(plugin, { type, subtype: null }, options),
+    name: typ,
+    order: columnIds(plugin, { typ, subtyp: null }, options),
   };
-  if (scoped) main.filters = { and: [equalsFilter(TYP_PROPERTY, type)] };
-  // Ohne Subtypen wäre die Gruppierung nach einer überall leeren Property nur
-  // eine Gruppe "ohne Wert" - dann bleibt sie weg.
-  if (subtypes.length > 0) main.groupBy = { property: noteId(SUBTYP_PROPERTY), direction: "ASC" };
+  if (scoped) main.filters = { and: [equalsFilter(TYP_PROPERTY, typ)] };
+  // Without any Subtyp, grouping by an always-empty property would only give
+  // one "no value" group.
+  if (subtyps.length > 0) main.groupBy = { property: noteId(SUBTYP_PROPERTY), direction: "ASC" };
 
   const views = [main];
-  for (const subtype of subtypes) {
+  for (const subtyp of subtyps) {
     views.push({
       type: "table",
-      name: subtype,
-      // allSubtypes ist in einer Subtyp-View bewusst aus (siehe targetKeys).
-      order: columnIds(plugin, { type, subtype }, { ...options, allSubtypes: false }),
+      name: subtyp,
+      // allSubtyps is always off in a Subtyp view (see targetKeys).
+      order: columnIds(plugin, { typ, subtyp }, { ...options, allSubtyps: false }),
       filters: {
         and: scoped
-          ? [equalsFilter(TYP_PROPERTY, type), equalsFilter(SUBTYP_PROPERTY, subtype)]
-          : [equalsFilter(SUBTYP_PROPERTY, subtype)],
+          ? [equalsFilter(TYP_PROPERTY, typ), equalsFilter(SUBTYP_PROPERTY, subtyp)]
+          : [equalsFilter(SUBTYP_PROPERTY, subtyp)],
       },
     });
   }
   return views;
 }
 
-// View-Objekt in der Form, in der es in der Datei steht: ohne "note."-Präfix
-// und in der Schlüsselreihenfolge, die Bases selbst schreibt.
+// A view object as it appears in the file: without "note." and with the key
+// order Bases itself writes.
 function serializeView(view) {
   const out = { type: view.type, name: view.name };
   if (view.filters) out.filters = view.filters;
@@ -263,15 +251,14 @@ function serializeView(view) {
   return out;
 }
 
-/* --- Datei öffnen und schreiben ------------------------------------------ */
+/* --- Opening and writing the file ---------------------------------------- */
 
 function waitFor(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-// Öffnet die Base und wartet, bis ihre Query geparst ist - erst dann lässt
-// sich über sie lesen und schreiben. Ist die Datei bereits in einem Tab offen,
-// wird der benutzt, statt einen zweiten danebenzulegen.
+// Opens the Base and waits until its query is parsed; only then can it be
+// read and written. Reuses a tab that already shows the file.
 async function openBase(app, file) {
   const open = app.workspace.getLeavesOfType("bases").find((leaf) => leaf.view?.file?.path === file.path);
   const leaf = open ?? app.workspace.getLeaf("tab");
@@ -281,46 +268,45 @@ async function openBase(app, file) {
   return leaf.view?.query ? leaf.view : null;
 }
 
-// Views in eine bestehende Base ergänzen. getSerializable() liefert genau die
-// Struktur, die Bases auch beim eigenen Speichern schreibt (nachgeprüft: der
-// Round-Trip gibt Bestandsdateien samt Formelblöcken und Sonderschlüsseln
-// byte-identisch zurück) - angefasst wird davon nur die views-Liste.
+// Appends views to an existing Base. getSerializable() returns exactly what
+// Bases writes when it saves (verified: the round trip reproduces existing
+// files byte for byte, formula blocks and special keys included); only the
+// views list is touched.
 async function appendViews(app, view, views) {
   const data = view.query.getSerializable();
   data.views = [...(data.views ?? []), ...views.map(serializeView)];
   await app.vault.modify(view.file, stringifyYaml(data));
 }
 
-/* --- Befehl: Base für TYP anlegen ---------------------------------------- */
+/* --- Command: Create Base for TYP ---------------------------------------- */
 
 async function createBase(plugin, target, options) {
   const app = plugin.app;
-  const name = target.subtype ?? target.type;
+  const name = target.subtyp ?? target.typ;
   const path = `${name}.${BASE_EXTENSION}`;
   const existing = app.vault.getAbstractFileByPath(path);
 
   if (existing && !(existing instanceof TFile)) {
-    new Notice(`"${path}" ist keine Datei - Base nicht angelegt.`);
+    new Notice(`"${path}" is not a file – Base not created.`);
     return;
   }
 
   if (!existing) {
     const views = targetViews(plugin, target, options, { scoped: false });
-    const root = target.type
-      ? { and: [equalsFilter(TYP_PROPERTY, target.type)] }
-      : { and: [equalsFilter(SUBTYP_PROPERTY, target.subtype)] };
+    const root = target.typ
+      ? { and: [equalsFilter(TYP_PROPERTY, target.typ)] }
+      : { and: [equalsFilter(SUBTYP_PROPERTY, target.subtyp)] };
     const file = await app.vault.create(path, stringifyYaml({ filters: root, views: views.map(serializeView) }));
     await openBase(app, file);
-    new Notice(`${path} angelegt: ${views.length} View(s).`);
+    new Notice(`Created ${path} with ${plural(views.length, "view")}.`);
     return;
   }
 
-  // Die Datei gibt es schon - ergänzt wird, was fehlt. Eine gleichnamige View
-  // bleibt unangetastet: sie könnte von Hand eingerichtet sein, und sie
-  // kommentarlos zu überschreiben wäre ein stiller Verlust.
+  // The file exists: add what is missing. A view with the same name stays
+  // untouched - it may be hand-made, and overwriting it would be a silent loss.
   const view = await openBase(app, existing);
   if (!view) {
-    new Notice(`${path} konnte nicht gelesen werden - Base nicht ergänzt.`);
+    new Notice(`Couldn't read ${path} – Base not updated.`);
     return;
   }
   const present = new Set(view.query.views.map((cfg) => cfg.name));
@@ -331,28 +317,27 @@ async function createBase(plugin, target, options) {
   if (toAdd.length > 0) await appendViews(app, view, toAdd);
 
   const parts = [];
-  parts.push(toAdd.length > 0 ? `${path}: ${toAdd.length} View(s) ergänzt.` : `${path}: nichts zu ergänzen.`);
-  if (skipped.length > 0) parts.push(`Bereits vorhanden und unangetastet: ${skipped.join(", ")}.`);
+  parts.push(toAdd.length > 0 ? `${path}: added ${plural(toAdd.length, "view")}.` : `${path}: nothing to add.`);
+  if (skipped.length > 0) parts.push(`Already present, left unchanged: ${skipped.join(", ")}.`);
   new Notice(parts.join(" "));
 }
 
 async function createBaseCommand(plugin) {
-  // includeManualOff: gerade für die nicht manuell vergebenen TYPen (KONTAKT,
-  // MEDIA, EXTERN) ist eine Base interessant. Nicht erfasste TYPen bleiben
-  // außen vor - für sie gibt es kein TYP-Frontmatter und damit keine Spalten.
-  const choice = await plugin.pickTypeAndSubtype({ includeManualOff: true });
+  // includeManualOff: a Base is especially useful for TYP entries that aren't
+  // set by hand (KONTAKT, MEDIA, EXTERN). Unregistered values are left out -
+  // they have no TYP-Frontmatter and so no columns.
+  const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true });
   if (!choice) return;
 
-  // Ein im Picker gewählter Subtyp meint die eigenständige Subtyp-Base: sie
-  // filtert nur nach SUBTYP und sammelt die Spalten über alle TYPen, die
-  // diesen Subtyp-Namen führen.
-  const target = choice.subtype ? { type: null, subtype: choice.subtype } : { type: choice.type, subtype: null };
+  // A Subtyp picked here means the standalone Subtyp Base: it filters by
+  // SUBTYP only and merges the columns of every TYP with that Subtyp name.
+  const target = choice.subtyp ? { typ: null, subtyp: choice.subtyp } : { typ: choice.typ, subtyp: null };
   const options = await askColumnOptions(plugin, target, (current) => columnIds(plugin, target, current));
   if (!options) return;
   await createBase(plugin, target, options);
 }
 
-/* --- Befehl: Spalten der Base-View aktualisieren -------------------------- */
+/* --- Command: Update columns of Base view -------------------------------- */
 
 function activeBaseView(plugin) {
   const leaf = plugin.app.workspace.activeLeaf ?? plugin.app.workspace.getMostRecentLeaf?.();
@@ -370,20 +355,19 @@ async function updateActiveView(plugin, view) {
   const viewName = view.controller?.viewName;
   const cfg = (viewName ? query.getViewConfig(viewName) : null) ?? query.views[0];
   if (!cfg) {
-    new Notice("Keine View aktiv.");
+    new Notice("No active view.");
     return;
   }
 
   let target = readTarget(serializeFilters(query.filters), serializeFilters(cfg.filters));
   if (!target) {
-    // Kein eindeutiger TYP im Filter (handgeschriebene oder-Gruppe, gar kein
-    // Filter): nachfragen - und die Antwort gleich als Filter hinterlegen,
-    // damit der nächste Lauf sie selbst liest.
-    const choice = await plugin.pickTypeAndSubtype({ includeManualOff: true });
+    // No unambiguous TYP in the filter (hand-written OR group, no filter at
+    // all): ask, and store the answer as a filter so the next run reads it.
+    const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true });
     if (!choice) return;
-    target = { type: choice.type, subtype: choice.subtype };
-    const and = [equalsFilter(TYP_PROPERTY, choice.type)];
-    if (choice.subtype) and.push(equalsFilter(SUBTYP_PROPERTY, choice.subtype));
+    target = { typ: choice.typ, subtyp: choice.subtyp };
+    const and = [equalsFilter(TYP_PROPERTY, choice.typ)];
+    if (choice.subtyp) and.push(equalsFilter(SUBTYP_PROPERTY, choice.subtyp));
     query.setViewFilters(cfg.name, { and });
   }
 
@@ -392,8 +376,8 @@ async function updateActiveView(plugin, view) {
 
   const desired = columnIds(plugin, target, options);
   const desiredLower = new Set(desired.map((id) => id.toLowerCase()));
-  // Ohne eigene order zeigt eine View alle Properties - dann gibt es nichts zu
-  // entfernen, die generierte Liste tritt schlicht an deren Stelle.
+  // A view without its own order shows every property - nothing to remove,
+  // the generated list simply takes its place.
   const current = Array.isArray(cfg.order) ? [...cfg.order] : [];
   const extras = current.filter((id) => !desiredLower.has(id.toLowerCase()));
 
@@ -404,8 +388,8 @@ async function updateActiveView(plugin, view) {
     kept = extras.filter((id) => !removals.has(id));
   }
 
-  // Behaltene Spalten bleiben vorn, direkt hinter file.name: was von Hand
-  // ergänzt wurde (Formel-Spalten etwa), soll nicht ans Ende rutschen.
+  // Kept columns stay up front, right after file.name: hand-added ones
+  // (formula columns, say) shouldn't slide to the end.
   const newOrder = [
     FILE_NAME_ID,
     ...kept.filter((id) => !sameId(id, FILE_NAME_ID)),
@@ -413,21 +397,21 @@ async function updateActiveView(plugin, view) {
   ];
 
   if (newOrder.length === current.length && newOrder.every((id, index) => id === current[index])) {
-    new Notice(`View "${cfg.name}": Spalten sind bereits aktuell.`);
+    new Notice(`View "${cfg.name}": columns are already up to date.`);
     return;
   }
 
   const added = desired.filter((id) => !current.some((existing) => sameId(existing, id))).length;
   const removed = extras.length - kept.length;
   cfg.setOrder(newOrder);
-  new Notice(`View "${cfg.name}": ${added} Spalte(n) ergänzt, ${removed} entfernt.`);
+  new Notice(`View "${cfg.name}": added ${plural(added, "column")}, removed ${removed}.`);
 }
 
 module.exports = {
   createBaseCommand,
   activeBaseView,
   updateActiveView,
-  // Für Tests/Entwicklung an einzelnen Bausteinen
+  // Exposed for testing single building blocks
   columnIds,
   readTarget,
   targetViews,

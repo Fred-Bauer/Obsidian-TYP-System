@@ -6,9 +6,8 @@ const production = process.argv[2] === "production";
 const context = await esbuild.context({
   entryPoints: ["src/main.js"],
   bundle: true,
-  // @codemirror/* stellt Obsidian zur Laufzeit selbst bereit (dieselben
-  // Instanzen wie der Editor) - mitgebündelte Kopien würden als fremde
-  // Klassen nicht erkannt.
+  // Obsidian provides @codemirror/* at runtime (the editor's own instances);
+  // bundled copies would be foreign classes it doesn't recognize.
   external: ["obsidian", "electron", "@codemirror/view", "@codemirror/state", "@codemirror/language"],
   format: "cjs",
   target: "es2020",

@@ -1,40 +1,30 @@
 const { moment } = require("obsidian");
 
-// Ein Shortcut ist ein Verweis auf einen erst beim Anlegen einer Notiz
-// berechneten Wert. Er steht bewusst NICHT im Frontmatter-Wert der Property,
-// sondern daneben - in settings.typeShortcuts[TYP][key] für das TYP-Frontmatter
-// bzw. im shortcuts-Objekt des jeweiligen Subtyp-Blocks (siehe subtypes.js):
-//   { name: "today" }            - fester Token, hier im Plugin aufgelöst
-//   { name: "tp.<Skriptname>" }  - Templater-Skript, nur von TYP.js auflösbar
-//   { name: "tp.<Skriptname>", args: { ordner: "Literatur", jahr: 2024 } }
-//     - dasselbe mit Argumenten. Die Parameternamen deklariert das Skript
-//       selbst im @typ-shortcut-Marker (siehe shortcut-scripts.js); TYP.js
-//       reicht das Objekt als ctx.args durch. Feste Token haben nie Argumente.
+// A shortcut is a value computed only when a note is created. It is stored
+// NEXT TO the property's frontmatter value, not in it: in
+// settings.typShortcuts[TYP][key] for the TYP-Frontmatter, or in the shortcuts
+// object of a Subtyp block (see subtyps.js):
+//   { name: "today" }            - fixed token, resolved by the plugin
+//   { name: "tp.<script>" }      - Templater script, only TYP.js can resolve it
+//   { name: "tp.<script>", args: { folder: "Literatur", year: 2024 } }
+//     - the same with arguments. The script declares the parameter names in
+//       its @typ-shortcut marker (see shortcut-scripts.js); TYP.js passes the
+//       object on as ctx.args. Fixed tokens never have arguments.
 //
-// Warum daneben statt im Wert: Obsidians Property-Widget bestimmt das
-// Eingabefeld einer Zeile aus dem in types.json deklarierten Typ der Property
-// (getTypeInfo im gebauten app.js). Bei einer als "date"/"number"/"checkbox"
-// deklarierten Property ist das ein <input type="date">, ein
-// <input type="number"> bzw. ein Toggle - dort ließ sich ein Token wie
-// "{{today}}" gar nicht erst eintippen, ein trotzdem gespeicherter Wert löste
-// Obsidians "Type mismatch"-Warnung aus, und das Listen-Widget machte aus einem
-// String beim ersten Bearbeiten stillschweigend ein Array (onChange(e.slice())).
-// Alle diese Probleme haben dieselbe Ursache: ein Fremdkörper in einem Slot,
-// dessen Datentyp Obsidian kontrolliert. Liegt der Shortcut daneben, bleibt der
-// Wert typrein und das native Widget unangetastet - es braucht dafür keinerlei
-// Eingriff in Obsidians Zeilen-Rendering.
+// Why next to the value: Obsidian picks a row's input from the property type
+// in types.json. A date/number/checkbox property can't take a token like
+// "{{today}}" at all, a stored one triggers the "Type mismatch" warning, and
+// the list widget silently turns a string into an array on first edit. Kept
+// apart, the value stays type-clean and the native widget untouched.
 //
-// Der Frontmatter-Wert der Property bleibt dabei erhalten und dient als
-// RÜCKFALLWERT: Schlägt das Templater-Skript fehl (fehlt oder wirft), schreibt
-// TYP.js ihn statt eines leeren Werts (siehe getTypeShortcuts in main.js und
-// die Auswertung in TYP.js). Ein Skript, das bewusst null/"" liefert - etwa bei
-// ESC im Picker -, gilt dagegen nicht als Fehlschlag und lässt die Property leer.
+// The frontmatter value stays and serves as FALLBACK: if the script is missing
+// or throws, TYP.js writes it instead of an empty value. A script that
+// deliberately returns null/"" (e.g. ESC in a picker) is not a failure and
+// leaves the property empty.
 
-// Die festen Token, die das Plugin selbst auflösen kann - ohne Templater und
-// ohne tp-Zugriff, daher schon in getTypeDefaults() (main.js) eingesetzt. Erst
-// beim Abruf aufgelöst, nicht beim Speichern, damit z. B. "today" bei jeder neu
-// angelegten Notiz das dann aktuelle Datum liefert statt des Tages, an dem der
-// Shortcut gesetzt wurde.
+// Tokens the plugin resolves itself, without Templater - so getTypDefaults()
+// fills them in. Resolved on each call, not when set, so "today" is the day
+// the note is created.
 const FIXED_SHORTCUTS = [
   {
     name: "today",
@@ -47,28 +37,24 @@ const FIXED_SHORTCUTS = [
     resolve: () => moment().format("YYYY-MM-DD HH:mm"),
   },
   {
-    // Anders als today/now nicht der Aufrufzeitpunkt, sondern das
-    // Erstellungsdatum der jeweiligen Datei (file.stat.ctime) - braucht daher
-    // die Ziel-Datei als Kontext (file-Parameter, von getTypeDefaults
-    // durchgereicht). Ohne Datei Fallback auf den aktuellen Zeitpunkt.
+    // The file's creation date (file.stat.ctime), not the call time; falls
+    // back to now without a file.
     name: "created",
     description: "Erstellungsdatum der Datei (JJJJ-MM-TT)",
     resolve: (file) => moment(file?.stat?.ctime ?? Date.now()).format("YYYY-MM-DD"),
   },
 ];
 
-// Skript-Shortcuts tragen diesen Präfix im name, damit ein Skript nie mit einem
-// festen Token kollidieren kann - auch dann nicht, wenn jemand eine Datei
-// "today.js" in den Templater-Skript-Ordner legt.
+// Script shortcuts carry this prefix so a script can never collide with a
+// fixed token, not even a "today.js" in the script folder.
 const SCRIPT_PREFIX = "tp.";
 
 function findFixedShortcut(name) {
   return FIXED_SHORTCUTS.find((shortcut) => shortcut.name === name) ?? null;
 }
 
-// Skriptname eines "tp.<Skriptname>"-Shortcuts, sonst null. Skriptname =
-// Dateiname in templater-scripts/ ohne ".js", daher auch mit Umlauten, "-"
-// oder Leerzeichen erlaubt.
+// Script name of a "tp.<script>" shortcut, otherwise null. The script name is
+// the file name without ".js", so umlauts, "-" and spaces are allowed.
 function scriptNameOf(name) {
   return typeof name === "string" && name.startsWith(SCRIPT_PREFIX) ? name.slice(SCRIPT_PREFIX.length) : null;
 }
@@ -77,27 +63,19 @@ function isScriptShortcut(record) {
   return scriptNameOf(record?.name) !== null;
 }
 
-// Anzeigeform eines Shortcuts - in der Property-Zeile (Chip) und im Auswahl-
-// Modal. Bewusst der nackte name ohne Zierrat: Früher stand der Shortcut als
-// "{{today}}" im Wert der Property, die geschweiften Klammern waren dort die
-// einzige Möglichkeit, ihn von einem festen Wert zu unterscheiden. Beides ist
-// weg - gespeichert wird { name }, TYP.js bekommt Struktur statt Text (siehe
-// getTypeShortcuts in main.js), und den Unterschied zum festen Wert macht jetzt
-// der Chip selbst samt Akzentfarbe. Die Klammern bildeten also nichts mehr ab.
+// Display form in the property row (chip) and the picker: the bare name plus
+// its arguments. The chip itself marks it as a shortcut, so no braces.
 function shortcutLabel(record) {
   if (!record?.name) return "";
-  const werte = Object.values(record.args ?? {}).filter((value) => value !== undefined);
-  return werte.length > 0 ? `${record.name}: ${werte.join(", ")}` : record.name;
+  const values = Object.values(record.args ?? {}).filter((value) => value !== undefined);
+  return values.length > 0 ? `${record.name}: ${values.join(", ")}` : record.name;
 }
 
-// Ein eingetipptes Argument in den Typ überführen, den es offensichtlich meint -
-// damit ein Skript "5" als Zahl und "true" als Boolean bekommt, statt jedes
-// Skript selbst casten zu lassen (wichtig z. B., wenn der Wert anschließend in
-// einer als Zahl deklarierten Property landet). Bewusst diese wenigen, klar
-// benannten Fälle statt JSON.parse: das würde bei "Literatur" ohnehin
-// scheitern und bei '"a"' etwas anderes liefern, als dort steht. Ein leeres
-// Feld heißt "nicht gesetzt" (undefined) und fällt aus dem Argument-Objekt
-// heraus, damit ein Skript sauber mit "args.jahr ?? fallback" arbeiten kann.
+// Converts a typed argument to the type it obviously means, so a script gets
+// 5 as a number and true as a boolean (matters when the value lands in a
+// number property). Deliberately these few cases instead of JSON.parse, which
+// would fail on "Literatur". An empty field means "not set" (undefined) and
+// drops out of the argument object, so "args.year ?? fallback" works.
 function parseArgValue(raw) {
   const text = String(raw ?? "").trim();
   if (text === "") return undefined;
@@ -108,100 +86,84 @@ function parseArgValue(raw) {
   return text;
 }
 
-// Namen, die in der Parameterliste eines Markers für Werte stehen, die das
-// Plugin bzw. TYP.js selbst kennt - sie werden nicht abgefragt, sondern beim
-// Aufruf eingesetzt:
-//   newFile  die neu angelegte Notiz
-//   ctx      der Kontext { typ, subtyp, key, werte, danach, args }
-//   key      die Property, an der der Shortcut hängt. Erspart es, ihren Namen
-//            als Argument zu wiederholen - ein Skript wie relation.js, das
-//            sich seine Property sagen lässt, bekommt damit automatisch die
-//            richtige, auch wenn derselbe Shortcut an einer anderen Zeile
-//            sitzt.
-// "tp" steht immer als erstes Argument und muss nicht deklariert werden; wird
-// es trotzdem genannt, wird es übergangen, statt es ein zweites Mal zu
-// übergeben.
+// Parameter names whose values the plugin or TYP.js already know; they are
+// filled in at call time, not asked for:
+//   newFile  the newly created note
+//   ctx      the context { typ, subtyp, key, values, after, args }
+//   key      the property the shortcut sits on, so a script like relation.js
+//            gets the right one wherever the shortcut is used
+// "tp" always comes first and needn't be declared; if it is, it is skipped.
 const RESERVED_PARAMS = ["newFile", "ctx", "key"];
 
-// Die Parameter, für die das Modal ein Eingabefeld zeigt: alles, was nicht
-// reserviert ist. params === null (kein Klammerpaar am Marker) heißt
-// "herkömmlicher Aufruf", also ebenfalls keine Felder.
+// Parameters that get an input field: everything not reserved. params === null
+// (marker without parentheses) means the classic call, also without fields.
 function inputParams(params) {
   return (params ?? []).filter((name) => name !== "tp" && !RESERVED_PARAMS.includes(name));
 }
 
-// Eingaben (je Parametername ein Text) in das gespeicherte Argument-Objekt.
-// params gibt die Reihenfolge vor, damit shortcutLabel() sie in der vom Skript
-// deklarierten Folge anzeigt; leere Felder fehlen im Ergebnis ganz.
-function buildArgs(params, eingaben) {
+// Inputs (one string per parameter) to the stored argument object, in the
+// declared order so shortcutLabel() shows them that way. Empty fields are left
+// out.
+function buildArgs(params, inputs) {
   const args = {};
   for (const name of inputParams(params)) {
-    const value = parseArgValue(eingaben[name]);
+    const value = parseArgValue(inputs[name]);
     if (value !== undefined) args[name] = value;
   }
   return args;
 }
 
-// Aus der deklarierten Parameterliste die Argumente für den Aufruf
-// f(tp, ...hier) bauen - aufgerufen von TYP.js, das als einziges newFile und
-// ctx kennt.
+// Builds the arguments for f(tp, ...here) from the declared parameter list.
+// Called from TYP.js, the only place that knows newFile and ctx.
 //
-// Ohne Klammern am Marker (params === null) bleibt es beim herkömmlichen
-// Aufruf f(tp, newFile, ctx). Sonst wird die Liste Eintrag für Eintrag
-// aufgelöst: reservierte Namen zu den übergebenen Werten, alle anderen zum
-// eingetippten Argument.
+// Without parentheses (params === null) it stays the classic f(tp, newFile,
+// ctx). Otherwise each entry resolves to the passed value (reserved names) or
+// the typed argument.
 //
-// Ein Punkt-Name ("options.typ") beschreibt kein eigenes Argument, sondern ein
-// FELD eines Objekt-Arguments: alle "options.*" sammeln sich zu einem einzigen
-// Objekt an der Position ihres ersten Vorkommens. Damit lassen sich auch
-// Skripte bedienen, deren Signatur ein Options-Objekt erwartet, ohne dass man
-// JSON in ein Eingabefeld tippen müsste. Nur eine Ebene tief - bei "a.b.c"
-// entstünde ein Feld, das wörtlich "b.c" heißt.
+// A dotted name ("options.typ") is a FIELD of an object argument: all
+// "options.*" collect into one object at the position of the first one. This
+// serves scripts that take an options object without typing JSON. One level
+// only - "a.b.c" gives a field literally named "b.c".
 function resolveCallArgs(params, args, reserved = {}) {
   if (params === null || params === undefined) return [reserved.newFile, reserved.ctx];
 
-  const werte = [];
-  const objektPosition = new Map();
+  const callArgs = [];
+  const objectIndex = new Map();
   for (const name of params) {
     if (name === "tp") continue;
     if (RESERVED_PARAMS.includes(name)) {
-      werte.push(reserved[name]);
+      callArgs.push(reserved[name]);
       continue;
     }
-    const punkt = name.indexOf(".");
-    if (punkt === -1) {
-      werte.push(args?.[name]);
+    const dot = name.indexOf(".");
+    if (dot === -1) {
+      callArgs.push(args?.[name]);
       continue;
     }
-    const basis = name.slice(0, punkt);
-    if (!objektPosition.has(basis)) {
-      objektPosition.set(basis, werte.length);
-      werte.push({});
+    const base = name.slice(0, dot);
+    if (!objectIndex.has(base)) {
+      objectIndex.set(base, callArgs.length);
+      callArgs.push({});
     }
-    const wert = args?.[name];
-    if (wert !== undefined) werte[objektPosition.get(basis)][name.slice(punkt + 1)] = wert;
+    const value = args?.[name];
+    if (value !== undefined) callArgs[objectIndex.get(base)][name.slice(dot + 1)] = value;
   }
-  return werte;
+  return callArgs;
 }
 
-// Ob die Property laut types.json (bzw., falls dort nicht gesetzt, laut ihrer
-// bisherigen Verwendung im Vault) eine Liste ist - dann wird ein aufgelöster
-// Shortcut-Wert einelementig eingepackt, damit der gelieferte Wert zum
-// deklarierten Typ der Property passt. Ohne app (z. B. in Tests) wie bisher
-// ohne Einpacken.
+// Whether types.json (or, if unset, the property's usage) declares a list.
+// Then a resolved shortcut value is wrapped in a one-element array to match.
+// Without app (tests) nothing is wrapped.
 function isListProperty(app, key) {
   return app?.metadataTypeManager?.getTypeInfo?.(key)?.expected?.type === "multitext";
 }
 
-// Kopie von frontmatter, in der jeder Key mit Shortcut seinen berechneten Wert
-// trägt:
-//   - fester Token -> aufgelöst (bei einer Listen-Property einelementig
-//     eingepackt),
-//   - "tp.<Skript>" -> null; nur Templater kann das auflösen, TYP.js holt sich
-//     diese Keys über getTypeShortcuts() und setzt sie selbst ein.
-// Keys ohne Shortcut bleiben unverändert - ebenso der Wert eines Keys MIT
-// Shortcut in den Settings selbst: er bleibt dort als Rückfallwert stehen (siehe
-// Kommentar oben) und wird hier nur überschrieben, nicht gelöscht.
+// Copy of frontmatter in which every key with a shortcut carries its value:
+//   - fixed token -> resolved (wrapped for list properties),
+//   - "tp.<script>" -> null; only Templater can resolve it, TYP.js gets these
+//     keys from getTypShortcuts() and fills them in itself.
+// Keys without a shortcut stay as they are. The stored value of a key WITH a
+// shortcut is only overridden here, never deleted - it is the fallback.
 function resolveShortcuts(frontmatter, shortcuts, { file, app } = {}) {
   const resolved = {};
   for (const [key, value] of Object.entries(frontmatter)) {

@@ -3,7 +3,7 @@
   "name": "TYP-System",
   "version": "0.0.0",
   "minAppVersion": "1.4.0",
-  "description": "Notiz-Typ-System (TYP/SUBTYP): TYP-Pane, TYP-Frontmatter, Frontmatter-Sortierung, Einfärbung nach TYP.",
+  "description": "Note TYP system (TYP/SUBTYP): TYP-Pane, TYP-Frontmatter, frontmatter sorting, coloring by TYP.",
   "author": "Fred",
   "isDesktopOnly": false
 }

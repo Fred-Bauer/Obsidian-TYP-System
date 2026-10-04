@@ -211,6 +211,7 @@ Applies to script shortcuts run by the plugin's commands and by TYP.js alike.
 ## Technical notes
 
 - `src/` is the source, `main.js` the esbuild bundle (`npm run dev` watches, `npm run build` builds once)
+- **Tests:** `npm install` once, then `npm test` – Node's built-in runner (`node:test`, `node:assert`), no framework. `test/frontmatter-text.test.js` covers `editFrontmatterText` (comment-preserving writes, see below): comments, lists, block scalars, case variants, quote styles, CRLF and mixed line endings, BOM, missing or empty blocks, aliases, flow mappings, complex and duplicate keys, the fallback and the skip cases. Outside Obsidian, `test/setup.js` redirects `require("obsidian")` to `test/obsidian-shim.js`; its `parseYaml`/`stringifyYaml`/`getFrontMatterInfo` behave like Obsidian 1.13.7, which bundles `yaml` 2.7.0 – the devDependency is pinned to that version, so check it again after an Obsidian update. `test/` isn't part of the bundle
 - In the code TYP and Subtyp are fixed terms too (`typ`, `subtyp`, plural `typs`/`subtyps`)
 - **TYP index** (`src/typ-index.js`): holds TYP and SUBTYP of every note (property names case-insensitive) and fires its own `change` event only on real TYP/SUBTYP changes; all coloring hangs on it, so typing triggers no recoloring. Caches the counts
 - **Frontmatter blocks** (`src/frontmatter-blocks.js`): one Obsidian property editor per block - the only way to allow the same key in several blocks. Keyboard navigation across blocks and dragging rows between blocks are added on top of Obsidian's own behavior

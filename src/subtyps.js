@@ -1,4 +1,5 @@
-const { typKeyOf, propertyValue, setCanonicalProperty, SUBTYP_PROPERTY } = require("./typ-index");
+const { typKeyOf, propertyValue, SUBTYP_PROPERTY } = require("./typ-index");
+const { editFrontmatter } = require("./frontmatter-text");
 
 // Subtyp names are title case per word (unlike TYP names, see
 // normalizeTypName): "kurz GESCHICHTE" -> "Kurz Geschichte". The SUBTYP
@@ -180,19 +181,20 @@ function mergeSubtyps(settings, typ, source, target) {
 }
 
 // Rewrites the SUBTYP of every note with TYP key `typ` and SUBTYP key oldKey
-// to the single value newValue - like renameTypInNotes() in typ-pane.js.
+// to the single value newValue - like renameTypInNotes() in typ-pane.js,
+// comment-preserving too. Returns { changed, skipped }.
 async function renameSubtypInNotes(plugin, typ, oldKey, newValue) {
   let changed = 0;
+  let skipped = 0;
   for (const file of plugin.typIndex.filesWithSubtyp(typ, oldKey)) {
-    let matched = false;
-    await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      if (typKeyOf(propertyValue(frontmatter, SUBTYP_PROPERTY)) !== oldKey) return;
-      setCanonicalProperty(frontmatter, SUBTYP_PROPERTY, newValue);
-      matched = true;
+    const { status } = await editFrontmatter(plugin.app, file, (doc) => {
+      if (typKeyOf(propertyValue(doc.toObject(), SUBTYP_PROPERTY)) !== oldKey) return;
+      doc.set(SUBTYP_PROPERTY, newValue);
     });
-    if (matched) changed++;
+    if (status === "changed") changed++;
+    else if (status === "skipped") skipped++;
   }
-  return changed;
+  return { changed, skipped };
 }
 
 module.exports = {

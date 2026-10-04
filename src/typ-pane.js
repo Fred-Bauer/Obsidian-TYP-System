@@ -7,6 +7,7 @@ const { moveTypSettings, deleteTypSettings } = require("./typ-settings");
 const { runOrReportError } = require("./commands");
 const { isBasesEnabled, createBaseFor } = require("./bases");
 const { runFrontmatterSort } = require("./frontmatter-sort");
+const { editFrontmatter, skippedText } = require("./frontmatter-text");
 const {
   normalizeSubtypName,
   getSubtypNames,
@@ -23,7 +24,7 @@ const {
   renameSubtypInNotes,
 } = require("./subtyps");
 const { normalizeTypName, compareTyps, sortTypsByMode, plural, joinAnd } = require("./typ-utils");
-const { typKeyOf, propertyValue, setCanonicalProperty, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
+const { typKeyOf, propertyValue, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 const {
   subtypColor,
   applyColorOffset,
@@ -76,19 +77,27 @@ const SORT_OPTIONS = [
 // registerTyp() (cleanup), renaming and merging. Matching is exact on the key,
 // so a list is replaced as a whole. A differently spelled property ("typ")
 // becomes "TYP".
+//
+// Only the TYP property's own lines change; comments and the rest of the
+// frontmatter stay as they are (see frontmatter-text.js). Returns { changed,
+// skipped }: skipped notes keep their old value because rewriting it would
+// lose a comment - the callers name them in their notice.
 async function renameTypInNotes(plugin, oldKey, newValue) {
   let changed = 0;
+  let skipped = 0;
   for (const file of plugin.typIndex.filesWithTyp(oldKey)) {
-    let matched = false;
-    await plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      if (typKeyOf(propertyValue(frontmatter, TYP_PROPERTY)) !== oldKey) return;
-      setCanonicalProperty(frontmatter, TYP_PROPERTY, newValue);
-      matched = true;
+    const { status } = await editFrontmatter(plugin.app, file, (doc) => {
+      if (typKeyOf(propertyValue(doc.toObject(), TYP_PROPERTY)) !== oldKey) return;
+      doc.set(TYP_PROPERTY, newValue);
     });
-    if (matched) changed++;
+    if (status === "changed") changed++;
+    else if (status === "skipped") skipped++;
   }
-  return changed;
+  return { changed, skipped };
 }
+
+// Result of renameTypInNotes/renameSubtypInNotes when no note has to change.
+const NO_NOTES = Object.freeze({ changed: 0, skipped: 0 });
 
 // Cleaned form of a raw value for registerTyp(): a single value trimmed and
 // uppercased; a list is deliberately NOT reduced to one item but joined into
@@ -199,14 +208,14 @@ class TypPane extends ItemView {
     this.render();
     this.refreshOtherViews();
 
-    if (result.renamed > 0) {
-      new Notice(`TYP ${result.typ} registered, ${plural(result.renamed, "note")} updated.`);
+    if (result.renamed > 0 || result.skipped > 0) {
+      new Notice(`TYP ${result.typ} registered, ${plural(result.renamed, "note")} updated.${skippedText(result.skipped, "updated")}`);
     }
   }
 
   // The core of registerTyp() without saving, re-rendering and notice, so
   // registerTypWithSubtyp() can register TYP and Subtyp in turn and then save
-  // and notify ONCE. Returns { typ, renamed }, or null if nothing usable is
+  // and notify ONCE. Returns { typ, renamed, skipped }, or null if nothing usable is
   // left.
   async applyTypRegistration(typKey) {
     const raw = this.plugin.typIndex.rawValueOf(typKey);
@@ -215,8 +224,9 @@ class TypPane extends ItemView {
     if (!this.plugin.settings.typs.includes(normalized)) {
       this.plugin.settings.typs.push(normalized);
     }
-    const renamed = normalized !== typKey ? await renameTypInNotes(this.plugin, typKey, normalized) : 0;
-    return { typ: normalized, renamed };
+    const { changed: renamed, skipped } =
+      normalized !== typKey ? await renameTypInNotes(this.plugin, typKey, normalized) : NO_NOTES;
+    return { typ: normalized, renamed, skipped };
   }
 
   // Colors and marks of every other view after a change made in this pane
@@ -989,7 +999,7 @@ class TypPane extends ItemView {
   async registerTypWithSubtyp(typKey, subtypKey) {
     const bucket = this.plugin.typIndex.subtypBucket(typKey);
     const typResult = this.plugin.settings.typs.includes(typKey)
-      ? { typ: typKey, renamed: 0 }
+      ? { typ: typKey, renamed: 0, skipped: 0 }
       : await this.applyTypRegistration(typKey);
     if (!typResult) return;
 
@@ -1003,7 +1013,10 @@ class TypPane extends ItemView {
     if (typResult.typ !== typKey) parts.push(`TYP ${typResult.typ}`);
     parts.push(`Subtyp ${subtypResult.subtyp}`);
     const changed = typResult.renamed + subtypResult.renamed;
-    new Notice(`${joinAnd(parts)} registered${changed > 0 ? `, ${plural(changed, "note")} updated` : ""}.`);
+    const skipped = typResult.skipped + subtypResult.skipped;
+    new Notice(
+      `${joinAnd(parts)} registered${changed > 0 ? `, ${plural(changed, "note")} updated` : ""}.${skippedText(skipped, "updated")}`
+    );
   }
 
   renderTypSettings(typ) {
@@ -1412,9 +1425,9 @@ class TypPane extends ItemView {
     const applyRename = async ({ withNotes }) => {
       renameSubtyp(this.plugin.settings, typ, subtyp, value);
       await this.plugin.saveSettings();
-      const renamed = withNotes ? await renameSubtypInNotes(this.plugin, typ, subtyp, value) : 0;
+      const { changed, skipped } = withNotes ? await renameSubtypInNotes(this.plugin, typ, subtyp, value) : NO_NOTES;
       this.refreshOtherViews();
-      if (withNotes) new Notice(`Subtyp ${value}: ${plural(renamed, "note")} updated.`);
+      if (withNotes) new Notice(`Subtyp ${value}: ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`);
       this.render();
     };
 
@@ -1441,9 +1454,11 @@ class TypPane extends ItemView {
         onConfirm: async () => {
           mergeSubtyps(this.plugin.settings, typ, subtyp, existing);
           await this.plugin.saveSettings();
-          const renamed = await renameSubtypInNotes(this.plugin, typ, subtyp, existing);
+          const { changed, skipped } = await renameSubtypInNotes(this.plugin, typ, subtyp, existing);
           this.refreshOtherViews();
-          new Notice(`Subtyp ${subtyp} merged into ${existing}, ${plural(renamed, "note")} updated.`);
+          new Notice(
+            `Subtyp ${subtyp} merged into ${existing}, ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`
+          );
           this.render();
         },
         onCancel: () => this.render(),
@@ -1544,11 +1559,16 @@ class TypPane extends ItemView {
     await this.plugin.saveSettings();
     this.refreshOtherViews();
     this.render();
-    if (result.renamed > 0) new Notice(`Subtyp ${result.subtyp} registered, ${plural(result.renamed, "note")} updated.`);
+    if (result.renamed > 0 || result.skipped > 0) {
+      new Notice(
+        `Subtyp ${result.subtyp} registered, ${plural(result.renamed, "note")} updated.${skippedText(result.skipped, "updated")}`
+      );
+    }
   }
 
   // Like applyTypRegistration: the core without saving and notice, so
-  // registerTypWithSubtyp() can bundle it. Returns { subtyp, renamed } or null.
+  // registerTypWithSubtyp() can bundle it. Returns { subtyp, renamed, skipped }
+  // or null.
   async applySubtypRegistration(typ, subtypKey, bucket) {
     const raw = bucket.rawByKey.get(subtypKey);
     const normalized = normalizeRawTyp(raw === undefined ? subtypKey : raw, normalizeSubtypName);
@@ -1557,8 +1577,9 @@ class TypPane extends ItemView {
     const subtyp = existing ?? normalized;
     ensureSubtyp(this.plugin.settings, typ, subtyp);
 
-    const renamed = subtyp !== subtypKey ? await renameSubtypInNotes(this.plugin, typ, subtypKey, subtyp) : 0;
-    return { subtyp, renamed };
+    const { changed: renamed, skipped } =
+      subtyp !== subtypKey ? await renameSubtypInNotes(this.plugin, typ, subtypKey, subtyp) : NO_NOTES;
+    return { subtyp, renamed, skipped };
   }
 
   // A new, empty Subtyp block right above the "Add Subtyp" button, its name
@@ -1686,8 +1707,8 @@ class TypPane extends ItemView {
       focus: "confirm",
       onConfirm: async () => {
         await this.renameTypSettings(typ, value);
-        const renamed = await renameTypInNotes(this.plugin, typ, value);
-        new Notice(`TYP ${value}: ${plural(renamed, "note")} updated.`);
+        const { changed, skipped } = await renameTypInNotes(this.plugin, typ, value);
+        new Notice(`TYP ${value}: ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`);
         this.render();
       },
       onCancel: () => this.render(),
@@ -1750,7 +1771,7 @@ class TypPane extends ItemView {
   // list stays in the list.
   async mergeTyp(source, target) {
     const settings = this.plugin.settings;
-    const renamed = await renameTypInNotes(this.plugin, source, target);
+    const { changed, skipped } = await renameTypInNotes(this.plugin, source, target);
 
     mergeTypSubtyps(settings, source, target);
     deleteTypSettings(settings, source);
@@ -1759,7 +1780,7 @@ class TypPane extends ItemView {
     if (this.selectedTyp === source) this.selectedTyp = target;
     await this.plugin.saveSettings();
     this.refreshOtherViews();
-    new Notice(`TYP ${source} merged into ${target}, ${plural(renamed, "note")} updated.`);
+    new Notice(`TYP ${source} merged into ${target}, ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`);
     this.render();
   }
 

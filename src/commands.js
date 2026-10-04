@@ -45,8 +45,13 @@ function registerCommands(plugin) {
       if (checking) return true;
 
       runOrReportError("Frontmatter sorting", async () => {
-        const changed = await sortSingleFileFrontmatter(plugin.app, plugin, file);
-        new Notice(changed ? `Sorted frontmatter of "${file.basename}".` : `Frontmatter of "${file.basename}" was already sorted.`);
+        const status = await sortSingleFileFrontmatter(plugin.app, plugin, file);
+        const messages = {
+          changed: `Sorted frontmatter of "${file.basename}".`,
+          unchanged: `Frontmatter of "${file.basename}" was already sorted.`,
+          skipped: `Frontmatter of "${file.basename}" couldn't be sorted without losing comments.`,
+        };
+        new Notice(messages[status]);
       })();
       return true;
     },

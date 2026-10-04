@@ -3,6 +3,7 @@ const { getSubtyp } = require("./subtyps");
 const { typKeyOf, propertyValue, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 const { plural } = require("./typ-utils");
 const { ConfirmModal, typNameNode } = require("./confirm-modal");
+const { editFrontmatter, skippedText } = require("./frontmatter-text");
 
 // The four placeholders of the global order; the order editor lets you move
 // them but not remove them. "typValue" is the TYP property itself,
@@ -135,20 +136,26 @@ function cacheNeedsSorting(app, file, globalOrder, typDefaultKeys) {
   return !cachedSorted.every((key, i) => key === cachedKeys[i]);
 }
 
+// Resolves to "changed", "unchanged" or "skipped" (see editFrontmatter).
 async function sortFileFrontmatter(app, file, globalOrder, typDefaultKeys) {
-  // processFrontMatter stays the source of truth for the actual write, since
-  // the cache can lag behind.
-  if (!cacheNeedsSorting(app, file, globalOrder, typDefaultKeys)) return false;
+  if (!cacheNeedsSorting(app, file, globalOrder, typDefaultKeys)) return "unchanged";
 
-  let changed = false;
-  await app.fileManager.processFrontMatter(file, (frontmatter) => {
-    changed = sortFrontmatterObject(frontmatter, globalOrder, typDefaultKeys);
+  // The file itself stays the source of truth for the actual write, since the
+  // cache can lag behind. Only whole properties move, together with the
+  // comments above them; every line keeps its text (see frontmatter-text.js).
+  const { status } = await editFrontmatter(app, file, (doc) => {
+    const existingKeys = doc.keys();
+    if (existingKeys.length <= 1) return;
+    const sortedKeys = computeSortedKeys(existingKeys, globalOrder, typDefaultKeys);
+    if (!sortedKeys.every((key, i) => key === existingKeys[i])) doc.reorder(sortedKeys);
   });
-  return changed;
+  return status;
 }
 
 // Sorts the processFrontMatter object in place: insertion order becomes the
 // YAML order, so all keys are deleted and re-added. Returns true on a change.
+// Only for the Templater API (sortFrontmatterFor); the plugin's own runs go
+// through sortFileFrontmatter.
 function sortFrontmatterObject(frontmatter, globalOrder, typDefaultKeys) {
   const existingKeys = Object.keys(frontmatter);
   if (existingKeys.length <= 1) return false;
@@ -199,6 +206,7 @@ function placePropertyFor(plugin, frontmatter, key) {
   return true;
 }
 
+// Resolves to "changed", "unchanged" or "skipped" (see editFrontmatter).
 async function sortSingleFileFrontmatter(app, plugin, file) {
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
   // An unclean TYP value (list, padded) has no TYP-Frontmatter; only the global
@@ -256,18 +264,21 @@ async function sortAllFrontmatter(app, plugin, onlyTyp) {
   const notice = candidates.length >= LARGE_SORT_THRESHOLD ? new Notice(progressText(0), 0) : null;
 
   let changed = 0;
+  let skipped = 0;
   try {
     for (const [index, { file, typDefaultKeys }] of candidates.entries()) {
       // sortFileFrontmatter checks the cache once more - a note may have been
       // sorted or edited since the count.
-      if (await sortFileFrontmatter(app, file, globalOrder, typDefaultKeys)) changed++;
+      const status = await sortFileFrontmatter(app, file, globalOrder, typDefaultKeys);
+      if (status === "changed") changed++;
+      else if (status === "skipped") skipped++;
       if (notice && (index + 1) % PROGRESS_STEP === 0) notice.setMessage(progressText(index + 1));
     }
   } finally {
     notice?.hide();
   }
 
-  return { checked, changed, hasTypDefaults };
+  return { checked, changed, skipped, hasTypDefaults };
 }
 
 // Resolves true for "Sort", false for Cancel, Escape or a click outside.
@@ -301,8 +312,8 @@ async function runFrontmatterSort(plugin, onlyTyp = null) {
   const { checked, candidates } = sortCandidates(plugin.app, plugin, onlyTyp);
   if (candidates.length >= LARGE_SORT_THRESHOLD && !(await confirmLargeSort(plugin, onlyTyp, candidates.length, checked))) return;
 
-  const { changed, hasTypDefaults, checked: checkedNow } = await sortAllFrontmatter(plugin.app, plugin, onlyTyp);
-  let message = sortSummary(onlyTyp ? `Frontmatter sorting ${onlyTyp}` : "Frontmatter sorting", checkedNow, changed);
+  const { changed, skipped, hasTypDefaults, checked: checkedNow } = await sortAllFrontmatter(plugin.app, plugin, onlyTyp);
+  let message = sortSummary(onlyTyp ? `Frontmatter sorting ${onlyTyp}` : "Frontmatter sorting", checkedNow, changed, skipped);
   // Not an error, but explains why nothing may have changed.
   if (hasTypDefaults === false) {
     message += ` Note: ${onlyTyp} has no TYP-Frontmatter, so only the global order was applied.`;
@@ -311,10 +322,14 @@ async function runFrontmatterSort(plugin, onlyTyp = null) {
 }
 
 // Result notice of a sorting run over many notes (runFrontmatterSort).
-function sortSummary(label, checked, changed) {
-  return changed > 0
-    ? `${label}: checked ${plural(checked, "note")}, sorted ${changed}.`
-    : `${label}: checked ${plural(checked, "note")}, all already sorted.`;
+// skipped: notes whose frontmatter couldn't be re-sorted without losing
+// comments (see frontmatter-text.js).
+function sortSummary(label, checked, changed, skipped = 0) {
+  const result =
+    changed > 0 || skipped > 0
+      ? `${label}: checked ${plural(checked, "note")}, sorted ${changed}.`
+      : `${label}: checked ${plural(checked, "note")}, all already sorted.`;
+  return result + skippedText(skipped, "re-sorted");
 }
 
 module.exports = {

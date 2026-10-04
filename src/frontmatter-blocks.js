@@ -1,5 +1,6 @@
 const { mountFrontmatterEditor, addBlankProperty, typStore, subtypStore } = require("./typ-frontmatter-editor");
 const { getSectionOrder, isEmptyValue } = require("./subtyps");
+const { attachPointerDrag } = require("./pointer-drag");
 
 /* ============================================================
  * The frontmatter blocks of a TYP in the TYP-Pane detail (see
@@ -90,18 +91,16 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
     renderFooter?.(section, footer, api);
 
     if (!isSub) continue;
-    blockEl.addEventListener("mousedown", (event) => startBlockDrag(event, section));
+    attachBlockDrag(blockEl, section);
   }
 
-  // Mouse drag instead of HTML5 draggable: a draggable ancestor broke text
-  // selection in the row inputs. Starts after a few pixels; an accent line
-  // shows the target gap, Escape cancels. The TYP-Frontmatter is fixed on top
-  // (see getSectionOrder), so target 0 doesn't exist.
-  function startBlockDrag(event, section) {
-    if (event.button !== 0 || !isGrabTarget(event.target)) return;
-    const win = wrapper.win;
-    const startY = event.clientY;
-    let dragging = false;
+  // Pointer drag (see pointer-drag.js) instead of HTML5 draggable: a
+  // draggable ancestor broke text selection in the row inputs, and HTML5 drag
+  // doesn't work on touch. Mouse: starts after a few pixels; touch: long press
+  // on the heading, footer or margin, then move. An accent line shows the
+  // target gap, Escape cancels. The TYP-Frontmatter is fixed on top (see
+  // getSectionOrder), so target 0 doesn't exist.
+  function attachBlockDrag(blockEl, section) {
     let indicator = null;
     let boxes = [];
     let targetIndex = null;
@@ -114,57 +113,45 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
       });
     };
 
-    const onMove = (moveEvent) => {
-      if (!dragging) {
-        if (Math.abs(moveEvent.clientY - startY) < 4) return;
-        dragging = true;
+    attachPointerDrag(blockEl, {
+      canStart: (event) => isGrabTarget(event.target),
+      onStart: () => {
+        targetIndex = null;
         wrapper.doc.body.addClass("typ-block-dragging");
-        win.getSelection()?.removeAllRanges();
-        blockEls.get(section).addClass("is-dragging");
+        blockEl.addClass("is-dragging");
         measure();
         indicator = wrapper.createDiv({ cls: "typ-block-drop-indicator" });
-      }
-      moveEvent.preventDefault();
-      const y = moveEvent.clientY - wrapper.getBoundingClientRect().top;
-      targetIndex = Math.max(1, boxes.filter((box) => (box.top + box.bottom) / 2 < y).length);
-      const from = boxes.findIndex((box) => box.section === section);
-      indicator.toggle(targetIndex !== from && targetIndex !== from + 1);
-      // Middle of the gap between two blocks (see .typ-block + .typ-block in
-      // styles.css).
-      const halfGap = 6;
-      const gapY =
-        targetIndex === boxes.length
-          ? boxes[boxes.length - 1].bottom + halfGap
-          : (boxes[targetIndex - 1].bottom + boxes[targetIndex].top) / 2;
-      indicator.style.top = `${gapY - 1}px`;
-    };
+      },
+      onMove: (event) => {
+        // Relative to the wrapper, so the boxes measured at the start stay
+        // valid while the pane auto-scrolls.
+        const y = event.clientY - wrapper.getBoundingClientRect().top;
+        targetIndex = Math.max(1, boxes.filter((box) => (box.top + box.bottom) / 2 < y).length);
+        const from = boxes.findIndex((box) => box.section === section);
+        indicator.toggle(targetIndex !== from && targetIndex !== from + 1);
+        // Middle of the gap between two blocks (see .typ-block + .typ-block in
+        // styles.css).
+        const halfGap = 6;
+        const gapY =
+          targetIndex === boxes.length
+            ? boxes[boxes.length - 1].bottom + halfGap
+            : (boxes[targetIndex - 1].bottom + boxes[targetIndex].top) / 2;
+        indicator.style.top = `${gapY - 1}px`;
+      },
+      onEnd: (commit) => {
+        wrapper.doc.body.removeClass("typ-block-dragging");
+        blockEl.removeClass("is-dragging");
+        indicator?.remove();
+        indicator = null;
 
-    const end = (commit) => {
-      win.removeEventListener("mousemove", onMove);
-      win.removeEventListener("mouseup", onUp);
-      win.removeEventListener("keydown", onKey, true);
-      if (!dragging) return;
-      wrapper.doc.body.removeClass("typ-block-dragging");
-      blockEls.get(section).removeClass("is-dragging");
-      indicator?.remove();
-
-      const order = boxes.map((box) => box.section);
-      const from = order.indexOf(section);
-      if (!commit || targetIndex === null || targetIndex === from || targetIndex === from + 1) return;
-      order.splice(from, 1);
-      order.splice(from < targetIndex ? targetIndex - 1 : targetIndex, 0, section);
-      onMoveSection?.(order);
-    };
-    const onUp = () => end(true);
-    const onKey = (keyEvent) => {
-      if (keyEvent.key !== "Escape") return;
-      keyEvent.preventDefault();
-      keyEvent.stopPropagation();
-      end(false);
-    };
-    win.addEventListener("mousemove", onMove);
-    win.addEventListener("mouseup", onUp);
-    win.addEventListener("keydown", onKey, true);
+        const order = boxes.map((box) => box.section);
+        const from = order.indexOf(section);
+        if (!commit || targetIndex === null || targetIndex === from || targetIndex === from + 1) return;
+        order.splice(from, 1);
+        order.splice(from < targetIndex ? targetIndex - 1 : targetIndex, 0, section);
+        onMoveSection?.(order);
+      },
+    });
   }
 
   registerPropertyDrag();
@@ -179,15 +166,20 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
    *
    *  - an empty extra child in the list while dragging: otherwise Obsidian
    *    doesn't start the drag in a block with a single row (its mousedown
-   *    checks n.firstChild !== n.lastChild);
+   *    and touchstart check n.firstChild !== n.lastChild);
    *  - a placeholder with the same .drag-ghost-hidden class in the target
    *    block once the cursor reaches another block; the source row is
    *    hidden meanwhile so there aren't two boxes;
    *  - a reorderKey per instance that moves the property to the other
    *    block on drop instead of sorting within its own.
    *
-   * Our handlers run in the capture phase on the window, before Obsidian's
-   * (which it adds to window in its mousedown handler).
+   * Our handlers are Pointer Events, which the browser sends before the
+   * mouse and touch events Obsidian listens to - so one set covers both:
+   * pointerdown (capture, on the wrapper) adds the spacer before Obsidian's
+   * mousedown/touchstart checks the list, pointerup (capture, on the
+   * window) keeps the target before Obsidian's mouseup/touchend drops. On
+   * touch Obsidian starts its drag after a long press on the type icon (250
+   * ms, then move); a swipe or tap on the icon is no drag.
    * -------------------------------------------------------------------- */
   function registerPropertyDrag() {
     // Without a second block there is no target; Obsidian's drag stays as is.
@@ -195,7 +187,7 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
     if (!anchor || sections.length < 2) return;
 
     // State of a running drag; drop keeps the target for the reorderKey call
-    // that follows the mouseup.
+    // that follows the mouseup/touchend.
     let drag = null;
     let drop = null;
 
@@ -213,9 +205,9 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
     };
 
     wrapper.addEventListener(
-      "mousedown",
+      "pointerdown",
       (event) => {
-        if (event.button !== 0) return;
+        if (!event.isPrimary || event.button !== 0) return;
         const rowEl = event.target.closest(".metadata-property-icon")?.closest(".metadata-property");
         const section = rowEl?.closest(".typ-block")?.typSection;
         const editor = section === undefined ? null : editors.get(section);
@@ -239,8 +231,11 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
 
     // On the window so a drag is tracked outside the blocks too; removed with
     // the first editor, which unloads on the next rebuild of the detail view.
+    // Only while Obsidian's drag really runs (its body class): before that,
+    // a press on the icon may still turn into a tap, and on touch the finger
+    // can move before the long press is over.
     const onWinMove = (event) => {
-      if (!drag) return;
+      if (!drag || !wrapper.doc.body.hasClass("is-grabbing")) return;
       const target = sectionAt(event.clientY);
       if (target === undefined || target === drag.section) {
         if (drag.placeholder) clearPlaceholder();
@@ -264,6 +259,8 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
       list.insertBefore(drag.placeholder, before ?? null);
     };
 
+    // pointercancel as well: Obsidian treats touchcancel like touchend and
+    // drops, so the target has to be kept then too.
     const onWinUp = () => {
       if (!drag) return;
       const { spacer, placeholder, rowEl, target } = drag;
@@ -277,11 +274,13 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
       wrapper.win.setTimeout(() => spacer.remove(), 0);
     };
 
-    wrapper.win.addEventListener("mousemove", onWinMove, true);
-    wrapper.win.addEventListener("mouseup", onWinUp, true);
+    wrapper.win.addEventListener("pointermove", onWinMove, true);
+    wrapper.win.addEventListener("pointerup", onWinUp, true);
+    wrapper.win.addEventListener("pointercancel", onWinUp, true);
     anchor.register(() => {
-      wrapper.win.removeEventListener("mousemove", onWinMove, true);
-      wrapper.win.removeEventListener("mouseup", onWinUp, true);
+      wrapper.win.removeEventListener("pointermove", onWinMove, true);
+      wrapper.win.removeEventListener("pointerup", onWinUp, true);
+      wrapper.win.removeEventListener("pointercancel", onWinUp, true);
     });
 
     for (const [section, editor] of editors) {
@@ -298,8 +297,8 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
   // Moves key from block `from` to block `to` at position index. If the target
   // already has the name (unique within a block), the two merge: the existing
   // entry keeps position, value, floating flag and shortcut; only an empty
-  // value is filled from the dragged one - same rule as mergeSubtyps
-  // (subtyps.js) and renameInStore (property-rename-sync.js).
+  // value is filled from the dragged one - same rule as mergeSubtyps and
+  // mergeTypSubtyps (subtyps.js) and renameInStore (property-rename-sync.js).
   async function moveProperty(from, to, key, index) {
     const source = stores.get(from);
     const target = stores.get(to);

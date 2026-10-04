@@ -1,11 +1,9 @@
 const { TFile } = require("obsidian");
-const { colorForFile, subtypColor, subtypHasOwnColor, setInlineColor } = require("./typ-colors");
+const { colorForFile, subtypColor, subtypHasOwnColor, setInlineColor, DEFAULT_TYP_COLOR } = require("./typ-colors");
 const { getSubtyp } = require("./subtyps");
 
 const DOT_CLASS = "typ-title-dot";
 const DOT_HOLLOW_CLASS = "typ-title-dot-hollow";
-// Same as DEFAULT_TYP_COLOR in typ-pane.js (a TYP without its own color).
-const DEFAULT_DOT_COLOR = "#888888";
 const BADGE_CLASS = "typ-title-badge";
 const BADGE_PLAIN_CLASS = "typ-title-badge-plain";
 const COLOR_VAR = "--typ-title-color";
@@ -33,7 +31,7 @@ function resolveMarker(plugin, file) {
   if (!typ) return { kind: "none" };
   const colored = settings.noteTitleBadgeColored;
   if (colored && !settings.typColors[typ] && !settings.typs.includes(typ)) return { kind: "none" };
-  const typColor = settings.typColors[typ] ?? DEFAULT_DOT_COLOR;
+  const typColor = settings.typColors[typ] ?? DEFAULT_TYP_COLOR;
 
   const label = badgeLabel(plugin, file, typ);
   if (!label) return { kind: "none" };
@@ -67,7 +65,7 @@ function resolveDot(plugin, file) {
   const { settings } = plugin;
   const typColor = settings.typColors[typ];
   if (!typColor) {
-    return settings.typs.includes(typ) ? { color: DEFAULT_DOT_COLOR, hollow: true } : { color: null, hollow: false };
+    return settings.typs.includes(typ) ? { color: DEFAULT_TYP_COLOR, hollow: true } : { color: null, hollow: false };
   }
   const subtyp = plugin.typIndex.subtypOf(file);
   if (settings.colorViews.noteTitleMarkerSubtyp && subtyp && getSubtyp(settings, typ, subtyp)) {

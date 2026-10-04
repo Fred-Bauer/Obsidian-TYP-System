@@ -7,6 +7,7 @@ const { moveTypSettings, deleteTypSettings } = require("./typ-settings");
 const { runOrReportError } = require("./commands");
 const { isBasesEnabled, createBaseFor } = require("./bases");
 const { runFrontmatterSort } = require("./frontmatter-sort");
+const { attachPointerDrag, gapIndexAt, showDropGap } = require("./pointer-drag");
 const { editFrontmatter, skippedText } = require("./frontmatter-text");
 const {
   normalizeSubtypName,
@@ -788,41 +789,41 @@ class TypPane extends ItemView {
     });
 
     // Only in manual sort mode (see render()): the whole row can be dragged
-    // (a drag starting on the dot or in the description field doesn't count -
-    // those take the mousedown themselves). Moves entries in settings.typs,
-    // the list that is the display order in manual mode.
+    // (see pointer-drag.js) - with the mouse after a few pixels, on touch
+    // after a long press. A drag starting on the dot or in the description
+    // field doesn't count, those take the press themselves; neither does a
+    // row being renamed, so the cursor can be placed in the name. Moves
+    // entries in settings.typs, the list that is the display order in manual
+    // mode. A long press without moving opens the context menu above.
     if (draggable) {
-      self.draggable = true;
-      self.addEventListener("dragstart", (event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", String(index));
-        self.classList.add("is-dragging");
-      });
-      self.addEventListener("dragend", () => self.classList.remove("is-dragging"));
-      self.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        const rect = self.getBoundingClientRect();
-        const isAfter = event.clientY - rect.top > rect.height / 2;
-        self.classList.toggle("is-drop-before", !isAfter);
-        self.classList.toggle("is-drop-after", isAfter);
-      });
-      self.addEventListener("dragleave", () => self.classList.remove("is-drop-before", "is-drop-after"));
-      self.addEventListener("drop", async (event) => {
-        event.preventDefault();
-        const isAfter = self.classList.contains("is-drop-after");
-        self.classList.remove("is-drop-before", "is-drop-after");
-
-        const fromIndex = Number(event.dataTransfer.getData("text/plain"));
-        if (Number.isNaN(fromIndex) || fromIndex === index) return;
-
-        let insertBefore = isAfter ? index + 1 : index;
-        if (fromIndex < insertBefore) insertBefore -= 1;
-
-        const typs = this.plugin.settings.typs;
-        const [moved] = typs.splice(fromIndex, 1);
-        typs.splice(insertBefore, 0, moved);
-        await this.plugin.saveSettings();
-        this.render();
+      self.typSortable = true;
+      let rows = [];
+      let gap = null;
+      attachPointerDrag(self, {
+        canStart: (event) =>
+          !this.isEditing && !event.target.closest(".typ-color-wrap, input, .is-being-renamed, [contenteditable='true']"),
+        longPressMenu: true,
+        onStart: () => {
+          rows = [...this.listEl.querySelectorAll(".tree-item-self")].filter((el) => el.typSortable);
+          gap = null;
+          self.addClass("is-dragging");
+        },
+        onMove: (event) => {
+          gap = gapIndexAt(rows, event.clientY);
+          // Right before or after itself the row wouldn't move.
+          showDropGap(rows, gap === index || gap === index + 1 ? null : gap);
+        },
+        onEnd: async (commit) => {
+          self.removeClass("is-dragging");
+          showDropGap(rows, null);
+          if (!commit || gap === null || gap === index || gap === index + 1) return;
+          const insertBefore = index < gap ? gap - 1 : gap;
+          const typs = this.plugin.settings.typs;
+          const [moved] = typs.splice(index, 1);
+          typs.splice(insertBefore, 0, moved);
+          await this.plugin.saveSettings();
+          this.render();
+        },
       });
     }
   }
@@ -1655,10 +1656,6 @@ class TypPane extends ItemView {
   // view (commitTypRename).
   startListRename(typ, self, nameEl, options = {}) {
     if (this.isEditing) return;
-    // A draggable row (manual sorting) would take the mouse away from the
-    // text - no cursor placement or selection in the name. render() rebuilds
-    // the row afterwards.
-    self.draggable = false;
     this.startInlineEdit(nameEl, {
       classEl: self,
       onFinish: (commit, text) => (commit ? this.commitTypRename(typ, text, options) : this.render()),

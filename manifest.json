@@ -2,7 +2,7 @@
   "id": "typ-system",
   "name": "TYP-System",
   "version": "0.0.0",
-  "minAppVersion": "1.4.0",
+  "minAppVersion": "1.13.0",
   "description": "Note TYP system (TYP/SUBTYP): TYP-Pane, TYP-Frontmatter, frontmatter sorting, coloring by TYP.",
   "author": "Fred",
   "isDesktopOnly": false

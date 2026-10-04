@@ -27,7 +27,8 @@ function normalizeSubtypName(raw) {
 
 // "Still to be filled": when two blocks or two properties merge, such a value
 // is filled from the other instead of overwriting the existing entry (see
-// mergeSubtyps here and renameInStore in property-rename-sync.js).
+// mergeSubtyps and mergeTypSubtyps here, moveProperty in
+// frontmatter-blocks.js and renameInStore in property-rename-sync.js).
 function isEmptyValue(value) {
   return value === null || value === undefined || value === "";
 }
@@ -92,9 +93,11 @@ function deleteTypSubtyps(settings, typ) {
 }
 
 // Merging two TYP entries: Subtyps only in source move over. Blocks with the
-// same name are combined - for a shared key the target's value and floating
-// flag win, keys only in source are appended. A moved key that is also in the
-// target's TYP-Frontmatter stays in both, which is the normal override.
+// same name are combined like mergeSubtyps does it: for a shared key the
+// target keeps position, value, floating flag and shortcut, only an empty
+// target value is filled from source; keys only in source are appended. A
+// moved key that is also in the target's TYP-Frontmatter stays in both, which
+// is the normal override.
 function mergeTypSubtyps(settings, source, target) {
   const sourceSubtyps = settings.typSubtyps?.[source];
   if (!sourceSubtyps) return;
@@ -105,10 +108,16 @@ function mergeTypSubtyps(settings, source, target) {
       settings.typSubtyps[target][name] = sourceData;
       continue;
     }
-    const targetLower = new Set(Object.keys(targetData.frontmatter).map((key) => key.toLowerCase()));
+    const targetKeys = new Map(Object.keys(targetData.frontmatter).map((key) => [key.toLowerCase(), key]));
     for (const [key, value] of Object.entries(sourceData.frontmatter)) {
-      if (key === "" || targetLower.has(key.toLowerCase())) continue;
+      if (key === "") continue;
+      const existing = targetKeys.get(key.toLowerCase());
+      if (existing !== undefined) {
+        if (isEmptyValue(targetData.frontmatter[existing])) targetData.frontmatter[existing] = value;
+        continue;
+      }
       targetData.frontmatter[key] = value;
+      targetKeys.set(key.toLowerCase(), key);
       if (sourceData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
       // The shortcut belongs to the key and moves with it.
       const shortcut = sourceData.shortcuts?.[key];

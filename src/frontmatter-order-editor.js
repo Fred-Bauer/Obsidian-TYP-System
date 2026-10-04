@@ -1,5 +1,6 @@
 const { setIcon, Notice } = require("obsidian");
 const { TYP_PROPERTY, SUBTYP_PROPERTY, runFrontmatterSort } = require("./frontmatter-sort");
+const { attachPointerDrag, gapIndexAt, showDropGap } = require("./pointer-drag");
 
 // Labels of the four placeholder rows; computeSortedKeys in frontmatter-sort.js
 // resolves what each one stands for.
@@ -20,7 +21,7 @@ const PLACEHOLDER_DESCRIPTIONS = {
 };
 
 // Editor for settings.globalPropertyOrder: a plain list of names with drag &
-// drop. It holds no values, so unlike typ-frontmatter-editor.js it needs no
+// drop (see pointer-drag.js). It holds no values, so unlike typ-frontmatter-editor.js it needs no
 // detour through Obsidian's private property widget. The placeholder rows can
 // be moved but not removed.
 function mountGlobalOrderEditor(containerEl, plugin) {
@@ -62,6 +63,10 @@ function mountGlobalOrderEditor(containerEl, plugin) {
     if (lower === TYP_PROPERTY.toLowerCase() || lower === SUBTYP_PROPERTY.toLowerCase()) return true;
     return order().some((other) => other !== ownEntry && other.kind === "property" && other.name.toLowerCase() === lower);
   };
+
+  // Rows taking part in the running drag and the gap it points to.
+  let rows = [];
+  let gap = null;
 
   const render = () => {
     listEl.empty();
@@ -139,40 +144,38 @@ function mountGlobalOrderEditor(containerEl, plugin) {
       // A draft has no place in the real list yet, so it can't be moved.
       if (isDraft) return;
 
-      row.draggable = true;
-      row.addEventListener("dragstart", (event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", String(index));
-        row.classList.add("is-dragging");
+      // Mouse: the whole row, after a few pixels (not in the name field, so
+      // its text stays selectable, nor on the remove button). Touch: only the
+      // grip, right away - the rest of the row scrolls the settings as usual.
+      // The grip is hidden for the mouse (see .typ-order-drag in styles.css).
+      attachPointerDrag(row, {
+        canStart: (event) =>
+          event.pointerType === "mouse"
+            ? !event.target.closest("input, .typ-order-remove")
+            : !!event.target.closest(".typ-order-drag"),
+        immediateTouch: true,
+        onStart: () => {
+          rows = [...listEl.children].filter((el) => el.typOrderIndex !== undefined);
+          gap = null;
+          row.addClass("is-dragging");
+        },
+        onMove: (event) => {
+          gap = gapIndexAt(rows, event.clientY);
+          // Right before or after itself the row wouldn't move.
+          showDropGap(rows, gap === index || gap === index + 1 ? null : gap);
+        },
+        onEnd: async (commit) => {
+          row.removeClass("is-dragging");
+          showDropGap(rows, null);
+          if (!commit || gap === null || gap === index || gap === index + 1) return;
+          const insertBefore = index < gap ? gap - 1 : gap;
+          const [moved] = order().splice(index, 1);
+          order().splice(insertBefore, 0, moved);
+          await plugin.saveSettings();
+          render();
+        },
       });
-      row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
-      row.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        // Upper or lower half decides before/after - otherwise nothing could
-        // be dropped below the last row.
-        const rect = row.getBoundingClientRect();
-        const isAfter = event.clientY - rect.top > rect.height / 2;
-        row.classList.toggle("is-drop-before", !isAfter);
-        row.classList.toggle("is-drop-after", isAfter);
-      });
-      row.addEventListener("dragleave", () => row.classList.remove("is-drop-before", "is-drop-after"));
-      row.addEventListener("drop", async (event) => {
-        event.preventDefault();
-        const isAfter = row.classList.contains("is-drop-after");
-        row.classList.remove("is-drop-before", "is-drop-after");
-
-        const fromIndex = Number(event.dataTransfer.getData("text/plain"));
-        if (Number.isNaN(fromIndex)) return;
-
-        // Target index counted before fromIndex is removed.
-        let insertBefore = isAfter ? index + 1 : index;
-        if (fromIndex < insertBefore) insertBefore -= 1;
-
-        const [moved] = order().splice(fromIndex, 1);
-        order().splice(insertBefore, 0, moved);
-        await plugin.saveSettings();
-        render();
-      });
+      row.typOrderIndex = index;
     });
   };
 

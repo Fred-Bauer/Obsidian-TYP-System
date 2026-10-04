@@ -343,13 +343,14 @@ body.typ-system-subtyps-right .typ-list-subtyps {
 }
 
 /* Manual sort mode (see SORT_OPTIONS/renderRegisteredItem in typ-pane.js) -
-   no grip icon, the whole row is draggable. */
+   no grip icon, the whole row is draggable (mouse; long press on touch, see
+   pointer-drag.js). */
 .typ-list .tree-item-self.is-dragging {
   opacity: 0.4;
 }
 
-/* Shows on which side of the row a dragged row would land - see the dragover
-   handler in renderRegisteredItem() and the same technique in
+/* Shows the gap a dragged row would land in - see showDropGap() in
+   pointer-drag.js and the same technique in
    .typ-order-row.is-drop-before/-after. */
 .typ-list .tree-item-self.is-drop-before {
   box-shadow: inset 0 2px 0 var(--interactive-accent);
@@ -1058,10 +1059,10 @@ input[type="range"].typ-subtyp-color-slider:disabled {
   opacity: 0.4;
 }
 
-/* Shows on which side of the row a dragged row would land - "before" (top
-   edge) or "after" (bottom edge), by the half the pointer is in (see
-   dragover in frontmatter-order-editor.js). Without it, dropping below the
-   last row wasn't visible. */
+/* Shows the gap a dragged row would land in - "before" (top edge of the row
+   below it) or "after" (bottom edge of the last row), see showDropGap() in
+   pointer-drag.js. Without "after", dropping below the last row wasn't
+   visible. */
 .typ-order-row.is-drop-before {
   box-shadow: inset 0 2px 0 var(--interactive-accent);
 }
@@ -1083,9 +1084,23 @@ input[type="range"].typ-subtyp-color-slider:disabled {
   padding: 0 !important;
 }
 
+/* The grip is for touch only (see frontmatter-order-editor.js): there it is
+   the only place a row can be dragged from, right away, while the rest of the
+   row scrolls. With a mouse the whole row drags, so no grip is shown. */
 .typ-order-drag {
-  cursor: grab;
+  display: none;
   color: var(--text-faint);
+  touch-action: none;
+}
+
+body.is-mobile .typ-order-drag {
+  display: flex;
+}
+
+@media (pointer: coarse) {
+  .typ-order-drag {
+    display: flex;
+  }
 }
 
 .typ-order-label {

@@ -1,4 +1,4 @@
-const { Modal, Setting } = require("obsidian");
+const { ButtonComponent, Modal, Setting } = require("obsidian");
 const { plural } = require("./typ-utils");
 
 /* ============================================================
@@ -22,18 +22,23 @@ function targetLabel(target) {
 
 /* --- Column options ------------------------------------------------------ */
 
-// Three toggles, all off by default (file.name plus TYP-Frontmatter is the
-// normal case), with a live preview of the resulting columns so a toggle's
+// Three toggles with a live preview of the resulting columns so a toggle's
 // effect needn't be guessed. "All Subtyp properties" only shows for a TYP
 // target: in a Subtyp view the other Subtyp blocks would stay empty.
+//
+// initial presets the toggles. Creating passes nothing - all off, file.name
+// plus TYP-Frontmatter is the normal case. Updating passes what the view's
+// current columns suggest (optionsFromColumns in bases.js); otherwise the
+// removal dialog would offer exactly the columns chosen when the Base was
+// created.
 class ColumnOptionsModal extends Modal {
-  constructor(plugin, target, preview, resolve) {
+  constructor(plugin, target, preview, initial, resolve) {
     super(plugin.app);
     this.plugin = plugin;
     this.target = target;
     this.preview = preview;
     this.resolve = resolve;
-    this.options = { floating: false, allSubtyps: false, tags: false };
+    this.options = { floating: false, allSubtyps: false, tags: false, ...initial };
     this.confirmed = false;
   }
 
@@ -87,8 +92,8 @@ class ColumnOptionsModal extends Modal {
   }
 }
 
-function askColumnOptions(plugin, target, preview) {
-  return new Promise((resolve) => new ColumnOptionsModal(plugin, target, preview, resolve).open());
+function askColumnOptions(plugin, target, preview, initial = null) {
+  return new Promise((resolve) => new ColumnOptionsModal(plugin, target, preview, initial, resolve).open());
 }
 
 /* --- Confirm removals ---------------------------------------------------- */
@@ -96,6 +101,11 @@ function askColumnOptions(plugin, target, preview) {
 // Adding and reordering columns happen silently; only removing is shown,
 // because only that loses something. Every entry starts checked; an unchecked
 // column is kept (at the front, see updateActiveView).
+//
+// The question is the title, as in the plugin's other confirmations
+// (confirm-modal.js). Not built on ConfirmModal, though: the action button
+// follows the checked columns in label and color. Like every dialog that
+// rewrites a file, it can't be switched off.
 class RemovalModal extends Modal {
   constructor(plugin, columns, viewName, resolve) {
     super(plugin.app);
@@ -109,28 +119,61 @@ class RemovalModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     this.modalEl.addClass("typ-base-removal-modal");
-    this.titleEl.setText(`Remove columns from "${this.viewName}"`);
+    this.titleEl.setText(`Remove columns from "${this.viewName}"?`);
     contentEl.createEl("p", {
       cls: "typ-base-removal-intro",
       text: "These columns don't belong to the TYP. Unchecked ones are kept.",
     });
 
+    // Checkboxes rather than toggles: a toggle reads as a setting that stays,
+    // a checkbox as a choice for this one run.
     for (const id of this.columns) {
-      new Setting(contentEl).setName(columnLabel(id)).addToggle((control) =>
-        control.setValue(true).onChange((value) => {
-          if (value) this.marked.add(id);
-          else this.marked.delete(id);
-        })
-      );
+      const setting = new Setting(contentEl).setName(columnLabel(id));
+      const label = setting.controlEl.createEl("label", { cls: "typ-base-removal-check" });
+      const checkbox = label.createEl("input", { type: "checkbox" });
+      checkbox.checked = true;
+      label.appendText("Remove");
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) this.marked.add(id);
+        else this.marked.delete(id);
+        this.updateConfirm();
+      });
     }
 
+    // Cancel drops the whole run (updateActiveView writes nothing), which
+    // the dialog itself wouldn't otherwise tell.
+    contentEl.createEl("p", {
+      cls: "typ-base-removal-note",
+      text: "Cancel discards the whole update, including adding and reordering columns.",
+    });
+
     const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
-    const confirm = buttonRow.createEl("button", { cls: "mod-cta", text: "Apply" });
-    confirm.addEventListener("click", () => {
+    this.cancelButton = new ButtonComponent(buttonRow).setButtonText("Cancel").onClick(() => this.close());
+    this.confirmButton = new ButtonComponent(buttonRow).onClick(() => {
       this.confirmed = true;
       this.close();
     });
+    this.updateConfirm();
+  }
+
+  // Focus on Cancel, as in the plugin's delete dialogs: Enter then only drops
+  // the run instead of removing columns from the file. Here, not in onOpen:
+  // Modal.open() focuses the first input (the first checkbox) after onOpen.
+  open() {
+    super.open();
+    this.cancelButton?.buttonEl.focus();
+  }
+
+  // "Remove 3 columns" in red while anything goes, "Keep all columns" as a
+  // plain confirmation once nothing is checked. setWarning() is
+  // setDestructive() plus setCta() since Obsidian 1.13 - the red button of
+  // ConfirmModal - and has no counterpart, hence the reset by class.
+  updateConfirm() {
+    const count = this.marked.size;
+    const button = this.confirmButton;
+    button.buttonEl.removeClass("mod-cta", "mod-destructive");
+    if (count > 0) button.setButtonText(`Remove ${plural(count, "column")}`).setWarning();
+    else button.setButtonText("Keep all columns").setCta();
   }
 
   onClose() {

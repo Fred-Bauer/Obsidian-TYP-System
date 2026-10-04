@@ -161,6 +161,38 @@ function targetKeys(plugin, target, options) {
   return { main, others };
 }
 
+// The column options a view's current columns suggest, to preset the column
+// dialog when updating (currentIds qualified, "note.x"). Without this the
+// dialog would start all off and the removal dialog would offer exactly the
+// columns chosen when the Base was created.
+//   tags       - the tags column exists
+//   floating   - a floating property of the target exists as a column
+//   allSubtyps - (TYP target only) a property of another Subtyp block exists
+//                as a column
+// A heuristic, on purpose: the view keeps no record of the options it was
+// built with.
+function optionsFromColumns(plugin, target, currentIds) {
+  const present = new Set(currentIds.map((id) => id.toLowerCase()));
+  const hasColumn = (key) => present.has(noteId(key).toLowerCase());
+
+  const fixed = new Set(
+    targetKeys(plugin, target, { floating: false, allSubtyps: false }).main.map((key) => key.toLowerCase())
+  );
+  const floatingKeys = targetKeys(plugin, target, { floating: true, allSubtyps: false }).main.filter(
+    (key) => !fixed.has(key.toLowerCase())
+  );
+
+  const options = {
+    floating: floatingKeys.some(hasColumn),
+    allSubtyps: false,
+    tags: hasColumn(TAGS_PROPERTY),
+  };
+  if (target.typ && !target.subtyp) {
+    options.allSubtyps = targetKeys(plugin, target, { floating: true, allSubtyps: true }).others.some(hasColumn);
+  }
+  return options;
+}
+
 // The final column list: file.name first, then the global property order as
 // the frame. Its placeholders mean here:
 //   "typ"                     - TYP-Frontmatter plus the target's Subtyp block
@@ -294,10 +326,32 @@ async function appendViews(app, view, views) {
 
 /* --- Command: Create Base for TYP ---------------------------------------- */
 
-async function createBase(plugin, target, options) {
+// Files and folders of the vault root whose name matches name ignoring case
+// but not exactly. getAbstractFileByPath() is case-sensitive, while Windows
+// and macOS treat "BUCH.base" and "Buch.base" as the same file - and Sync
+// would collide them on every other device.
+function caseVariants(app, name) {
+  const lower = name.toLowerCase();
+  return app.vault.getRoot().children.filter((file) => file.name !== name && file.name.toLowerCase() === lower);
+}
+
+// <TYP>.base, or <Subtyp>.base for a standalone Subtyp Base. A TYP BUCH and
+// a Subtyp Buch would share one file on Windows, so the Subtyp Base gets
+// " (Subtyp)" - but only when there actually is a clash: a TYP of that name
+// (registered, whether or not its Base exists yet) or a root .base file whose
+// name differs only in case. Then only the new name counts, with no fallback
+// to "Buch.base" - that one belongs to the TYP.
+function basePath(plugin, target) {
+  if (target.typ) return `${target.typ}.${BASE_EXTENSION}`;
+  const subtyp = target.subtyp;
+  const lower = subtyp.toLowerCase();
+  const typClash = plugin.settings.typs.some((typ) => typ.toLowerCase() === lower);
+  const fileClash = caseVariants(plugin.app, `${subtyp}.${BASE_EXTENSION}`).length > 0;
+  return typClash || fileClash ? `${subtyp} (Subtyp).${BASE_EXTENSION}` : `${subtyp}.${BASE_EXTENSION}`;
+}
+
+async function createBase(plugin, target, path, options) {
   const app = plugin.app;
-  const name = target.subtyp ?? target.typ;
-  const path = `${name}.${BASE_EXTENSION}`;
   const existing = app.vault.getAbstractFileByPath(path);
 
   if (existing && !(existing instanceof TFile)) {
@@ -352,9 +406,20 @@ async function createBaseCommand(plugin) {
 // The command after its picker, also the entry with a fixed target (context
 // menu of the TYP-List): column options, then create or complete the file.
 async function createBaseFor(plugin, target) {
+  const path = basePath(plugin, target);
+  // Only a file in a different case exists (an old Subtyp Base "Buch.base"
+  // when creating "BUCH.base", say): creating would fail on Windows, and
+  // writing into it would fill someone else's Base. Leave the decision to the
+  // user - checked before the dialog, so no options are chosen in vain.
+  const variant = plugin.app.vault.getAbstractFileByPath(path) ? null : caseVariants(plugin.app, path)[0];
+  if (variant) {
+    new Notice(`"${variant.name}" already exists in a different case – rename or delete it first.`);
+    return;
+  }
+
   const options = await askColumnOptions(plugin, target, (current) => columnIds(plugin, target, current));
   if (!options) return;
-  await createBase(plugin, target, options);
+  await createBase(plugin, target, path, options);
 }
 
 /* --- Command: Update columns of Base view -------------------------------- */
@@ -382,6 +447,9 @@ async function updateActiveView(plugin, view) {
   }
 
   let target = readTarget(serializeFilters(query.filters), serializeFilters(cfg.filters));
+  // Written only once every dialog is confirmed: cancelling must leave the
+  // view exactly as it was, filter included.
+  let pendingFilter = null;
   if (!target) {
     // No unambiguous TYP in the filter (hand-written OR group, no filter at
     // all): ask, and store the answer as a filter so the next run reads it.
@@ -390,10 +458,13 @@ async function updateActiveView(plugin, view) {
     target = { typ: choice.typ, subtyp: choice.subtyp };
     const and = [equalsFilter(TYP_PROPERTY, choice.typ)];
     if (choice.subtyp) and.push(equalsFilter(SUBTYP_PROPERTY, choice.subtyp));
-    query.setViewFilters(cfg.name, { and });
+    pendingFilter = { and };
   }
 
-  const options = await askColumnOptions(plugin, target, (current) => columnIds(plugin, target, current));
+  // Preset from the view's columns, so the options it was built with aren't
+  // offered for removal.
+  const initial = optionsFromColumns(plugin, target, Array.isArray(cfg.order) ? cfg.order : []);
+  const options = await askColumnOptions(plugin, target, (current) => columnIds(plugin, target, current), initial);
   if (!options) return;
 
   const desired = columnIds(plugin, target, options);
@@ -418,15 +489,20 @@ async function updateActiveView(plugin, view) {
     ...desired.filter((id) => !sameId(id, FILE_NAME_ID)),
   ];
 
+  // Filter before order, as before: both change the same parsed query, each
+  // call saves it.
+  if (pendingFilter) query.setViewFilters(cfg.name, pendingFilter);
+  const filterNote = pendingFilter ? "filter set, " : "";
+
   if (newOrder.length === current.length && newOrder.every((id, index) => id === current[index])) {
-    new Notice(`View "${cfg.name}": columns are already up to date.`);
+    new Notice(`View "${cfg.name}": ${filterNote}columns are already up to date.`);
     return;
   }
 
   const added = desired.filter((id) => !current.some((existing) => sameId(existing, id))).length;
   const removed = extras.length - kept.length;
   cfg.setOrder(newOrder);
-  new Notice(`View "${cfg.name}": added ${plural(added, "column")}, removed ${removed}.`);
+  new Notice(`View "${cfg.name}": ${filterNote}added ${plural(added, "column")}, removed ${removed}.`);
 }
 
 module.exports = {
@@ -436,7 +512,9 @@ module.exports = {
   activeBaseView,
   updateActiveView,
   // Exposed for testing single building blocks
+  basePath,
   columnIds,
+  optionsFromColumns,
   readTarget,
   targetViews,
 };

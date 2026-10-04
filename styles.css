@@ -1272,3 +1272,23 @@ input[type="range"].typ-subtyp-color-slider:disabled {
   font-size: var(--font-ui-smaller);
   margin-top: 0;
 }
+
+/* "[x] Remove" in place of a toggle: box and word as one click target. */
+.typ-base-removal-check {
+  align-items: center;
+  cursor: var(--cursor);
+  display: flex;
+  font-size: var(--font-ui-small);
+  gap: var(--size-2-2);
+}
+
+.typ-base-removal-check input[type="checkbox"] {
+  margin: 0;
+}
+
+/* What Cancel does, below the list and right above the buttons it explains. */
+.typ-base-removal-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: 0;
+}

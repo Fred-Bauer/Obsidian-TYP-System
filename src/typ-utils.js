@@ -86,4 +86,43 @@ function sortTypsByMode(typs, mode, counts, typColors) {
   return [...typs].sort((a, b) => compareTyps(mode, a, b, counts, typColors));
 }
 
-module.exports = { normalizeTypName, plural, joinAnd, pickerInstructions, hexToHue, compareTyps, sortTypsByMode };
+// Returns schedule(): runs fn at most once per animation frame, however often
+// it is called in between. schedule.cancel() drops a pending run; callers
+// register it with plugin.register() so nothing runs after unload.
+//
+// A frame and not a timer: a request made from an event, a timer or a
+// MutationObserver (scroll handlers included) still runs before the next paint,
+// so rows a virtualized list inserts are never painted uncolored. Only a
+// request made inside another frame callback waits one frame.
+//
+// The frame is taken from the focused window (Obsidian's activeWindow): a
+// hidden or minimized window gets no frames, and the change being reacted to
+// usually happens where the user is working, pop-out windows included.
+function coalesceFrame(fn) {
+  let frame = null;
+  let win = null;
+  const schedule = () => {
+    if (frame !== null) return;
+    win = window.activeWindow ?? window;
+    frame = win.requestAnimationFrame(() => {
+      frame = null;
+      fn();
+    });
+  };
+  schedule.cancel = () => {
+    if (frame !== null) win.cancelAnimationFrame(frame);
+    frame = null;
+  };
+  return schedule;
+}
+
+module.exports = {
+  normalizeTypName,
+  plural,
+  joinAnd,
+  pickerInstructions,
+  hexToHue,
+  compareTyps,
+  sortTypsByMode,
+  coalesceFrame,
+};

@@ -1,4 +1,5 @@
 const { colorForFile, setInlineColor } = require("./typ-colors");
+const { coalesceFrame } = require("./typ-utils");
 
 const BACKLINK_VIEW_TYPE = "backlink";
 
@@ -26,7 +27,9 @@ function applyBacklinkPaneColors(plugin) {
   for (const leaf of plugin.app.workspace.getLeavesOfType(BACKLINK_VIEW_TYPE)) {
     for (const lookup of getResultDomLookups(leaf.view)) {
       for (const [file, resultDom] of lookup) {
-        const titleEl = resultDom.el?.querySelector(".search-result-file-title .tree-item-inner");
+        // Rows out of view (virtualized list) are colored once inserted.
+        if (!resultDom.el?.isConnected) continue;
+        const titleEl = resultDom.el.querySelector(".search-result-file-title .tree-item-inner");
         if (titleEl) colorTitleEl(plugin, titleEl, file);
       }
     }
@@ -57,7 +60,10 @@ function applyBacklinkColors(plugin) {
 }
 
 function registerBacklinkColors(plugin) {
-  const refresh = () => applyBacklinkColors(plugin);
+  // One full round per frame at most, however many DOM changes and events come
+  // in between: one update of the pane brings a burst of DOM changes.
+  const refresh = coalesceFrame(() => applyBacklinkColors(plugin));
+  plugin.register(refresh.cancel);
 
   // Only the small sidebar pane is observed, never a markdown view: a subtree
   // observer near the editor fires on every keystroke and once froze this

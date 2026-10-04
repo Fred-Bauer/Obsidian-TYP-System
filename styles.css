@@ -1224,6 +1224,21 @@ input[type="range"].typ-subtyp-color-slider:disabled {
   color: var(--link-color-hover);
 }
 
+/* Markdown links ([text](Note.md)): Obsidian paints their text in Live Preview
+   with the external link color, set directly on ".cm-underline" (".markdown-
+   source-view.mod-cm6 .cm-link .cm-underline"), so that element needs a rule
+   of its own that wins over Obsidian's. Only internal links that resolve to a
+   note get the mark; they then look like wikilinks, hover included. */
+.cm-link .typ-link,
+.markdown-source-view.mod-cm6 .cm-link .typ-link .cm-underline {
+  color: var(--link-color);
+}
+
+.cm-link:hover .typ-link,
+.markdown-source-view.mod-cm6 .cm-link .typ-link .cm-underline:hover {
+  color: var(--link-color-hover);
+}
+
 /* ============================================================
    Base dialogs (see base-dialogs.js)
    ============================================================ */

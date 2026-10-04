@@ -1,4 +1,5 @@
 const { colorForFile, setInlineColor } = require("./typ-colors");
+const { coalesceFrame } = require("./typ-utils");
 
 const RECENT_FILES_VIEW_TYPE = "recent-files";
 
@@ -20,7 +21,10 @@ function applyRecentFilesColors(plugin) {
 }
 
 function registerRecentFilesColors(plugin) {
-  const refresh = () => applyRecentFilesColors(plugin);
+  // One full round per frame at most, however many DOM changes and events come
+  // in between. Rows are matched by index, so the whole (short) list is redone.
+  const refresh = coalesceFrame(() => applyRecentFilesColors(plugin));
+  plugin.register(refresh.cancel);
 
   const observer = new MutationObserver(refresh);
   const observeLeaves = () => {

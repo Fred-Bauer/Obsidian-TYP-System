@@ -3,6 +3,7 @@ const { ViewPlugin, Decoration } = require("@codemirror/view");
 const { Prec, RangeSetBuilder, StateEffect } = require("@codemirror/state");
 const { syntaxTree } = require("@codemirror/language");
 const { colorForFile, allDocuments } = require("./typ-colors");
+const { coalesceFrame } = require("./typ-utils");
 
 // Colors links in note text by the TYP of their target. Obsidian colors
 // internal links through var(--link-color), so only that variable is set per
@@ -14,7 +15,9 @@ const { colorForFile, allDocuments } = require("./typ-colors");
 //    callouts): real <a class="internal-link" data-href> elements ->
 //    markdown post-processor, once per link when rendered.
 //  - Live Preview/source mode: only CodeMirror spans over the raw text ->
-//    a ViewPlugin that looks at the visible range only.
+//    a ViewPlugin that looks at the visible range only. It finds wikilinks and
+//    Markdown links ([text](Note.md)), each only where Obsidian's parser sees
+//    a link.
 //
 // Recoloring otherwise only happens on a real TYP change (typIndex "change")
 // or a settings change, not on every save.
@@ -26,12 +29,39 @@ const SOURCE_ATTR = "data-typ-src";
 // links. Inside tables the alias pipe is escaped ("\|").
 const WIKILINK_PATTERN = /(?<!!)\[\[([^[\]]+?)\]\]/g;
 
-function colorForLinktext(plugin, linktext, sourcePath) {
-  const target = linktext.split(/\\?\|/)[0].trim();
+// [text](target), [text](<target with spaces>), [text](target "title").
+// Group 2 is the target; one level of parentheses inside it is allowed
+// ("Note%20(draft).md"). Embeds (![…](…)) are not links.
+const MD_LINK_PATTERN = /(?<!!)\[([^\]\n]*)\]\((<[^>\n]+>|[^()\s]+(?:\([^()\s]*\)[^()\s]*)*)(?:\s+"[^"\n]*")?\)/g;
+
+// Resolves a link target ("Note", "Note#Heading", "folder/Note.md") the way
+// Obsidian does and returns the TYP color of an existing note, else null.
+function colorForTarget(plugin, target, sourcePath) {
   const linkpath = getLinkpath(target);
   if (!linkpath) return null;
   const file = plugin.app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
   return colorForFile(plugin, file, "links");
+}
+
+function colorForLinktext(plugin, linktext, sourcePath) {
+  return colorForTarget(plugin, linktext.split(/\\?\|/)[0].trim(), sourcePath);
+}
+
+// The target of a Markdown link, read with Obsidian's own rules: <…>
+// unwrapped; internal only without a ":" (https:, obsidian:, mailto: … are
+// external) or as an explicit relative path; then URL-decoded ("%20"). A
+// target that can't be decoded is no link for Obsidian either.
+function colorForMarkdownTarget(plugin, rawTarget, sourcePath) {
+  const target = rawTarget.startsWith("<") ? rawTarget.slice(1, -1).trim() : rawTarget;
+  const internal = target.startsWith("./") || target.startsWith("../") || !target.includes(":");
+  if (!target || !internal) return null;
+  let decoded;
+  try {
+    decoded = decodeURI(target);
+  } catch {
+    return null;
+  }
+  return colorForTarget(plugin, decoded.trim(), sourcePath);
 }
 
 // --- Reading view -------------------------------------------------------
@@ -49,7 +79,20 @@ function applyToAnchor(plugin, anchorEl) {
 // Recolors links that are already rendered. The post-processor stores each
 // link's source note on it, which ambiguous link text needs to resolve.
 // Covers all windows (pop-outs included).
+//
+// Links rendered while the plugin was off (before it was enabled, or before a
+// reload) have no source yet; they get the note of the leaf they are shown in.
+// Only rendered Markdown is meant - the same links the post-processor sees.
+// Obsidian re-runs post-processors in reading view on its own, but not for
+// blocks Live Preview has already rendered (tables, callouts), so without
+// this they would stay uncolored until re-rendered.
 function refreshRenderedLinks(plugin) {
+  plugin.app.workspace.iterateAllLeaves((leaf) => {
+    const sourcePath = leaf.view.file?.path ?? "";
+    for (const anchorEl of leaf.view.containerEl.querySelectorAll(`.markdown-rendered a.internal-link:not([${SOURCE_ATTR}])`)) {
+      anchorEl.setAttribute(SOURCE_ATTR, sourcePath);
+    }
+  });
   for (const doc of allDocuments(plugin.app)) {
     for (const anchorEl of doc.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) applyToAnchor(plugin, anchorEl);
   }
@@ -79,6 +122,9 @@ function buildLinkViewPlugin(plugin) {
     const tree = syntaxTree(view.state);
     const builder = new RangeSetBuilder();
 
+    // RangeSetBuilder wants its ranges in order, and the two patterns are
+    // searched one after the other: collect, sort, then add.
+    const links = [];
     for (const { from, to } of view.visibleRanges) {
       const text = view.state.sliceDoc(from, to);
       WIKILINK_PATTERN.lastIndex = 0;
@@ -88,8 +134,27 @@ function buildLinkViewPlugin(plugin) {
         // out [[…]] in code blocks and inline code.
         if (!tree.resolveInner(start + 2, 1).name.includes("hmd-internal-link")) continue;
         const color = colorForLinktext(plugin, match[1], sourcePath);
-        if (color) builder.add(start, start + match[0].length, decorationFor(color));
+        if (color) links.push({ from: start, to: start + match[0].length, color });
       }
+      MD_LINK_PATTERN.lastIndex = 0;
+      for (let match; (match = MD_LINK_PATTERN.exec(text)); ) {
+        const start = from + match.index;
+        // The same check on the target ("[" text "](" comes before it): the
+        // parser marks it "string_url" only in a real link, never in code.
+        const targetNode = tree.resolveInner(start + match[1].length + 3, 1).name;
+        if (!targetNode.includes("string_url") || targetNode.includes("formatting")) continue;
+        const color = colorForMarkdownTarget(plugin, match[2], sourcePath);
+        if (color) links.push({ from: start, to: start + match[0].length, color });
+      }
+    }
+    links.sort((a, b) => a.from - b.from);
+    let end = -1;
+    for (const link of links) {
+      // Overlaps are hardly possible ([[…]] inside a Markdown link's text),
+      // but the builder would throw on one.
+      if (link.from < end) continue;
+      builder.add(link.from, link.to, decorationFor(link.color));
+      end = link.to;
     }
     return builder.finish();
   };
@@ -129,9 +194,7 @@ function buildLinkViewPlugin(plugin) {
 // CodeMirror's internal flag, 0 = idle; it is also non-zero while measuring)
 // is retried a frame later.
 function createEditorRefresher(plugin) {
-  let frame = null;
   const run = () => {
-    frame = null;
     let busy = false;
     plugin.app.workspace.iterateAllLeaves((leaf) => {
       const cm = leaf.view?.editor?.cm;
@@ -149,13 +212,8 @@ function createEditorRefresher(plugin) {
     });
     if (busy) schedule();
   };
-  const schedule = () => {
-    if (frame === null) frame = window.requestAnimationFrame(run);
-  };
-  plugin.register(() => {
-    if (frame !== null) window.cancelAnimationFrame(frame);
-    frame = null;
-  });
+  const schedule = coalesceFrame(run);
+  plugin.register(schedule.cancel);
   return schedule;
 }
 
@@ -170,8 +228,9 @@ function registerLinkColors(plugin) {
       applyToAnchor(plugin, anchorEl);
     }
   });
-  // Obsidian's ".cm-hmd-internal-link" span always ends up outside our mark,
-  // whatever the priority, so a rule in styles.css (.typ-link) sets the color.
+  // Obsidian's ".cm-hmd-internal-link" (wikilink) and ".cm-link" (Markdown
+  // link text) spans always end up outside our mark, whatever the priority, so
+  // rules in styles.css (.typ-link) set the color.
   // Lowest priority at least wraps ".cm-underline", covering the whole text.
   plugin.registerEditorExtension(Prec.lowest(buildLinkViewPlugin(plugin)));
 
@@ -181,14 +240,18 @@ function registerLinkColors(plugin) {
     refreshEditors();
   };
   plugin.registerEvent(plugin.typIndex.on("change", refresh));
+  // After enabling or a reload, links rendered earlier get their colors right
+  // away instead of waiting for a re-render.
+  plugin.app.workspace.onLayoutReady(() => refreshRenderedLinks(plugin));
   // Editor decorations go away with the extension on unload, the inline
-  // variables on rendered links don't.
+  // variables on rendered links don't. The source attribute stays, so the next
+  // load finds it.
   plugin.register(() => {
-    plugin.app.workspace.iterateAllLeaves((leaf) => {
-      for (const anchorEl of leaf.view.containerEl.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) {
+    for (const doc of allDocuments(plugin.app)) {
+      for (const anchorEl of doc.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) {
         anchorEl.style.removeProperty(COLOR_VAR);
       }
-    });
+    }
   });
   return refresh;
 }

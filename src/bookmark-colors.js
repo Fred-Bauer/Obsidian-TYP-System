@@ -1,4 +1,5 @@
 const { colorForFile, setInlineColor } = require("./typ-colors");
+const { coalesceFrame } = require("./typ-utils");
 
 const BOOKMARKS_VIEW_TYPE = "bookmarks";
 const BOOKMARKS_PLUGIN_ID = "bookmarks";
@@ -34,7 +35,10 @@ function applyBookmarksColors(plugin) {
 }
 
 function registerBookmarksColors(plugin) {
-  const refresh = () => applyBookmarksColors(plugin);
+  // One full round per frame at most, however many DOM changes and events come
+  // in between. Rows are looked up per bookmark, so the whole list is redone.
+  const refresh = coalesceFrame(() => applyBookmarksColors(plugin));
+  plugin.register(refresh.cancel);
 
   // Rows are re-rendered when groups expand/collapse or bookmarks change.
   const observer = new MutationObserver(refresh);

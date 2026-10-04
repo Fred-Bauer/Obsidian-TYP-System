@@ -1,20 +1,21 @@
 const { Notice } = require("obsidian");
-const { sortAllFrontmatter, sortSingleFileFrontmatter, sortSummary } = require("./frontmatter-sort");
+const { sortAllFrontmatter, sortSingleFileFrontmatter, sortTypFrontmatter, sortSummary } = require("./frontmatter-sort");
 const { isBasesEnabled, createBaseCommand, activeBaseView, updateActiveView } = require("./bases");
 
-function registerCommands(plugin) {
+// Obsidian neither awaits a command callback (or a menu item's onClick) nor
+// catches its errors, so an exception would vanish into the console. These
+// actions always end in a notice instead. Also used by the TYP-Pane's context
+// menu.
+const runOrReportError = (label, fn) => async () => {
+  try {
+    await fn();
+  } catch (error) {
+    console.error(`[${label}]`, error);
+    new Notice(`${label} failed: ${error.message}`);
+  }
+};
 
-  // Obsidian neither awaits a command callback nor catches its errors, so an
-  // exception would vanish into the console. These commands always end in a
-  // notice instead.
-  const runOrReportError = (label, fn) => async () => {
-    try {
-      await fn();
-    } catch (error) {
-      console.error(`[${label}]`, error);
-      new Notice(`${label} failed: ${error.message}`);
-    }
-  };
+function registerCommands(plugin) {
 
   plugin.addCommand({
     id: "sort-frontmatter-all",
@@ -33,13 +34,7 @@ function registerCommands(plugin) {
       // or not.
       const typ = await plugin.pickTyp({ includeManualOff: true, includeUnregistered: true });
       if (!typ) return;
-      const { checked, changed, hasTypDefaults } = await sortAllFrontmatter(plugin.app, plugin, typ);
-      let message = sortSummary(`Frontmatter sorting ${typ}`, checked, changed);
-      // Not an error, but explains why nothing may have changed.
-      if (hasTypDefaults === false) {
-        message += ` Note: ${typ} has no TYP-Frontmatter, so only the global order was applied.`;
-      }
-      new Notice(message);
+      await sortTypFrontmatter(plugin, typ);
     }),
   });
 
@@ -90,4 +85,4 @@ function registerCommands(plugin) {
 
 }
 
-module.exports = { registerCommands };
+module.exports = { registerCommands, runOrReportError };

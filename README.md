@@ -9,12 +9,17 @@ Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TY
 - Lists every registered TYP with color dot and note count. Sort button in the header: manual (drag & drop), by count, by name or by color
 - A second header button cycles what stands next to the name: the **Subtyp list** `(Subtyp 1, Subtyp 2)` in their colors (default), the **description** as an editable field, or **nothing**
   - Style Setting *Right-align Subtyp list* (Style Settings → TYP-System): the lists end right before the counts. The plugin triggers `parse-style-settings` on load so the section shows up reliably
-- **Registered TYP:** click opens the detail view, right-click searches `["TYP":"…"]`
+- **Registered TYP:** click opens the detail view. Right-click opens a menu:
+  - **Search notes** – searches `["TYP":"…"]`
+  - **Rename** / **Rename and update notes** – the name in the row becomes editable, right in the list; otherwise exactly as in the detail view (confirmation before notes are rewritten, an existing name offers a merge). The list stays open, also after a merge
+  - **Delete** – same confirmation and undo as in the detail view
+  - **Create Base** – the column dialog of "Create Base for TYP", for this TYP without the picker. Only while the Bases core plugin is on
+  - **Sort frontmatter for this TYP** – like the command, without the picker, with the same notice
 - Below a separator:
   - **Unregistered values** found in notes, muted. Click registers them: trimmed, uppercased, and the notes are rewritten. Padded values show in quotes (`" BUCH"`), lists in brackets (`[PERSON, BUCH]` → registered as `PERSON, BUCH`, then mergeable by renaming)
   - **Unregistered Subtyp:** every Subtyp value of the vault that isn't registered, as `TYP / Subtyp`, sorted by count. A registered TYP part keeps its color, toned down by the Style Setting *Color in unregistered Subtyp rows*. Click registers the Subtyp (and its TYP if needed), right-click searches. A SUBTYP without a TYP is ignored
   - **`[NO TYP]`:** notes without a TYP; click searches
-- "+" in the header adds a TYP, named inline
+- "+" in the header adds a TYP, named inline; an existing name (in any case) only shows a notice *TYP … already exists.*
 - Counts stay current: the list follows the TYP index and Obsidian's "Excluded files" list
 
 ## TYP-Pane detail
@@ -23,14 +28,17 @@ Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TY
 - **Confirmations** (delete, rename and update notes, merge – for TYPs and Subtyps alike) are Obsidian's own confirmation dialogs (`ConfirmationModal`, Obsidian 1.13+): [Cancel] [Action], a bottom sheet on phones. As in Obsidian's own "Merge property …?" dialog, the question is the title ("Delete TERMIN?", "Rename TERMIN to TERMINE?", "Merge Arzt into Praxis?"), with TYP and Subtyp names colored like in the TYP-List (or with a color dot when "TYP-Pane" coloring is off); the text below only adds what the title doesn't say (how many notes are updated, which properties are lost, what a merge does) and is left out otherwise. With a keyboard, the rename dialogs focus the action button (Enter confirms), delete and merge dialogs focus **Cancel**. Escape or a click outside cancels. The delete dialogs also offer **Don't ask again** on desktop (see [Undo](#undo))
 - **Merge:** renaming onto an existing TYP offers to merge. Notes move to the target; color, description and TYP-Frontmatter of the source are dropped; every Subtyp moves along, same-named blocks are combined (the target wins per key). If the target isn't manually creatable, every moved Subtyp is switched off too
 - **Manually creatable** (on by default) decides whether a TYP appears in the TYP-Picker. Switching a TYP off or on does the same for every Subtyp of it; switching one Subtyp on also switches its TYP on. A Subtyp is never creatable without its TYP
-- Options row: color (native picker, reset) and the description
+- Options row: color (native picker, reset) and the description. While the native picker is open, the color previews live but `data.json` is only written once the pointer rests for a moment and when the picker closes, not for every intermediate color
 - **TYP-Frontmatter:** Obsidian's own property widget. Properties every new note of this TYP gets, empty or with a fixed value. Command **"Add TYP-Frontmatter property"** adds one (in the open detail view, else for the active note's TYP)
 - **Floating properties:** italic rows within the same list (accent "+" button or right-click → *Floating*). They count for sorting but aren't created for new notes; Templater only gets them with `includeFloating: true`
 - **Subtyp blocks:** one block per Subtyp below the TYP-Frontmatter, same features. A Subtyp block adds to the TYP-Frontmatter for notes with that SUBTYP. A key may appear in several blocks; with the TYP-Frontmatter, the Subtyp overrides value, floating flag and shortcut, the row keeps the TYP-Frontmatter position. Rows can be dragged between blocks (an existing name merges), blocks can be reordered by dragging
   - **Add Subtyp** creates a block, named inline
-  - Footer: **Subtyp color** (dot with sliders *Hue* and *Lightness*, stored as an offset from the TYP color in OKLCH, so every Subtyp follows its TYP; limits under Settings → *Subtyp colors*), plus the same actions as the TYP header. Deleting only asks if properties would be lost (and only while *Confirm deletion* is on), and can be undone either way (see [Undo](#undo)); notes keep their SUBTYP
+  - Footer: **Subtyp color** (dot with sliders *Hue* and *Lightness*, stored as an offset from the TYP color in OKLCH, so every Subtyp follows its TYP; limits under Settings → *Subtyp colors*). Saved when the popover closes, and only if the color changed. While the TYP itself has no color there is nothing to offset from: the dot stays a hollow ring, the popover says *Set a color for TERMIN first.* and the sliders are locked. Next to it the same actions as the TYP header. Deleting only asks if properties would be lost (and only while *Confirm deletion* is on), and can be undone either way (see [Undo](#undo)); notes keep their SUBTYP
   - Every **unregistered Subtyp** of this TYP appears as an empty block: click registers, click on the name searches
 - Clickable names (title, block headings) search their notes and light up in accent color on hover
+- **Inline names** (new TYP or Subtyp, every rename in the list, the detail title or a block heading): Enter or leaving the field commits, Escape cancels. A field that disappears without the user leaving it (the pane closed, say) commits nothing
+- **Typing is never interrupted:** while the focus is in a field of the pane – an inline name, a description (list or detail view), a property name or value, or a property row of the editor's keyboard navigation – the pane doesn't rebuild. Changes arriving meanwhile (an edited note, Sync, a refresh from the settings, Undo) are shown as soon as the focus leaves the pane's fields; moving from field to field (Tab) keeps waiting. The native color picker doesn't hold anything back. The pane's own actions (back, delete, moving a block …) take effect at once
+- **No jumps:** editing a property keeps the focus where it is (Tab moves on to the next row), and every rebuild of the pane keeps the scroll position; only switching between list and detail view starts at the top
 
 ### Shortcuts
 
@@ -57,7 +65,7 @@ The shortcut is stored **next to** the value (`typShortcuts`, or `shortcuts` in 
 
 These actions change only plugin settings and show a notice with an **Undo** button for 8 seconds afterwards:
 
-- **Delete a TYP** – notes keep their TYP, which then shows as unregistered
+- **Delete a TYP** (detail header or the list's context menu) – notes keep their TYP, which then shows as unregistered
 - **Delete a Subtyp** – notes keep their SUBTYP
 - **Delete properties** from the TYP-Frontmatter or a Subtyp block (value, shortcut and floating flag go with them): *Property "key" removed from TERMIN.*
 - **Remove a shortcut**
@@ -144,5 +152,7 @@ The plugin has no Templater logic of its own but offers an API on `app.plugins.p
 - **Confirmation dialog** (`src/confirm-modal.js`): one `ConfirmModal` on top of Obsidian's public `ConfirmationModal` (since 1.13.0) for every confirmation; title and body take text and nodes, so names can be colored. Both callbacks run once the dialog has closed; the `dontAskAgain` option adds Obsidian's checkbox (`addCheckbox`, desktop only) and hands its state to `onConfirm`
 - **Undo** (`src/undo.js`): a `structuredClone` of the settings before the action, restored in place (the `plugin.settings` object stays the same). `saveSettings()` and `onExternalSettingsChange()` bump `plugin.settingsRevision`; an undo whose recorded revision no longer matches is refused
 - The TYP-Pane (view type `typ-system-pane`) reconnects itself after hot reload
+- **Refreshing views:** `plugin.refreshTypColors()` refreshes every view, the TYP-Pane included (rebuilt from the settings) – for changes made elsewhere (settings tab, property rename sync, Sync, Undo). The pane's own actions use `plugin.refreshTypColorsExcept(pane)` instead and update the pane themselves, calling `render()` only where it really has to rebuild (blocks moved, a color that Subtyp colors derive from). Above all a property edit no longer rebuilds the pane, which used to take the focus away. `render()` keeps the scroll position and is deferred while an inline name is being typed (`startInlineEdit`, the one implementation of every inline input in the pane). Refreshes from outside go through `requestRender()`, which additionally waits while the focus is in a field of the pane and catches up on `focusout` once the focus has left the fields
+- **Per-TYP settings** (`src/typ-settings.js`): one list of the tables keyed by TYP name (`typColors`, `typDescriptions`, `typDefaultFrontmatter`, `typFloatingKeys`, `typShortcuts`, `typManual`), used by renaming (`moveTypSettings`), deleting and merging (`deleteTypSettings`) - a table added later can't be forgotten in one of them. Subtyps follow through `subtyps.js`
 - **First start:** when the plugin is loaded without a `data.json` (`loadData()` resolves `null`, i.e. it has never saved settings in this vault), the TYP-Pane is created in the left sidebar and revealed. This happens once: afterwards a closed pane stays closed and only "Open TYP-Pane" brings it back. "Already created" is a marker in this device's `localStorage` for the vault (`app.saveLocalStorage("typ-system-pane-created")`), so a hot reload before the first save doesn't open the pane again. `data.json` is deliberately not written for this: with Obsidian Sync, a `data.json` full of defaults written on a second device before the real one arrives could replace the real settings. On another device (or after clearing the app's local data) the pane may therefore open once more if `data.json` hasn't arrived yet
 - The global property order uses its own plain list instead of Obsidian's widget: re-running `synchronize()` from `saveFrontmatter` can cause a stack overflow

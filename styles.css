@@ -789,6 +789,13 @@ body.typ-block-dragging * {
   min-width: 260px;
 }
 
+/* Shown instead of usable sliders while the TYP has no color of its own -
+   there is nothing to offset from (see openSubtypColorPopover). */
+.typ-subtyp-color-hint {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
 .typ-subtyp-color-row {
   display: grid;
   grid-template-columns: 6.5em 1fr 3.5em;
@@ -808,6 +815,13 @@ input[type="range"].typ-subtyp-color-slider {
   height: 8px;
   border-radius: 4px;
   background: var(--typ-track, var(--slider-track-background));
+}
+
+/* Locked (TYP without color, or a channel without range): visibly so - the
+   theme draws a disabled slider like an active one. */
+input[type="range"].typ-subtyp-color-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .typ-subtyp-add {

@@ -2,12 +2,14 @@ const { ItemView, Menu, Notice, setIcon, debounce } = require("obsidian");
 const { ConfirmModal, typNameNode, subtypNameNode } = require("./confirm-modal");
 const { snapshotSettings, offerUndo } = require("./undo");
 const { mountFrontmatterBlocks } = require("./frontmatter-blocks");
+const { moveTypSettings, deleteTypSettings } = require("./typ-settings");
+const { runOrReportError } = require("./commands");
+const { isBasesEnabled, createBaseFor } = require("./bases");
+const { sortTypFrontmatter } = require("./frontmatter-sort");
 const {
   normalizeSubtypName,
   getSubtypNames,
   ensureSubtyp,
-  moveTypSubtyps,
-  deleteTypSubtyps,
   mergeTypSubtyps,
   getSubtyp,
   isSubtypManual,
@@ -102,6 +104,14 @@ function normalizeRawTyp(raw, normalize = normalizeTypName) {
   return normalize(String(raw));
 }
 
+// Where typing happens in the pane: text fields, contenteditable names and
+// Obsidian's property editor (its rows themselves are focus stops of its
+// keyboard navigation - Tab from a value lands on the next row). The native
+// color picker doesn't count: it keeps the focus after closing, which would
+// hold back every refresh, and a refresh while it is open only closes it.
+const FIELD_SELECTOR = 'input, textarea, [contenteditable="true"], [contenteditable=""], .metadata-property';
+const isField = (el) => !!el?.matches?.(FIELD_SELECTOR) && !el.matches('input[type="color"]');
+
 // Shows an unregistered key: padding would be invisible as plain text, so it
 // gets quotes. Lists already carry their brackets in the key.
 function displayTypKey(typKey) {
@@ -134,6 +144,17 @@ class TypPane extends ItemView {
 
     this.contentEl.empty();
     this.contentEl.addClass("typ-system-pane");
+
+    // A refresh from outside that waited for a field (see requestRender) runs
+    // once the focus has left the fields of this pane - checked a tick later,
+    // when the focus has settled. Moving from field to field (Tab) keeps
+    // waiting.
+    this.registerDomEvent(this.contentEl, "focusout", (event) => {
+      if (!this._renderPending || isField(event.relatedTarget)) return;
+      window.setTimeout(() => {
+        if (this._renderPending && !this.hasFieldFocus()) this.render();
+      }, 0);
+    });
 
     this.registerDomEvent(this.contentEl, "keydown", (event) => {
       if (event.key === "Escape" && this.selectedTyp !== null) this.closeTypSettings();
@@ -175,7 +196,7 @@ class TypPane extends ItemView {
 
     await this.plugin.saveSettings();
     this.render();
-    this.plugin.refreshTypColors?.();
+    this.refreshOtherViews();
 
     if (result.renamed > 0) {
       new Notice(`TYP ${result.typ} registered, ${plural(result.renamed, "note")} updated.`);
@@ -197,6 +218,13 @@ class TypPane extends ItemView {
     return { typ: normalized, renamed };
   }
 
+  // Colors and marks of every other view after a change made in this pane
+  // (see refreshTypColorsExcept in main.js). This pane updates itself: either
+  // the change is already visible (a property edit) or the caller renders.
+  refreshOtherViews() {
+    this.plugin.refreshTypColorsExcept?.(this);
+  }
+
   // A new, empty tree item straight in edit mode - like Obsidian's own views
   // (a new bookmark group, say).
   startAdd() {
@@ -207,24 +235,55 @@ class TypPane extends ItemView {
     const self = treeItem.createDiv({ cls: "tree-item-self is-clickable" });
     const inner = self.createDiv({ cls: "tree-item-inner" });
 
-    this.startEditing(null, self, inner);
+    this.startInlineEdit(inner, {
+      classEl: self,
+      onFinish: async (commit, text) => {
+        const value = normalizeTypName(text);
+        if (commit && value) {
+          // Like a Subtyp that already exists (see startAddSubtyp): say so
+          // instead of letting the input vanish without a word.
+          const existing = this.plugin.settings.typs.find((t) => t.toLowerCase() === value.toLowerCase());
+          if (existing) {
+            new Notice(`TYP ${existing} already exists.`);
+          } else {
+            this.plugin.settings.typs.push(value);
+            await this.plugin.saveSettings();
+            this.refreshOtherViews();
+          }
+        }
+        this.render();
+      },
+    });
   }
 
-  // Like Obsidian's tree items: no extra input, the text element itself
-  // becomes contenteditable. typ === null means a new entry, otherwise a
-  // rename of that TYP.
-  startEditing(typ, self, inner) {
-    if (this.isEditing) return;
+  // Every inline input of the pane - a new TYP or Subtyp, renaming one in the
+  // list, the detail title or a block heading - works the same way, like
+  // Obsidian's tree items: no extra input, the text element itself becomes
+  // contenteditable. Enter commits, Escape cancels, leaving the field (blur)
+  // commits too. onFinish(commit, text) does the rest; it should end in
+  // render() or a dialog whose callbacks render.
+  //
+  //   classEl     - gets the classes (the whole row in the list)
+  //   classes     - marks the input state (styles.css, makeSearchable)
+  //   stopAllKeys - keeps every key from the surroundings, not only Enter and
+  //                 Escape (a block heading inside the property editors,
+  //                 whose keyboard navigation would react too)
+  //
+  // While the input runs, render() is deferred (see there) - a rebuild would
+  // remove the element, and the blur that follows would commit a half-typed or
+  // empty name.
+  startInlineEdit(el, { classEl = el, classes = ["is-being-renamed"], stopAllKeys = false, onFinish }) {
+    if (this.isEditing) return false;
     this.isEditing = true;
 
-    self.addClass("is-being-renamed");
-    inner.setAttribute("contenteditable", "true");
-    inner.setAttribute("spellcheck", "false");
-    inner.focus();
+    if (classes.length > 0) classEl.addClass(...classes);
+    el.setAttribute("contenteditable", "true");
+    el.setAttribute("spellcheck", "false");
+    el.focus();
 
-    const range = inner.doc.createRange();
-    range.selectNodeContents(inner);
-    const selection = inner.win.getSelection();
+    const range = el.doc.createRange();
+    range.selectNodeContents(el);
+    const selection = el.win.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
 
@@ -233,71 +292,48 @@ class TypPane extends ItemView {
       if (done) return;
       done = true;
       this.isEditing = false;
-
-      const value = normalizeTypName(inner.textContent);
-      if (commit && value && value !== typ) {
-        const exists = this.plugin.settings.typs.some(
-          (t) => t.toLowerCase() === value.toLowerCase() && t !== typ
-        );
-        if (!exists) {
-          if (typ === null) {
-            this.plugin.settings.typs.push(value);
-          } else {
-            const idx = this.plugin.settings.typs.indexOf(typ);
-            if (idx !== -1) this.plugin.settings.typs[idx] = value;
-            if (this.plugin.settings.typColors[typ] !== undefined) {
-              this.plugin.settings.typColors[value] = this.plugin.settings.typColors[typ];
-              delete this.plugin.settings.typColors[typ];
-            }
-            if (this.plugin.settings.typDescriptions[typ] !== undefined) {
-              this.plugin.settings.typDescriptions[value] = this.plugin.settings.typDescriptions[typ];
-              delete this.plugin.settings.typDescriptions[typ];
-            }
-            if (this.plugin.settings.typDefaultFrontmatter[typ] !== undefined) {
-              this.plugin.settings.typDefaultFrontmatter[value] = this.plugin.settings.typDefaultFrontmatter[typ];
-              delete this.plugin.settings.typDefaultFrontmatter[typ];
-            }
-            if (this.plugin.settings.typFloatingKeys[typ] !== undefined) {
-              this.plugin.settings.typFloatingKeys[value] = this.plugin.settings.typFloatingKeys[typ];
-              delete this.plugin.settings.typFloatingKeys[typ];
-            }
-            if (this.plugin.settings.typShortcuts[typ] !== undefined) {
-              this.plugin.settings.typShortcuts[value] = this.plugin.settings.typShortcuts[typ];
-              delete this.plugin.settings.typShortcuts[typ];
-            }
-            if (this.ensureTypManual()[typ] !== undefined) {
-              this.plugin.settings.typManual[value] = this.plugin.settings.typManual[typ];
-              delete this.plugin.settings.typManual[typ];
-            }
-            moveTypSubtyps(this.plugin.settings, typ, value);
-          }
-          await this.plugin.saveSettings();
-          this.plugin.refreshTypColors?.();
-        }
+      try {
+        await onFinish(commit, el.textContent ?? "");
+      } finally {
+        // A render requested during the input was only deferred. onFinish
+        // usually rendered already (which clears the flag); if it left the
+        // view to a dialog, catch up now.
+        if (this._renderPending) this.render();
       }
-      this.render();
     };
 
-    inner.addEventListener("keydown", (event) => {
+    el.addEventListener("keydown", (event) => {
+      if (stopAllKeys) event.stopPropagation();
       if (event.key === "Enter") {
         event.preventDefault();
+        event.stopPropagation();
         finish(true);
       } else if (event.key === "Escape") {
+        // stopPropagation, or the detail view's own Escape handler (see
+        // onOpen) would leave it as well.
         event.preventDefault();
+        event.stopPropagation();
         finish(false);
       }
     });
-
-    inner.addEventListener("blur", () => finish(true));
+    // A blur because the element left the DOM (the view closed, say) is no
+    // decision of the user's and must not commit. Checked a microtask later:
+    // while it is being removed, the element may still count as connected.
+    el.addEventListener("blur", () => queueMicrotask(() => finish(el.isConnected)));
+    return true;
   }
 
+  // Switching between list and detail view starts at the top; every other
+  // render() keeps the scroll position (see there).
   openTypSettings(typ) {
     this.selectedTyp = typ;
+    this._resetScroll = true;
     this.render();
   }
 
   closeTypSettings() {
     this.selectedTyp = null;
+    this._resetScroll = true;
     this.render();
   }
 
@@ -312,13 +348,46 @@ class TypPane extends ItemView {
     this.frontmatterBlocks = null;
   }
 
+  // Focus in one of the pane's fields (see isField).
+  hasFieldFocus() {
+    const active = this.contentEl.doc.activeElement;
+    return !!active && this.contentEl.contains(active) && isField(active);
+  }
+
+  // A rebuild requested from outside (registerTypPane: refreshTypColors(), an
+  // index change, Sync, Undo). While someone types in this pane - a
+  // description, a property, an inline name - it would throw the field away
+  // with text, cursor and focus, so it waits until the focus leaves the
+  // fields (see onOpen) or the inline input ends (see startInlineEdit). The
+  // pane's own actions call render() directly and take effect at once.
+  requestRender() {
+    if (this.hasFieldFocus()) {
+      this._renderPending = true;
+      return;
+    }
+    this.render();
+  }
+
   render() {
-    // Reentrancy guard: renderTypSettings() ends with refreshTypColors(),
-    // which via registerTypPane calls render() on every TYP-Pane leaf -
-    // including this one, still inside this call. Without the guard that
-    // recurses into a stack overflow on every TYP opened or renamed.
+    // Reentrancy guard: a render reached from inside render() must not
+    // rebuild the half-built view. It once recursed into a stack overflow on
+    // every TYP opened, when renderTypSettings() still ended with the full
+    // refreshTypColors() (it now calls only refreshFrontmatterHighlight).
     if (this._rendering) return;
+    // An inline input is running (see startInlineEdit): a rebuild now would
+    // throw it away mid-typing - and commit it through the blur. So the render
+    // (an index change, a refresh from elsewhere) waits for the input to end.
+    if (this.isEditing) {
+      this._renderPending = true;
+      return;
+    }
+    this._renderPending = false;
     this._rendering = true;
+    // The rebuild keeps the scroll position, so a long TYP doesn't jump to the
+    // top after every change; only switching between list and detail view
+    // starts at the top (openTypSettings/closeTypSettings).
+    const scrollTop = this._resetScroll ? 0 : this.contentEl.scrollTop;
+    this._resetScroll = false;
     try {
       this.destroyFrontmatterEditor();
       if (this.selectedTyp !== null) {
@@ -382,6 +451,7 @@ class TypPane extends ItemView {
 
       if (noTyp > 0) this.renderNoTypItem(noTyp);
     } finally {
+      this.contentEl.scrollTop = scrollTop;
       this._rendering = false;
     }
   }
@@ -501,33 +571,49 @@ class TypPane extends ItemView {
 
     const colorInput = colorWrap.createEl("input", { type: "color", cls: "typ-color-input" });
     colorInput.value = currentColor;
-    colorInput.addEventListener("click", (event) => event.stopPropagation());
 
     // "input" fires for every intermediate color while the native picker is
-    // open - only a local preview here. refreshTypColors() would re-render
-    // this view, remove this <input type=color> and close the native picker
+    // open - only a local preview here. Refreshing the views would re-render
+    // this one, remove this <input type=color> and close the native picker
     // before a color could even be chosen.
+    //
+    // Saving is bundled: data.json is written once the pointer rests for a
+    // moment (saveSoon) and at the latest on "change", not on every
+    // intermediate color.
     //
     // One undo snapshot per picker session: taken before the first
     // intermediate color, offered once the choice is confirmed ("change").
+    // Cleared when the picker opens, so a session that ended without "change"
+    // (back to the old color, or cancelled) leaves no stale snapshot behind.
+    const saveSoon = debounce(() => this.plugin.saveSettings(), 400, true);
     let undoSnapshot = null;
-    colorInput.addEventListener("input", async () => {
+    colorInput.addEventListener("click", (event) => {
+      event.stopPropagation();
+      undoSnapshot = null;
+    });
+    colorInput.addEventListener("input", () => {
       undoSnapshot ??= snapshotSettings(this.plugin);
       showState(colorInput.value, false);
       this.plugin.settings.typColors[typ] = colorInput.value;
-      await this.plugin.saveSettings();
       onChange?.(colorInput.value);
+      saveSoon();
     });
 
     // Once the choice is confirmed and the picker closed, a re-render can't
-    // break anything any more.
-    colorInput.addEventListener("change", () => {
+    // break anything any more. The pending save is done right here instead -
+    // before offerUndo(), which records the settings revision of this save
+    // (a later debounced save would void the undo at once).
+    colorInput.addEventListener("change", async () => {
+      saveSoon.cancel();
       const snapshot = undoSnapshot;
       undoSnapshot = null;
+      await this.plugin.saveSettings();
       if (snapshot && snapshot.typColors[typ] !== this.plugin.settings.typColors[typ]) {
         offerUndo(this.plugin, `Color of ${typ} changed.`, snapshot);
       }
-      this.plugin.refreshTypColors?.();
+      this.refreshOtherViews();
+      // The Subtyp colors (list preview, block dots) derive from this color.
+      this.render();
     });
 
     if (showReset) {
@@ -545,8 +631,9 @@ class TypPane extends ItemView {
         showState(DEFAULT_TYP_COLOR, true);
         await this.plugin.saveSettings();
         offerUndo(this.plugin, `Color of ${typ} reset.`, snapshot);
-        this.plugin.refreshTypColors?.();
         onChange?.(DEFAULT_TYP_COLOR);
+        this.refreshOtherViews();
+        this.render();
       });
     }
     showState(currentColor, this.plugin.settings.typColors[typ] === undefined);
@@ -671,9 +758,11 @@ class TypPane extends ItemView {
       this.openTypSettings(typ);
     });
     self.addEventListener("contextmenu", (event) => {
+      // While renaming, the text field's own menu (copy, paste) applies.
+      if (this.isEditing) return;
       event.preventDefault();
       event.stopPropagation();
-      this.openSearch(typ);
+      this.showTypMenu(event, typ, self, nameEl);
     });
 
     // Only in manual sort mode (see render()): the whole row can be dragged
@@ -714,6 +803,54 @@ class TypPane extends ItemView {
         this.render();
       });
     }
+  }
+
+  // Right-click on a registered TYP: the actions of the detail header plus
+  // search, Base and sorting, without opening the detail view. "Manually
+  // creatable" stays in the detail view - a state, not an action. The rows
+  // below the separator keep right-click = search: they have no settings to
+  // act on.
+  showTypMenu(event, typ, self, nameEl) {
+    const menu = new Menu();
+    menu.addItem((item) => item.setTitle("Search notes").setIcon("search").onClick(() => this.openSearch(typ)));
+    menu.addSeparator();
+    menu.addItem((item) =>
+      item
+        .setTitle("Rename")
+        .setIcon("pencil")
+        .onClick(() => this.startListRename(typ, self, nameEl))
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle("Rename and update notes")
+        .setIcon("pencil")
+        .onClick(() => this.startListRename(typ, self, nameEl, { updateNotes: true }))
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle("Delete")
+        .setIcon("trash")
+        .setWarning(true)
+        .onClick(() => this.showDeleteConfirm(typ))
+    );
+    menu.addSeparator();
+    // Like the command: without the Bases core plugin the file couldn't be
+    // opened.
+    if (isBasesEnabled(this.app)) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Create Base")
+          .setIcon("table")
+          .onClick(runOrReportError("Create Base", () => createBaseFor(this.plugin, { typ, subtyp: null })))
+      );
+    }
+    menu.addItem((item) =>
+      item
+        .setTitle("Sort frontmatter for this TYP")
+        .setIcon("arrow-down-up")
+        .onClick(runOrReportError("Frontmatter sorting", () => sortTypFrontmatter(this.plugin, typ)))
+    );
+    menu.showAtMouseEvent(event);
   }
 
   // A real input, so the description can be edited right in the list. Its
@@ -847,7 +984,7 @@ class TypPane extends ItemView {
     const subtypResult = await this.applySubtypRegistration(typResult.typ, subtypKey, bucket);
     await this.plugin.saveSettings();
     this.render();
-    this.plugin.refreshTypColors?.();
+    this.refreshOtherViews();
 
     if (!subtypResult) return;
     const parts = [];
@@ -1037,7 +1174,7 @@ class TypPane extends ItemView {
       delete data.color;
       await this.plugin.saveSettings();
       offerUndo(this.plugin, `Color of Subtyp ${subtyp} reset.`, snapshot);
-      this.plugin.refreshTypColors?.();
+      this.refreshOtherViews();
       this.render();
     });
 
@@ -1072,20 +1209,26 @@ class TypPane extends ItemView {
 
   // Popover below a Subtyp block's dot: one slider per channel, limited to the
   // range from the settings (see typ-colors.js), each track showing the colors
-  // it can reach. Dragging only updates the dot here; saving and updating the
-  // other views happens on close (click outside or Escape), since
-  // refreshTypColors() re-renders this view among others.
+  // it can reach. Dragging only updates the dot here; saving, updating the
+  // other views and re-rendering this one happen on close (click outside or
+  // Escape), and only if the color changed.
+  //
+  // A Subtyp color is an offset from the TYP color: while the TYP has none,
+  // there is nothing to offset, so the popover says so and the sliders are
+  // locked (the dot stays a hollow ring, see renderSectionFooter).
   openSubtypColorPopover(anchorEl, typ, subtyp) {
     this.closeSubtypColorPopover?.();
     const { settings } = this.plugin;
     const data = getSubtyp(settings, typ, subtyp);
     if (!data) return;
+    const typHasColor = !!settings.typColors[typ];
     const typColor = settings.typColors[typ] ?? DEFAULT_TYP_COLOR;
     // Without an offset every slider starts at 0; SUBTYP_COLOR_CHANNELS alone
     // says which exist.
     const offset = clampedOffset(settings, data.color) ?? Object.fromEntries(SUBTYP_COLOR_CHANNELS.map(({ key }) => [key, 0]));
     const doc = anchorEl.doc;
     const popover = doc.body.createDiv({ cls: "menu typ-subtyp-color-popover" });
+    if (!typHasColor) popover.createDiv({ cls: "typ-subtyp-color-hint", text: `Set a color for ${typ} first.` });
 
     const rows = [];
     const update = () => {
@@ -1105,7 +1248,7 @@ class TypPane extends ItemView {
       input.max = String(max);
       input.step = "1";
       input.value = String(offset[key]);
-      input.disabled = min === max;
+      input.disabled = min === max || !typHasColor;
       const valueEl = row.createSpan({ cls: "typ-subtyp-color-value" });
       input.addEventListener("input", () => {
         offset[key] = Number(input.value);
@@ -1147,18 +1290,19 @@ class TypPane extends ItemView {
       popover.remove();
       const current = getSubtyp(settings, typ, subtyp);
       if (!current) return;
+      // Unchanged (just looked, or slid back): nothing to save, and no
+      // re-render that could move anything.
+      const next = hasColorOffset(offset) ? { ...offset } : null;
+      if (JSON.stringify(next) === JSON.stringify(current.color ?? null)) return;
       // The sliders only touched the dot so far, so a snapshot taken now is
       // still the state from opening - without reverting anything saved
       // elsewhere in the meantime.
       const snapshot = snapshotSettings(this.plugin);
-      const before = JSON.stringify(current.color ?? null);
-      if (hasColorOffset(offset)) current.color = { ...offset };
+      if (next) current.color = next;
       else delete current.color;
       await this.plugin.saveSettings();
-      if (JSON.stringify(current.color ?? null) !== before) {
-        offerUndo(this.plugin, `Color of Subtyp ${subtyp} changed.`, snapshot);
-      }
-      this.plugin.refreshTypColors?.();
+      offerUndo(this.plugin, `Color of Subtyp ${subtyp} changed.`, snapshot);
+      this.refreshOtherViews();
       this.render();
     };
     this.closeSubtypColorPopover = close;
@@ -1176,7 +1320,7 @@ class TypPane extends ItemView {
       deleteSubtyp(this.plugin.settings, typ, subtyp);
       await this.plugin.saveSettings();
       offerUndo(this.plugin, `Subtyp ${subtyp} deleted.`, snapshot);
-      this.plugin.refreshTypColors?.();
+      this.refreshOtherViews();
       this.render();
     };
     const keys = Object.keys(getSubtyp(this.plugin.settings, typ, subtyp)?.frontmatter ?? {}).filter((key) => key !== "");
@@ -1235,111 +1379,86 @@ class TypPane extends ItemView {
   // after confirmation. An existing name offers a merge instead (which always
   // rewrites the notes).
   startSubtypRename(typ, subtyp, titleEl, { updateNotes = false } = {}) {
-    if (this.isEditing) return;
-    this.isEditing = true;
+    this.startInlineEdit(titleEl, {
+      classes: ["typ-subtyp-name-input", "is-being-renamed"],
+      // The title sits among Obsidian's property editors, whose keyboard
+      // navigation would react too.
+      stopAllKeys: true,
+      onFinish: (commit, text) =>
+        commit ? this.commitSubtypRename(typ, subtyp, text, { updateNotes }) : this.render(),
+    });
+  }
 
-    titleEl.addClass("typ-subtyp-name-input", "is-being-renamed");
-    titleEl.setAttribute("contenteditable", "true");
-    titleEl.setAttribute("spellcheck", "false");
-    titleEl.focus();
-
-    const range = titleEl.doc.createRange();
-    range.selectNodeContents(titleEl);
-    const selection = titleEl.win.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
+  async commitSubtypRename(typ, subtyp, rawText, { updateNotes }) {
+    const value = normalizeSubtypName(rawText);
+    if (!value || value === subtyp) {
+      this.render();
+      return;
+    }
 
     const countOf = (name) => this.plugin.typIndex.subtypBucket(typ).counts.get(name) ?? 0;
-    const applyRename = async (value, { withNotes }) => {
+    const applyRename = async ({ withNotes }) => {
       renameSubtyp(this.plugin.settings, typ, subtyp, value);
       await this.plugin.saveSettings();
       const renamed = withNotes ? await renameSubtypInNotes(this.plugin, typ, subtyp, value) : 0;
-      this.plugin.refreshTypColors?.();
+      this.refreshOtherViews();
       if (withNotes) new Notice(`Subtyp ${value}: ${plural(renamed, "note")} updated.`);
       this.render();
     };
 
-    let done = false;
-    const finish = async (commit) => {
-      if (done) return;
-      done = true;
-      this.isEditing = false;
-
-      const value = normalizeSubtypName(titleEl.textContent);
-      if (!commit || !value || value === subtyp) {
-        this.render();
-        return;
-      }
-
-      const existing = getSubtypNames(this.plugin.settings, typ).find(
-        (name) => name.toLowerCase() === value.toLowerCase() && name !== subtyp
-      );
-      if (existing) {
-        new ConfirmModal(this.app, {
-          title: [
-            "Merge ",
-            subtypNameNode(this.plugin, typ, subtyp),
-            " into ",
-            subtypNameNode(this.plugin, typ, existing),
-            "?",
-          ],
-          body: [
-            `${existing} already exists in ${typ}. ` +
-              `${plural(countOf(subtyp), "note")} ${countOf(subtyp) === 1 ? "moves" : "move"} to it, ` +
-              `and the properties of ${subtyp} move into its block.`,
-          ],
-          confirmText: "Merge",
-          warning: true,
-          focus: "cancel",
-          onConfirm: async () => {
-            mergeSubtyps(this.plugin.settings, typ, subtyp, existing);
-            await this.plugin.saveSettings();
-            const renamed = await renameSubtypInNotes(this.plugin, typ, subtyp, existing);
-            this.plugin.refreshTypColors?.();
-            new Notice(`Subtyp ${subtyp} merged into ${existing}, ${plural(renamed, "note")} updated.`);
-            this.render();
-          },
-          onCancel: () => this.render(),
-        }).open();
-        return;
-      }
-
-      if (!updateNotes) {
-        await applyRename(value, { withNotes: false });
-        return;
-      }
-      // Same color for old and new name: the new one takes over the old one's
-      // offset (see renameSubtyp).
+    const existing = getSubtypNames(this.plugin.settings, typ).find(
+      (name) => name.toLowerCase() === value.toLowerCase() && name !== subtyp
+    );
+    if (existing) {
       new ConfirmModal(this.app, {
         title: [
-          "Rename ",
+          "Merge ",
           subtypNameNode(this.plugin, typ, subtyp),
-          " to ",
-          subtypNameNode(this.plugin, typ, value, subtyp),
+          " into ",
+          subtypNameNode(this.plugin, typ, existing),
           "?",
         ],
-        body: [`${plural(countOf(subtyp), "note")} will be updated.`],
-        confirmText: "Rename",
-        focus: "confirm",
-        onConfirm: () => applyRename(value, { withNotes: true }),
+        body: [
+          `${existing} already exists in ${typ}. ` +
+            `${plural(countOf(subtyp), "note")} ${countOf(subtyp) === 1 ? "moves" : "move"} to it, ` +
+            `and the properties of ${subtyp} move into its block.`,
+        ],
+        confirmText: "Merge",
+        warning: true,
+        focus: "cancel",
+        onConfirm: async () => {
+          mergeSubtyps(this.plugin.settings, typ, subtyp, existing);
+          await this.plugin.saveSettings();
+          const renamed = await renameSubtypInNotes(this.plugin, typ, subtyp, existing);
+          this.refreshOtherViews();
+          new Notice(`Subtyp ${subtyp} merged into ${existing}, ${plural(renamed, "note")} updated.`);
+          this.render();
+        },
         onCancel: () => this.render(),
       }).open();
-    };
+      return;
+    }
 
-    // Keep every key here: the title sits inside Obsidian's property editor,
-    // whose keyboard navigation would react too (Escape also because of the
-    // detail view, see onOpen).
-    titleEl.addEventListener("keydown", (event) => {
-      event.stopPropagation();
-      if (event.key === "Enter") {
-        event.preventDefault();
-        finish(true);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        finish(false);
-      }
-    });
-    titleEl.addEventListener("blur", () => finish(true));
+    if (!updateNotes) {
+      await applyRename({ withNotes: false });
+      return;
+    }
+    // Same color for old and new name: the new one takes over the old one's
+    // offset (see renameSubtyp).
+    new ConfirmModal(this.app, {
+      title: [
+        "Rename ",
+        subtypNameNode(this.plugin, typ, subtyp),
+        " to ",
+        subtypNameNode(this.plugin, typ, value, subtyp),
+        "?",
+      ],
+      body: [`${plural(countOf(subtyp), "note")} will be updated.`],
+      confirmText: "Rename",
+      focus: "confirm",
+      onConfirm: () => applyRename({ withNotes: true }),
+      onCancel: () => this.render(),
+    }).open();
   }
 
   // Like the unregistered entries of the TYP-List: SUBTYP values of this TYP's
@@ -1411,7 +1530,8 @@ class TypPane extends ItemView {
     if (!result) return;
 
     await this.plugin.saveSettings();
-    this.plugin.refreshTypColors?.();
+    this.refreshOtherViews();
+    this.render();
     if (result.renamed > 0) new Notice(`Subtyp ${result.subtyp} registered, ${plural(result.renamed, "note")} updated.`);
   }
 
@@ -1433,7 +1553,6 @@ class TypPane extends ItemView {
   // typed inline (like startAdd() in the list).
   startAddSubtyp(typ) {
     if (this.isEditing || !this.subtypAddBtnEl) return;
-    this.isEditing = true;
 
     // Built like the finished (empty) block, with the "+" buttons and footer
     // actions that do nothing yet, just without a count - so nothing jumps
@@ -1457,66 +1576,40 @@ class TypPane extends ItemView {
     const manualCls = "clickable-icon typ-manual-icon" + (this.ensureTypManual()[typ] !== false ? " is-active" : "");
     setIcon(actions.createDiv({ cls: manualCls }), "file-pen-line");
     setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-delete" }), "trash");
-    nameEl.setAttribute("contenteditable", "true");
-    nameEl.setAttribute("spellcheck", "false");
-    nameEl.focus();
 
-    let done = false;
-    const finish = async (commit) => {
-      if (done) return;
-      done = true;
-      this.isEditing = false;
-
-      const value = normalizeSubtypName(nameEl.textContent);
-      if (commit && value) {
-        const existing = getSubtypNames(this.plugin.settings, typ).find((name) => name.toLowerCase() === value.toLowerCase());
-        if (existing) {
-          new Notice(`${typ} already has Subtyp ${existing}.`);
-        } else {
-          ensureSubtyp(this.plugin.settings, typ, value);
-          await this.plugin.saveSettings();
+    this.startInlineEdit(nameEl, {
+      // nameEl carries the input classes from the start.
+      classes: [],
+      onFinish: async (commit, text) => {
+        const value = normalizeSubtypName(text);
+        if (commit && value) {
+          const existing = getSubtypNames(this.plugin.settings, typ).find((name) => name.toLowerCase() === value.toLowerCase());
+          if (existing) {
+            new Notice(`${typ} already has Subtyp ${existing}.`);
+          } else {
+            ensureSubtyp(this.plugin.settings, typ, value);
+            await this.plugin.saveSettings();
+          }
         }
-      }
-      this.render();
-    };
-
-    nameEl.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        event.stopPropagation();
-        finish(true);
-      } else if (event.key === "Escape") {
-        // stopPropagation, or the detail view's own Escape handler would leave
-        // it as well.
-        event.preventDefault();
-        event.stopPropagation();
-        finish(false);
-      }
+        this.render();
+      },
     });
-    nameEl.addEventListener("blur", () => finish(true));
   }
 
   // Notes keep their TYP (it then shows as unregistered), so this only changes
   // settings: Undo afterwards, and the confirmation can be switched off (see
-  // confirmDeletion).
+  // confirmDeletion). From the detail header or the list's context menu.
   showDeleteConfirm(typ) {
     const apply = async () => {
       const snapshot = snapshotSettings(this.plugin);
-      this.plugin.settings.typs = this.plugin.settings.typs.filter((t) => t !== typ);
-      delete this.plugin.settings.typColors[typ];
-      delete this.plugin.settings.typDescriptions[typ];
-      delete this.plugin.settings.typDefaultFrontmatter[typ];
-      delete this.plugin.settings.typFloatingKeys[typ];
-      delete this.plugin.settings.typShortcuts[typ];
-      delete this.ensureTypManual()[typ];
-      deleteTypSubtyps(this.plugin.settings, typ);
-      // Back to the list before refreshTypColors(), which re-renders
-      // synchronously - otherwise the deleted TYP's now empty detail view
-      // would briefly render again.
-      this.closeTypSettings();
+      deleteTypSettings(this.plugin.settings, typ);
+      // Back to the list (or the list rebuilt) right away, so the deleted
+      // TYP's now empty detail view never shows.
+      if (this.selectedTyp === typ) this.closeTypSettings();
+      else this.render();
       await this.plugin.saveSettings();
       offerUndo(this.plugin, `TYP ${typ} deleted.`, snapshot);
-      this.plugin.refreshTypColors?.();
+      this.refreshOtherViews();
     };
     this.confirmDeletion(
       { title: ["Delete ", typNameNode(this.plugin, typ, this.plugin.settings.typColors[typ] ?? null), "?"] },
@@ -1524,127 +1617,83 @@ class TypPane extends ItemView {
     );
   }
 
-  // Like startEditing(), but on the detail view's title, switching
-  // selectedTyp instead of just re-rendering the list. updateNotes: true (the
-  // highlighted button) also rewrites the TYP of every affected note after
-  // confirmation (see renameTypInNotes) instead of only the settings.
-  startDetailRename(typ, titleEl, { updateNotes = false } = {}) {
+  // "Rename" / "Rename and update notes" from the list's context menu: the
+  // name in the row becomes the input, the rest is the same as in the detail
+  // view (commitTypRename).
+  startListRename(typ, self, nameEl, options = {}) {
     if (this.isEditing) return;
-    this.isEditing = true;
-
-    titleEl.addClass("is-being-renamed");
-    titleEl.setAttribute("contenteditable", "true");
-    titleEl.setAttribute("spellcheck", "false");
-    titleEl.focus();
-
-    const range = titleEl.doc.createRange();
-    range.selectNodeContents(titleEl);
-    const selection = titleEl.win.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-
-    // Moves only the settings (list, color, description, TYP-Frontmatter,
-    // manual toggle) to the new name - touches no notes. Shared by both rename
-    // paths.
-    const applyRename = async (value) => {
-      const idx = this.plugin.settings.typs.indexOf(typ);
-      if (idx !== -1) this.plugin.settings.typs[idx] = value;
-      if (this.plugin.settings.typColors[typ] !== undefined) {
-        this.plugin.settings.typColors[value] = this.plugin.settings.typColors[typ];
-        delete this.plugin.settings.typColors[typ];
-      }
-      if (this.plugin.settings.typDescriptions[typ] !== undefined) {
-        this.plugin.settings.typDescriptions[value] = this.plugin.settings.typDescriptions[typ];
-        delete this.plugin.settings.typDescriptions[typ];
-      }
-      if (this.plugin.settings.typDefaultFrontmatter[typ] !== undefined) {
-        this.plugin.settings.typDefaultFrontmatter[value] = this.plugin.settings.typDefaultFrontmatter[typ];
-        delete this.plugin.settings.typDefaultFrontmatter[typ];
-      }
-      if (this.plugin.settings.typFloatingKeys[typ] !== undefined) {
-        this.plugin.settings.typFloatingKeys[value] = this.plugin.settings.typFloatingKeys[typ];
-        delete this.plugin.settings.typFloatingKeys[typ];
-      }
-      if (this.plugin.settings.typShortcuts[typ] !== undefined) {
-        this.plugin.settings.typShortcuts[value] = this.plugin.settings.typShortcuts[typ];
-        delete this.plugin.settings.typShortcuts[typ];
-      }
-      if (this.ensureTypManual()[typ] !== undefined) {
-        this.plugin.settings.typManual[value] = this.plugin.settings.typManual[typ];
-        delete this.plugin.settings.typManual[typ];
-      }
-      moveTypSubtyps(this.plugin.settings, typ, value);
-      // Set before refreshTypColors(), which calls render() synchronously -
-      // otherwise the old, now empty name would briefly render.
-      this.selectedTyp = value;
-      await this.plugin.saveSettings();
-      this.plugin.refreshTypColors?.();
-    };
-
-    let done = false;
-    const finish = async (commit) => {
-      if (done) return;
-      done = true;
-      this.isEditing = false;
-
-      const value = normalizeTypName(titleEl.textContent);
-      if (!commit || !value || value === typ) {
-        this.render();
-        return;
-      }
-
-      const existing = this.plugin.settings.typs.find(
-        (t) => t.toLowerCase() === value.toLowerCase() && t !== typ
-      );
-      if (existing) {
-        this.showMergeConfirm(typ, existing);
-        return;
-      }
-
-      if (!updateNotes) {
-        await applyRename(value);
-        this.render();
-        return;
-      }
-
-      // A bulk write across possibly many files - confirm first. Same color
-      // for old and new name: the new one has no typColors entry yet but takes
-      // over the old one's (see applyRename).
-      const { counts } = this.plugin.typIndex.typCounts();
-      const color = this.plugin.settings.typColors[typ] ?? null;
-      new ConfirmModal(this.app, {
-        title: ["Rename ", typNameNode(this.plugin, typ, color), " to ", typNameNode(this.plugin, value, color), "?"],
-        body: [`${plural(counts.get(typ) ?? 0, "note")} will be updated.`],
-        confirmText: "Rename",
-        focus: "confirm",
-        onConfirm: async () => {
-          await applyRename(value);
-          const renamed = await renameTypInNotes(this.plugin, typ, value);
-          new Notice(`TYP ${value}: ${plural(renamed, "note")} updated.`);
-          this.render();
-        },
-        onCancel: () => this.render(),
-      }).open();
-    };
-
-    titleEl.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        event.stopPropagation();
-        finish(true);
-      } else if (event.key === "Escape") {
-        // stopPropagation, or the detail view's Escape handler would leave it
-        // as well.
-        event.preventDefault();
-        event.stopPropagation();
-        finish(false);
-      }
+    // A draggable row (manual sorting) would take the mouse away from the
+    // text - no cursor placement or selection in the name. render() rebuilds
+    // the row afterwards.
+    self.draggable = false;
+    this.startInlineEdit(nameEl, {
+      classEl: self,
+      onFinish: (commit, text) => (commit ? this.commitTypRename(typ, text, options) : this.render()),
     });
-
-    titleEl.addEventListener("blur", () => finish(true));
   }
 
-  // Renaming to the name of an already registered TYP (see startDetailRename)
+  // The rename buttons of the detail header, on the title.
+  startDetailRename(typ, titleEl, options = {}) {
+    this.startInlineEdit(titleEl, {
+      onFinish: (commit, text) => (commit ? this.commitTypRename(typ, text, options) : this.render()),
+    });
+  }
+
+  // The rename itself, shared by list and detail view. updateNotes: true (the
+  // highlighted button) also rewrites the TYP of every affected note after
+  // confirmation (see renameTypInNotes) instead of only the settings. An
+  // existing name offers a merge (showMergeConfirm).
+  async commitTypRename(typ, rawText, { updateNotes = false } = {}) {
+    const value = normalizeTypName(rawText);
+    if (!value || value === typ) {
+      this.render();
+      return;
+    }
+
+    const existing = this.plugin.settings.typs.find((t) => t.toLowerCase() === value.toLowerCase() && t !== typ);
+    if (existing) {
+      this.showMergeConfirm(typ, existing);
+      return;
+    }
+
+    if (!updateNotes) {
+      await this.renameTypSettings(typ, value);
+      this.render();
+      return;
+    }
+
+    // A bulk write across possibly many files - confirm first. Same color for
+    // old and new name: the new one has no typColors entry yet but takes over
+    // the old one's (see renameTypSettings).
+    const { counts } = this.plugin.typIndex.typCounts();
+    const color = this.plugin.settings.typColors[typ] ?? null;
+    new ConfirmModal(this.app, {
+      title: ["Rename ", typNameNode(this.plugin, typ, color), " to ", typNameNode(this.plugin, value, color), "?"],
+      body: [`${plural(counts.get(typ) ?? 0, "note")} will be updated.`],
+      confirmText: "Rename",
+      focus: "confirm",
+      onConfirm: async () => {
+        await this.renameTypSettings(typ, value);
+        const renamed = await renameTypInNotes(this.plugin, typ, value);
+        new Notice(`TYP ${value}: ${plural(renamed, "note")} updated.`);
+        this.render();
+      },
+      onCancel: () => this.render(),
+    }).open();
+  }
+
+  // Moves only the settings (list position, color, description,
+  // TYP-Frontmatter, manual toggle, Subtyps - see typ-settings.js) to the new
+  // name; touches no notes. An open detail view follows the new name, a
+  // rename from the list stays in the list.
+  async renameTypSettings(typ, value) {
+    moveTypSettings(this.plugin.settings, typ, value);
+    if (this.selectedTyp === typ) this.selectedTyp = value;
+    await this.plugin.saveSettings();
+    this.refreshOtherViews();
+  }
+
+  // Renaming to the name of an already registered TYP (see commitTypRename)
   // offers to merge both (see mergeTyp) instead of silently dropping the
   // rename. It always rewrites the notes, whichever rename button started it:
   // a merge in the settings only would leave the source TYP's notes as an
@@ -1675,7 +1724,8 @@ class TypPane extends ItemView {
 
   // Merges source into target: notes are rewritten to target, source leaves
   // the list with its settings (target keeps its own). Source's Subtyps move
-  // over, same-named blocks are combined (see mergeTypSubtyps in subtyps.js).
+  // over first, same-named blocks are combined (see mergeTypSubtyps in
+  // subtyps.js); then the rest of source goes like a deleted TYP.
   //
   // "Manually creatable" is where a merge does more than move data: the moved
   // Subtyps bring source's toggles but end up under target's. With source on
@@ -1683,24 +1733,20 @@ class TypPane extends ItemView {
   // unreachable in the picker. So a switched-off target switches them off too,
   // as its own button would (see renderManualToggle). With target on they stay
   // as they were.
+  //
+  // An open detail view of source moves to target; a merge started from the
+  // list stays in the list.
   async mergeTyp(source, target) {
     const settings = this.plugin.settings;
     const renamed = await renameTypInNotes(this.plugin, source, target);
 
-    settings.typs = settings.typs.filter((t) => t !== source);
-    delete settings.typColors[source];
-    delete settings.typDescriptions[source];
-    delete settings.typDefaultFrontmatter[source];
-    delete settings.typFloatingKeys[source];
-    delete settings.typShortcuts[source];
-    delete this.ensureTypManual()[source];
     mergeTypSubtyps(settings, source, target);
+    deleteTypSettings(settings, source);
     if (this.ensureTypManual()[target] === false) setAllSubtypsManual(settings, target, false);
 
-    // Set before refreshTypColors(), as in applyRename.
-    this.selectedTyp = target;
+    if (this.selectedTyp === source) this.selectedTyp = target;
     await this.plugin.saveSettings();
-    this.plugin.refreshTypColors?.();
+    this.refreshOtherViews();
     new Notice(`TYP ${source} merged into ${target}, ${plural(renamed, "note")} updated.`);
     this.render();
   }
@@ -1743,9 +1789,14 @@ function registerTypPane(plugin) {
   // reference is kept there.
   plugin.app.workspace.onLayoutReady(() => openTypPaneOnStart(plugin));
 
-  const refresh = () => {
+  // exceptView: the TYP-Pane that made the change and updates itself (see
+  // refreshTypColorsExcept in main.js).
+  const refresh = (exceptView = null) => {
     for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_TYP_PANE)) {
-      leaf.view?.render?.();
+      if (leaf.view === exceptView) continue;
+      // render() for a view of the module before a hot reload.
+      if (leaf.view?.requestRender) leaf.view.requestRender();
+      else leaf.view?.render?.();
     }
   };
 
@@ -1753,12 +1804,14 @@ function registerTypPane(plugin) {
   // deleted note, TYP or SUBTYP changed). The index's "change" fires only for
   // those, not on every autosave. Debounced anyway since rendering the list is
   // relatively costly; resetTimer collects a burst (bulk import) into one.
-  const debouncedRefresh = debounce(refresh, 500, true);
+  // Without the event's arguments, which aren't a view to leave out.
+  const debouncedRefresh = debounce(() => refresh(), 500, true);
   plugin.registerEvent(plugin.typIndex.on("change", debouncedRefresh));
   // The "Excluded files" list changed (Hide Folders toggling a folder, say).
   plugin.registerEvent(plugin.app.vault.on("config-changed", debouncedRefresh));
 
-  // For plugin.refreshTypColors: re-renders the list or the detail view.
+  // For plugin.refreshTypColors(Except): re-renders the list or the detail
+  // view.
   return refresh;
 }
 

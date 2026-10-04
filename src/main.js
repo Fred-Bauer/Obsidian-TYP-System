@@ -64,8 +64,17 @@ module.exports = class TypSystemPlugin extends Plugin {
     // recurse into a stack overflow on every TYP opened.
     this.refreshFrontmatterHighlight = registerFrontmatterDefaultHighlight(this);
 
+    // Two variants, like refreshFrontmatterHighlight above:
+    //  - refreshTypColors() refreshes every view, the TYP-Pane included
+    //    (re-rendered from the settings) - for changes made elsewhere (settings
+    //    tab, property rename sync, Sync, Undo).
+    //  - refreshTypColorsExcept(view) leaves that one TYP-Pane out - for its
+    //    own actions. A full re-render there would throw away focus, an open
+    //    inline input or the editor being typed in, so the pane updates itself
+    //    and calls render() only where it really has to rebuild. Other
+    //    TYP-Pane leaves (rare - see activateTypPane) are still re-rendered.
+    const refreshTypPane = registerTypPane(this);
     const refreshFns = [
-      registerTypPane(this),
       registerFileExplorerColors(this),
       registerGraphColors(this),
       registerSearchColors(this),
@@ -76,7 +85,11 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerLinkColors(this),
       this.refreshFrontmatterHighlight,
     ];
-    this.refreshTypColors = () => refreshFns.forEach((fn) => fn());
+    this.refreshTypColorsExcept = (exceptView) => {
+      refreshTypPane(exceptView);
+      refreshFns.forEach((fn) => fn());
+    };
+    this.refreshTypColors = () => this.refreshTypColorsExcept(null);
 
     // Style Settings reads stylesheets when it loads and afterwards only on
     // "css-change", which fires for themes and snippets but not for a plugin's

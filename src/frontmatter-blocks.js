@@ -334,9 +334,10 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
     }
 
     await view.plugin.saveSettings();
-    // Re-renders this detail view among others; blocks and editors are rebuilt
-    // from the settings.
-    view.plugin.refreshTypColors?.();
+    // Both blocks changed, so this detail view is rebuilt from the settings;
+    // the other views only need their colors and marks refreshed.
+    view.plugin.refreshTypColorsExcept?.(view);
+    view.render();
   }
 }
 

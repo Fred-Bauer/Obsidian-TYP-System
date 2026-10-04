@@ -346,6 +346,12 @@ async function createBaseCommand(plugin) {
   // A Subtyp picked here means the standalone Subtyp Base: it filters by
   // SUBTYP only and merges the columns of every TYP with that Subtyp name.
   const target = choice.subtyp ? { typ: null, subtyp: choice.subtyp } : { typ: choice.typ, subtyp: null };
+  await createBaseFor(plugin, target);
+}
+
+// The command after its picker, also the entry with a fixed target (context
+// menu of the TYP-List): column options, then create or complete the file.
+async function createBaseFor(plugin, target) {
   const options = await askColumnOptions(plugin, target, (current) => columnIds(plugin, target, current));
   if (!options) return;
   await createBase(plugin, target, options);
@@ -426,6 +432,7 @@ async function updateActiveView(plugin, view) {
 module.exports = {
   isBasesEnabled,
   createBaseCommand,
+  createBaseFor,
   activeBaseView,
   updateActiveView,
   // Exposed for testing single building blocks

@@ -210,8 +210,10 @@ function toggleFloatingProperty(view, store, key) {
   const floating = store.getFloating();
   store.setFloating(floating.includes(key) ? floating.filter((k) => k !== key) : [...floating, key]);
   view.plugin.saveSettings();
-  // Updates the bold/italic marks at once, here and in open notes.
-  view.plugin.refreshTypColors?.();
+  // Updates the bold/italic marks at once, here (refreshFrontmatterHighlight
+  // covers the TYP-Pane's own editors) and in open notes - without
+  // re-rendering this TYP-Pane, see refreshTypColorsExcept in main.js.
+  view.plugin.refreshTypColorsExcept?.(view);
 }
 
 // Keyboard navigation beyond one editor instance (see frontmatter-blocks.js):
@@ -348,8 +350,11 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
       }
       // A newly named row gets its button, a deleted one takes it along.
       renderShortcutControls(view, editor, store);
-      // Bold/italic marks in open notes follow the changed list at once.
-      view.plugin.refreshTypColors?.();
+      // Bold/italic marks in open notes follow the changed list at once. Not
+      // the full refreshTypColors(): it would re-render this TYP-Pane, and
+      // the edit that called saveFrontmatter would lose its focus (Tab to the
+      // next row went nowhere) - the editor already shows the change.
+      view.plugin.refreshTypColorsExcept?.(view);
     },
   };
 

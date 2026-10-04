@@ -1,3 +1,4 @@
+const { Notice } = require("obsidian");
 const { getSubtyp } = require("./subtyps");
 const { typKeyOf, propertyValue, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 const { plural } = require("./typ-utils");
@@ -226,6 +227,19 @@ async function sortAllFrontmatter(app, plugin, onlyTyp) {
   return { checked, changed, hasTypDefaults };
 }
 
+// Sorts every note of one TYP and reports it in a notice - the command "Sort
+// frontmatter for one TYP" (after its picker) and the TYP-Pane's context menu
+// (with the TYP of the row).
+async function sortTypFrontmatter(plugin, typ) {
+  const { checked, changed, hasTypDefaults } = await sortAllFrontmatter(plugin.app, plugin, typ);
+  let message = sortSummary(`Frontmatter sorting ${typ}`, checked, changed);
+  // Not an error, but explains why nothing may have changed.
+  if (hasTypDefaults === false) {
+    message += ` Note: ${typ} has no TYP-Frontmatter, so only the global order was applied.`;
+  }
+  new Notice(message);
+}
+
 // Result notice of a sorting run, shared by the commands and the play button
 // of the global order.
 function sortSummary(label, checked, changed) {
@@ -237,6 +251,7 @@ function sortSummary(label, checked, changed) {
 module.exports = {
   sortAllFrontmatter,
   sortSingleFileFrontmatter,
+  sortTypFrontmatter,
   sortFrontmatterFor,
   placePropertyFor,
   normalizeGlobalOrder,

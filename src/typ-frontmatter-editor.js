@@ -3,6 +3,7 @@ const { shortcutLabel } = require("./shortcuts");
 const { pickShortcut } = require("./shortcut-picker");
 const { getSubtyp, ensureSubtyp } = require("./subtyps");
 const { TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
+const { snapshotSettings, offerUndo } = require("./undo");
 
 // Marks the TYP-Frontmatter editor's container so the shortcut rules in
 // styles.css apply only here, never in real notes.
@@ -303,6 +304,11 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
       const currentKeys = Object.keys(frontmatter).filter((key) => key !== "");
       const removedKeys = previousKeys.filter((key) => !currentKeys.includes(key));
       const addedKeys = currentKeys.filter((key) => !previousKeys.includes(key));
+      // Deleting rows loses value, shortcut and floating flag at once - the
+      // one change here that gets an undo (see undo.js). Snapshot before any
+      // store write, and only for a deletion - no full copy on every edit.
+      const removedOnly = removedKeys.length > 0 && addedKeys.length === 0;
+      const undoSnapshot = removedOnly ? snapshotSettings(view.plugin) : null;
 
       let floating = store.getFloating();
       if (removedKeys.length === 1 && addedKeys.length === 1) {
@@ -330,6 +336,16 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
       store.setFloating(floating);
       store.setShortcuts(shortcuts);
       view.plugin.saveSettings();
+      if (undoSnapshot) {
+        const blockName = store.subtyp ?? store.typ;
+        offerUndo(
+          view.plugin,
+          removedKeys.length === 1
+            ? `Property "${removedKeys[0]}" removed from ${blockName}.`
+            : `${removedKeys.length} properties removed from ${blockName}.`,
+          undoSnapshot
+        );
+      }
       // A newly named row gets its button, a deleted one takes it along.
       renderShortcutControls(view, editor, store);
       // Bold/italic marks in open notes follow the changed list at once.
@@ -450,9 +466,11 @@ function removeShortcut(view, editor, store, row) {
   const key = row.entry?.key ?? "";
   const shortcuts = { ...store.getShortcuts() };
   if (!(key in shortcuts)) return;
+  const snapshot = snapshotSettings(view.plugin);
   delete shortcuts[key];
   store.setShortcuts(shortcuts);
   saveShortcuts(view, editor, store);
+  offerUndo(view.plugin, `Shortcut removed from "${key}".`, snapshot);
 }
 
 function saveShortcuts(view, editor, store) {

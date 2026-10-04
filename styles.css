@@ -436,6 +436,11 @@ body.typ-system-subtyps-right .typ-list-subtyps {
   font-weight: 600;
 }
 
+/* "Undo" in the notice after an action without confirmation (undo.js). */
+.typ-undo-button {
+  margin-inline-start: var(--size-4-2);
+}
+
 .typ-color-reset,
 .typ-detail-rename,
 .typ-detail-rename-notes,

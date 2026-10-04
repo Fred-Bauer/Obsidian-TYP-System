@@ -1,5 +1,6 @@
 const { ItemView, Menu, Notice, setIcon, debounce } = require("obsidian");
 const { ConfirmModal, typNameNode, subtypNameNode } = require("./confirm-modal");
+const { snapshotSettings, offerUndo } = require("./undo");
 const { mountFrontmatterBlocks } = require("./frontmatter-blocks");
 const {
   normalizeSubtypName,
@@ -506,7 +507,12 @@ class TypPane extends ItemView {
     // open - only a local preview here. refreshTypColors() would re-render
     // this view, remove this <input type=color> and close the native picker
     // before a color could even be chosen.
+    //
+    // One undo snapshot per picker session: taken before the first
+    // intermediate color, offered once the choice is confirmed ("change").
+    let undoSnapshot = null;
     colorInput.addEventListener("input", async () => {
+      undoSnapshot ??= snapshotSettings(this.plugin);
       showState(colorInput.value, false);
       this.plugin.settings.typColors[typ] = colorInput.value;
       await this.plugin.saveSettings();
@@ -515,7 +521,14 @@ class TypPane extends ItemView {
 
     // Once the choice is confirmed and the picker closed, a re-render can't
     // break anything any more.
-    colorInput.addEventListener("change", () => this.plugin.refreshTypColors?.());
+    colorInput.addEventListener("change", () => {
+      const snapshot = undoSnapshot;
+      undoSnapshot = null;
+      if (snapshot && snapshot.typColors[typ] !== this.plugin.settings.typColors[typ]) {
+        offerUndo(this.plugin, `Color of ${typ} changed.`, snapshot);
+      }
+      this.plugin.refreshTypColors?.();
+    });
 
     if (showReset) {
       resetBtn = parent.createDiv({
@@ -524,10 +537,14 @@ class TypPane extends ItemView {
       });
       setIcon(resetBtn, "rotate-ccw");
       resetBtn.addEventListener("click", async () => {
+        // No undo offer for a no-op (the button is only grayed out).
+        if (this.plugin.settings.typColors[typ] === undefined) return;
+        const snapshot = snapshotSettings(this.plugin);
         delete this.plugin.settings.typColors[typ];
         colorInput.value = DEFAULT_TYP_COLOR;
         showState(DEFAULT_TYP_COLOR, true);
         await this.plugin.saveSettings();
+        offerUndo(this.plugin, `Color of ${typ} reset.`, snapshot);
         this.plugin.refreshTypColors?.();
         onChange?.(DEFAULT_TYP_COLOR);
       });
@@ -1016,8 +1033,10 @@ class TypPane extends ItemView {
     resetBtn.addEventListener("click", async () => {
       const data = getSubtyp(this.plugin.settings, typ, subtyp);
       if (!data?.color) return;
+      const snapshot = snapshotSettings(this.plugin);
       delete data.color;
       await this.plugin.saveSettings();
+      offerUndo(this.plugin, `Color of Subtyp ${subtyp} reset.`, snapshot);
       this.plugin.refreshTypColors?.();
       this.render();
     });
@@ -1128,9 +1147,17 @@ class TypPane extends ItemView {
       popover.remove();
       const current = getSubtyp(settings, typ, subtyp);
       if (!current) return;
+      // The sliders only touched the dot so far, so a snapshot taken now is
+      // still the state from opening - without reverting anything saved
+      // elsewhere in the meantime.
+      const snapshot = snapshotSettings(this.plugin);
+      const before = JSON.stringify(current.color ?? null);
       if (hasColorOffset(offset)) current.color = { ...offset };
       else delete current.color;
       await this.plugin.saveSettings();
+      if (JSON.stringify(current.color ?? null) !== before) {
+        offerUndo(this.plugin, `Color of Subtyp ${subtyp} changed.`, snapshot);
+      }
       this.plugin.refreshTypColors?.();
       this.render();
     };
@@ -1141,11 +1168,14 @@ class TypPane extends ItemView {
 
   // Deletes the Subtyp block with its properties. Notes keep their SUBTYP
   // value (it then shows as unregistered below), so confirmation is only
-  // needed when properties would be lost.
+  // needed when properties would be lost. Either way an undo is offered
+  // afterwards (see undo.js).
   deleteSubtypWithConfirm(typ, subtyp) {
     const apply = async () => {
+      const snapshot = snapshotSettings(this.plugin);
       deleteSubtyp(this.plugin.settings, typ, subtyp);
       await this.plugin.saveSettings();
+      offerUndo(this.plugin, `Subtyp ${subtyp} deleted.`, snapshot);
       this.plugin.refreshTypColors?.();
       this.render();
     };
@@ -1155,23 +1185,48 @@ class TypPane extends ItemView {
       return;
     }
     const { plugin } = this;
+    this.confirmDeletion(
+      {
+        title: [
+          "Delete ",
+          subtypNameNode(plugin, typ, subtyp),
+          " of ",
+          typNameNode(plugin, typ, plugin.settings.typColors[typ] ?? null),
+          "?",
+        ],
+        body: [
+          keys.length === 1
+            ? `Its property ${keys[0]} will be lost.`
+            : `Its ${keys.length} properties ${keys.join(", ")} will be lost.`,
+        ],
+      },
+      apply
+    );
+  }
+
+  // "Delete TYP" and "Delete Subtyp" change nothing but the settings and offer
+  // Undo afterwards, so - unlike every dialog that rewrites notes - their
+  // confirmation can be switched off: setting "Confirm deletion", or "Don't
+  // ask again" in the dialog itself. Without it apply() runs at once.
+  confirmDeletion({ title, body }, apply) {
+    if (!this.plugin.settings.confirmDeletion) {
+      apply();
+      return;
+    }
     new ConfirmModal(this.app, {
-      title: [
-        "Delete ",
-        subtypNameNode(plugin, typ, subtyp),
-        " of ",
-        typNameNode(plugin, typ, plugin.settings.typColors[typ] ?? null),
-        "?",
-      ],
-      body: [
-        keys.length === 1
-          ? `Its property ${keys[0]} will be lost.`
-          : `Its ${keys.length} properties ${keys.join(", ")} will be lost.`,
-      ],
+      title,
+      body,
       confirmText: "Delete",
       warning: true,
       focus: "cancel",
-      onConfirm: apply,
+      dontAskAgain: true,
+      onConfirm: (dontAskAgain) => {
+        // Set before apply(), which saves it along with the deletion and
+        // takes its undo snapshot only afterwards - Undo doesn't bring the
+        // dialog back.
+        if (dontAskAgain) this.plugin.settings.confirmDeletion = false;
+        apply();
+      },
     }).open();
   }
 
@@ -1441,8 +1496,12 @@ class TypPane extends ItemView {
     nameEl.addEventListener("blur", () => finish(true));
   }
 
+  // Notes keep their TYP (it then shows as unregistered), so this only changes
+  // settings: Undo afterwards, and the confirmation can be switched off (see
+  // confirmDeletion).
   showDeleteConfirm(typ) {
-    const onConfirm = async () => {
+    const apply = async () => {
+      const snapshot = snapshotSettings(this.plugin);
       this.plugin.settings.typs = this.plugin.settings.typs.filter((t) => t !== typ);
       delete this.plugin.settings.typColors[typ];
       delete this.plugin.settings.typDescriptions[typ];
@@ -1456,15 +1515,13 @@ class TypPane extends ItemView {
       // would briefly render again.
       this.closeTypSettings();
       await this.plugin.saveSettings();
+      offerUndo(this.plugin, `TYP ${typ} deleted.`, snapshot);
       this.plugin.refreshTypColors?.();
     };
-    new ConfirmModal(this.app, {
-      title: ["Delete ", typNameNode(this.plugin, typ, this.plugin.settings.typColors[typ] ?? null), "?"],
-      confirmText: "Delete",
-      warning: true,
-      focus: "cancel",
-      onConfirm,
-    }).open();
+    this.confirmDeletion(
+      { title: ["Delete ", typNameNode(this.plugin, typ, this.plugin.settings.typColors[typ] ?? null), "?"] },
+      apply
+    );
   }
 
   // Like startEditing(), but on the detail view's title, switching

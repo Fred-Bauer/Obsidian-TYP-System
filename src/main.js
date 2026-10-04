@@ -267,7 +267,12 @@ module.exports = class TypSystemPlugin extends Plugin {
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
   }
 
+  // settingsRevision counts every change of the settings (here and in
+  // onExternalSettingsChange). Undo (undo.js) compares it to tell whether
+  // anything happened after the action it would revert. Bumped synchronously,
+  // before the await, so a caller that doesn't await still counts at once.
   async saveSettings() {
+    this.settingsRevision = (this.settingsRevision ?? 0) + 1;
     await this.saveData(this.settings);
   }
 
@@ -276,6 +281,8 @@ module.exports = class TypSystemPlugin extends Plugin {
   // overwrite the new ones on the next save. Obsidian rebuilds an open
   // settings tab itself; colors and the TYP-Pane are refreshed here.
   async onExternalSettingsChange() {
+    // Invalidates a pending undo: its snapshot predates the synced settings.
+    this.settingsRevision = (this.settingsRevision ?? 0) + 1;
     await this.loadSettings();
     this.refreshTypColors();
   }

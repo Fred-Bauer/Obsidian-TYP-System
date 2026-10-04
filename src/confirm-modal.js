@@ -1,4 +1,4 @@
-const { ConfirmationModal } = require("obsidian");
+const { ConfirmationModal, Platform } = require("obsidian");
 const { nameColor, paintColorDot, DEFAULT_TYP_COLOR } = require("./typ-colors");
 
 // A TYP name in running text (dialogs): colored when "TYP-Pane" coloring is on
@@ -62,18 +62,30 @@ function appendParts(el, parts) {
 //   focus       - "confirm" or "cancel": which button Enter triggers. Rename
 //                 focuses the action, delete and merge focus Cancel.
 //   onConfirm / onCancel - onCancel also covers Escape and a click outside.
+//   dontAskAgain - optional: shows Obsidian's "Don't ask again" checkbox (as
+//                 in its "Delete file", desktop only) and passes its state to
+//                 onConfirm(dontAskAgain). Only for dialogs that may be
+//                 switched off, i.e. actions that can be undone.
 //
 // Both callbacks run from onClose, i.e. once the dialog is gone - as before
 // the switch to ConfirmationModal, and so a long onConfirm (rewriting many
 // notes) neither keeps the dialog open nor runs twice.
 class ConfirmModal extends ConfirmationModal {
-  constructor(app, { title, body = [], confirmText, warning = false, focus = "confirm", onConfirm, onCancel }) {
+  constructor(app, { title, body = [], confirmText, warning = false, focus = "confirm", dontAskAgain = false, onConfirm, onCancel }) {
     super(app);
     this.title = title;
     this.body = body;
     this.onConfirm = onConfirm;
     this.onCancel = onCancel;
     this.confirmed = false;
+    this.dontAskAgain = false;
+
+    // Before the buttons, so it sits on the left as in Obsidian's dialogs.
+    if (dontAskAgain && !Platform.isMobile) {
+      this.addCheckbox("Don't ask again", (checked) => {
+        this.dontAskAgain = checked;
+      });
+    }
 
     // Buttons already here, not in onOpen: ConfirmationModal.open() looks for
     // the initial-focus button before it calls onOpen.
@@ -101,7 +113,7 @@ class ConfirmModal extends ConfirmationModal {
   onClose() {
     super.onClose();
     this.contentEl.empty();
-    if (this.confirmed) this.onConfirm?.();
+    if (this.confirmed) this.onConfirm?.(this.dontAskAgain);
     else this.onCancel?.();
   }
 }

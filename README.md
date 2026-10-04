@@ -19,8 +19,8 @@ Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TY
 
 ## TYP-Pane detail
 
-- Header: name (click searches), count, **Rename and update notes** (accent color, rewrites every affected note after confirmation), **Rename** (settings only), **Manually creatable** toggle, **Delete** (with confirmation)
-- **Confirmations** (delete, rename and update notes, merge – for TYPs and Subtyps alike) are Obsidian's own confirmation dialogs (`ConfirmationModal`, Obsidian 1.13+): [Cancel] [Action], a bottom sheet on phones. As in Obsidian's own "Merge property …?" dialog, the question is the title ("Delete TERMIN?", "Rename TERMIN to TERMINE?", "Merge Arzt into Praxis?"), with TYP and Subtyp names colored like in the TYP-List (or with a color dot when "TYP-Pane" coloring is off); the text below only adds what the title doesn't say (how many notes are updated, which properties are lost, what a merge does) and is left out otherwise. With a keyboard, the rename dialogs focus the action button (Enter confirms), delete and merge dialogs focus **Cancel**. Escape or a click outside cancels
+- Header: name (click searches), count, **Rename and update notes** (accent color, rewrites every affected note after confirmation), **Rename** (settings only), **Manually creatable** toggle, **Delete** (with confirmation unless switched off, then undoable – see [Undo](#undo))
+- **Confirmations** (delete, rename and update notes, merge – for TYPs and Subtyps alike) are Obsidian's own confirmation dialogs (`ConfirmationModal`, Obsidian 1.13+): [Cancel] [Action], a bottom sheet on phones. As in Obsidian's own "Merge property …?" dialog, the question is the title ("Delete TERMIN?", "Rename TERMIN to TERMINE?", "Merge Arzt into Praxis?"), with TYP and Subtyp names colored like in the TYP-List (or with a color dot when "TYP-Pane" coloring is off); the text below only adds what the title doesn't say (how many notes are updated, which properties are lost, what a merge does) and is left out otherwise. With a keyboard, the rename dialogs focus the action button (Enter confirms), delete and merge dialogs focus **Cancel**. Escape or a click outside cancels. The delete dialogs also offer **Don't ask again** on desktop (see [Undo](#undo))
 - **Merge:** renaming onto an existing TYP offers to merge. Notes move to the target; color, description and TYP-Frontmatter of the source are dropped; every Subtyp moves along, same-named blocks are combined (the target wins per key). If the target isn't manually creatable, every moved Subtyp is switched off too
 - **Manually creatable** (on by default) decides whether a TYP appears in the TYP-Picker. Switching a TYP off or on does the same for every Subtyp of it; switching one Subtyp on also switches its TYP on. A Subtyp is never creatable without its TYP
 - Options row: color (native picker, reset) and the description
@@ -28,7 +28,7 @@ Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TY
 - **Floating properties:** italic rows within the same list (accent "+" button or right-click → *Floating*). They count for sorting but aren't created for new notes; Templater only gets them with `includeFloating: true`
 - **Subtyp blocks:** one block per Subtyp below the TYP-Frontmatter, same features. A Subtyp block adds to the TYP-Frontmatter for notes with that SUBTYP. A key may appear in several blocks; with the TYP-Frontmatter, the Subtyp overrides value, floating flag and shortcut, the row keeps the TYP-Frontmatter position. Rows can be dragged between blocks (an existing name merges), blocks can be reordered by dragging
   - **Add Subtyp** creates a block, named inline
-  - Footer: **Subtyp color** (dot with sliders *Hue* and *Lightness*, stored as an offset from the TYP color in OKLCH, so every Subtyp follows its TYP; limits under Settings → *Subtyp colors*), plus the same actions as the TYP header. Deleting only asks if properties would be lost; notes keep their SUBTYP
+  - Footer: **Subtyp color** (dot with sliders *Hue* and *Lightness*, stored as an offset from the TYP color in OKLCH, so every Subtyp follows its TYP; limits under Settings → *Subtyp colors*), plus the same actions as the TYP header. Deleting only asks if properties would be lost (and only while *Confirm deletion* is on), and can be undone either way (see [Undo](#undo)); notes keep their SUBTYP
   - Every **unregistered Subtyp** of this TYP appears as an empty block: click registers, click on the name searches
 - Clickable names (title, block headings) search their notes and light up in accent color on hover
 
@@ -52,6 +52,23 @@ Instead of a fixed value, a property can get a value computed when a note is cre
 `newFile`, `ctx` and `key` (the property the shortcut sits on) are filled in; every other name becomes an input field, typed on entry (`5` → number, `true`/`false`, `null`, otherwise text; empty = not set). Dotted names collect into one object argument (one level).
 
 The shortcut is stored **next to** the value (`typShortcuts`, or `shortcuts` in a Subtyp block), never in it, so typed property widgets keep working. The fixed value stays as **fallback** when the script is missing or throws. For list properties, a fixed shortcut's value is wrapped in an array.
+
+### Undo
+
+These actions change only plugin settings and show a notice with an **Undo** button for 8 seconds afterwards:
+
+- **Delete a TYP** – notes keep their TYP, which then shows as unregistered
+- **Delete a Subtyp** – notes keep their SUBTYP
+- **Delete properties** from the TYP-Frontmatter or a Subtyp block (value, shortcut and floating flag go with them): *Property "key" removed from TERMIN.*
+- **Remove a shortcut**
+- **Change a color** – a TYP color with the native picker (one undo per picker session, offered once the color is confirmed), a Subtyp color with the sliders (offered when the popover closes, only if the color changed)
+- **Reset a color** – of a TYP (detail header) or of a Subtyp (block footer)
+
+Not undoable on purpose: toggling *Floating* (just toggle it back), renaming in the settings only, removing an entry from the global property order.
+
+**Confirm deletion** (Settings, on by default): deleting a TYP, or a Subtyp with properties, asks first. As these deletions can be undone, the question can be switched off – with the setting or with **Don't ask again** in the dialog (desktop only, as in Obsidian's "Delete file"). Without it, the deletion happens at once and only the undo notice follows. Everything that rewrites notes or files (rename and update notes, merges) always asks.
+
+Undo restores the plugin settings as they were right before the action, saves them and refreshes every view (the TYP-Pane is rebuilt). Notes are never touched. Only the **last** action can be undone, there is no history and no command. Any later change of the settings – another action, any edit in the TYP-Pane or the settings tab, or `data.json` arriving through Sync – voids it: Undo then only says *"Can't undo – the settings have changed since."* instead of silently reverting that change too.
 
 ## TYP-Picker
 
@@ -116,6 +133,7 @@ The plugin has no Templater logic of its own but offers an API on `app.plugins.p
 - **Frontmatter blocks** (`src/frontmatter-blocks.js`): one Obsidian property editor per block - the only way to allow the same key in several blocks. Keyboard navigation across blocks and dragging rows between blocks are added on top of Obsidian's own behavior
 - **Shortcuts** (`src/shortcuts.js`, `shortcut-scripts.js`, `shortcut-picker.js`): button and chip hang on the row's `containerEl`, which `renderProperty()` never empties, so no hook into Obsidian's rendering is needed
 - Graph coloring patches `renderer.setData` (like graph-nested-tags); property rename sync wraps `app.fileManager.renameProperty`; the *Floating* menu entry patches `showPropertyMenu` of Obsidian's private property row class. All three are undone on unload
-- **Confirmation dialog** (`src/confirm-modal.js`): one `ConfirmModal` on top of Obsidian's public `ConfirmationModal` (since 1.13.0) for every confirmation; title and body take text and nodes, so names can be colored. Both callbacks run once the dialog has closed
+- **Confirmation dialog** (`src/confirm-modal.js`): one `ConfirmModal` on top of Obsidian's public `ConfirmationModal` (since 1.13.0) for every confirmation; title and body take text and nodes, so names can be colored. Both callbacks run once the dialog has closed; the `dontAskAgain` option adds Obsidian's checkbox (`addCheckbox`, desktop only) and hands its state to `onConfirm`
+- **Undo** (`src/undo.js`): a `structuredClone` of the settings before the action, restored in place (the `plugin.settings` object stays the same). `saveSettings()` and `onExternalSettingsChange()` bump `plugin.settingsRevision`; an undo whose recorded revision no longer matches is refused
 - The TYP-Pane (view type `typ-system-pane`) reconnects itself after hot reload
 - The global property order uses its own plain list instead of Obsidian's widget: re-running `synchronize()` from `saveFrontmatter` can cause a stack overflow

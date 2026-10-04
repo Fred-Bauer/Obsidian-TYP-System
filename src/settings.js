@@ -48,6 +48,11 @@ const DEFAULT_SETTINGS = {
   // TYP-Picker, true = a separate Subtyp-Picker after the TYP choice.
   separateSubtypPicker: false,
   includeIgnoredFiles: false,
+  // Ask before deleting a TYP or a Subtyp with properties. Only deletions that
+  // touch nothing but these settings can be switched off ("Don't ask again" in
+  // the dialog) - they can be undone (undo.js). Anything that rewrites notes
+  // or files always asks.
+  confirmDeletion: true,
   // Own tag/attachment colors in the graph disabled (2026-09-30): the Minimal
   // theme's Style Settings cover both, see graph-colors.js.
   // graphTagColorEnabled: false,
@@ -120,6 +125,19 @@ class TypSystemSettingTab extends PluginSettingTab {
               this.plugin.settings.includeIgnoredFiles = value;
               await this.plugin.saveSettings();
               this.plugin.refreshTypColors?.();
+            })
+          )
+      )
+      .addSetting((setting) =>
+        setting
+          .setName("Confirm deletion")
+          .setDesc(
+            "Ask before deleting a TYP or a Subtyp with properties. When off, they are deleted at once; either way the notice afterwards offers Undo. Dialogs that rewrite notes (rename and update notes, merge) always ask."
+          )
+          .addToggle((toggle) =>
+            toggle.setValue(this.plugin.settings.confirmDeletion).onChange(async (value) => {
+              this.plugin.settings.confirmDeletion = value;
+              await this.plugin.saveSettings();
             })
           )
       );

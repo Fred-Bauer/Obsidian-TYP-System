@@ -421,21 +421,8 @@ body.typ-system-subtyps-right .typ-list-subtyps {
   white-space: nowrap;
 }
 
-.typ-confirm-modal {
-  width: auto;
-  max-width: 22em;
-}
-
-.typ-confirm-modal .modal-content p {
-  text-align: center;
-}
-
-.typ-confirm-modal .modal-button-container {
-  justify-content: center;
-}
-
-/* A TYP name in dialog text (see appendTypName in typ-pane.js) - dot variant
-   like .typ-picker-dot. */
+/* A TYP or Subtyp name in dialog text (see appendTypName/appendSubtypName in
+   confirm-modal.js) - dot variant like .typ-picker-dot. */
 .typ-inline-dot {
   display: inline-block;
   width: 0.6em;

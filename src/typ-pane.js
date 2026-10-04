@@ -1,4 +1,5 @@
-const { ItemView, Menu, Modal, Notice, setIcon, debounce } = require("obsidian");
+const { ItemView, Menu, Notice, setIcon, debounce } = require("obsidian");
+const { ConfirmModal, typNameNode, subtypNameNode } = require("./confirm-modal");
 const { mountFrontmatterBlocks } = require("./frontmatter-blocks");
 const {
   normalizeSubtypName,
@@ -104,169 +105,6 @@ function normalizeRawTyp(raw, normalize = normalizeTypName) {
 // gets quotes. Lists already carry their brackets in the key.
 function displayTypKey(typKey) {
   return typKey !== typKey.trim() ? `"${typKey}"` : typKey;
-}
-
-// A TYP name in running text (dialogs): colored when "TYP-Pane" coloring is on
-// (colorViews.typList), otherwise a dot before plain text - the same switch as
-// in the picker and the list. The caller passes color so a rename can use the
-// same (old) color for old and new name. color null = TYP without a color.
-function appendTypName(parentEl, plugin, typ, color) {
-  if (plugin.settings.colorViews.typList) {
-    const nameEl = parentEl.createSpan({ cls: "typ-inline-name", text: typ });
-    if (color) nameEl.style.color = color;
-  } else {
-    paintColorDot(parentEl.createSpan({ cls: "typ-inline-dot" }), color ?? DEFAULT_TYP_COLOR, !color);
-    parentEl.createSpan({ cls: "typ-inline-name", text: typ });
-  }
-}
-
-class ConfirmDeleteTypModal extends Modal {
-  constructor(plugin, typ, onConfirm) {
-    super(plugin.app);
-    this.plugin = plugin;
-    this.typ = typ;
-    this.onConfirm = onConfirm;
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    this.modalEl.addClass("typ-confirm-modal");
-    const p = contentEl.createEl("p");
-    p.appendText("Delete TYP ");
-    appendTypName(p, this.plugin, this.typ, this.plugin.settings.typColors[this.typ] ?? null);
-    p.appendText("?");
-
-    const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
-
-    const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "Delete" });
-    confirmBtn.addEventListener("click", () => {
-      this.close();
-      this.onConfirm();
-    });
-  }
-
-  onClose() {
-    this.contentEl.empty();
-  }
-}
-
-// Shown before "Rename and update notes" (see renderTypSettings and
-// startDetailRename). Unlike a plain rename, which only touches the settings,
-// this also rewrites the TYP of every affected note - a bulk write across
-// possibly many files, hence the explicit confirmation.
-class ConfirmRenameTypModal extends Modal {
-  constructor(plugin, oldTyp, newTyp, affectedCount, onConfirm, onCancel) {
-    super(plugin.app);
-    this.plugin = plugin;
-    this.oldTyp = oldTyp;
-    this.newTyp = newTyp;
-    this.affectedCount = affectedCount;
-    this.onConfirm = onConfirm;
-    this.onCancel = onCancel;
-    this.confirmed = false;
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    this.modalEl.addClass("typ-confirm-modal");
-    // Same color for old and new: the new name has no typColors entry yet but
-    // takes over the old one's (see applyRename).
-    const color = this.plugin.settings.typColors[this.oldTyp] ?? null;
-    const p = contentEl.createEl("p");
-    p.appendText("Rename TYP ");
-    appendTypName(p, this.plugin, this.oldTyp, color);
-    p.appendText(" to ");
-    appendTypName(p, this.plugin, this.newTyp, color);
-    p.appendText(` and update ${plural(this.affectedCount, "note")}?`);
-
-    const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
-
-    const confirmBtn = buttonRow.createEl("button", { cls: "mod-cta", text: "Rename" });
-    confirmBtn.addEventListener("click", () => {
-      this.confirmed = true;
-      this.close();
-      this.onConfirm();
-    });
-  }
-
-  // Covers "Cancel" as well as Escape or a click outside.
-  onClose() {
-    this.contentEl.empty();
-    if (!this.confirmed) this.onCancel?.();
-  }
-}
-
-// Renaming to the name of an already registered TYP (see startDetailRename)
-// offers to merge both (see mergeTyp) instead of silently dropping the rename.
-// It always rewrites the notes, whichever rename button started it: a merge in
-// the settings only would leave the source TYP's notes as an unregistered
-// entry.
-class ConfirmMergeTypModal extends ConfirmRenameTypModal {
-  onOpen() {
-    const { contentEl } = this;
-    this.modalEl.addClass("typ-confirm-modal");
-    const settings = this.plugin.settings;
-    const p = contentEl.createEl("p");
-    p.appendText("TYP ");
-    appendTypName(p, this.plugin, this.newTyp, settings.typColors[this.newTyp] ?? null);
-    p.appendText(" already exists. Merge ");
-    appendTypName(p, this.plugin, this.oldTyp, settings.typColors[this.oldTyp] ?? null);
-    p.appendText(" into it?");
-
-    contentEl.createEl("p", {
-      text:
-        `${plural(this.affectedCount, "note")} ${this.affectedCount === 1 ? "moves" : "move"} to ${this.newTyp}. ` +
-        `The color, description and TYP-Frontmatter of ${this.oldTyp} are dropped. ` +
-        `Every Subtyp moves along; blocks with the same name are merged.`,
-    });
-
-    const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
-
-    const confirmBtn = buttonRow.createEl("button", { cls: "mod-warning", text: "Merge" });
-    confirmBtn.addEventListener("click", () => {
-      this.confirmed = true;
-      this.close();
-      this.onConfirm();
-    });
-  }
-}
-
-// Confirmations around Subtyps (see renderSectionFooter): plain text instead
-// of colored TYP names, otherwise like the TYP dialogs above.
-class ConfirmSubtypModal extends Modal {
-  constructor(app, { paragraphs, confirmText, confirmCls, onConfirm, onCancel }) {
-    super(app);
-    this.paragraphs = paragraphs;
-    this.confirmText = confirmText;
-    this.confirmCls = confirmCls;
-    this.onConfirm = onConfirm;
-    this.onCancel = onCancel;
-    this.confirmed = false;
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    this.modalEl.addClass("typ-confirm-modal");
-    for (const text of this.paragraphs) contentEl.createEl("p", { text });
-
-    const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    buttonRow.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
-
-    const confirmBtn = buttonRow.createEl("button", { cls: this.confirmCls, text: this.confirmText });
-    confirmBtn.addEventListener("click", () => {
-      this.confirmed = true;
-      this.close();
-      this.onConfirm();
-    });
-  }
-
-  onClose() {
-    this.contentEl.empty();
-    if (!this.confirmed) this.onCancel?.();
-  }
 }
 
 class TypPane extends ItemView {
@@ -1024,7 +862,7 @@ class TypPane extends ItemView {
 
     // Left of the plain rename button, highlighted in accent color: this one
     // also rewrites the TYP of every affected note (after confirmation, see
-    // startDetailRename/ConfirmRenameTypModal).
+    // startDetailRename).
     const renameWithNotesBtn = header.createDiv({
       cls: "clickable-icon typ-detail-rename-notes",
       attr: { "aria-label": "Rename and update notes" },
@@ -1316,15 +1154,23 @@ class TypPane extends ItemView {
       apply();
       return;
     }
-    new ConfirmSubtypModal(this.app, {
-      paragraphs: [
-        `Delete Subtyp ${subtyp} of ${typ}?`,
+    const { plugin } = this;
+    new ConfirmModal(this.app, {
+      title: [
+        "Delete ",
+        subtypNameNode(plugin, typ, subtyp),
+        " of ",
+        typNameNode(plugin, typ, plugin.settings.typColors[typ] ?? null),
+        "?",
+      ],
+      body: [
         keys.length === 1
           ? `Its property ${keys[0]} will be lost.`
           : `Its ${keys.length} properties ${keys.join(", ")} will be lost.`,
       ],
       confirmText: "Delete",
-      confirmCls: "mod-warning",
+      warning: true,
+      focus: "cancel",
       onConfirm: apply,
     }).open();
   }
@@ -1374,13 +1220,22 @@ class TypPane extends ItemView {
         (name) => name.toLowerCase() === value.toLowerCase() && name !== subtyp
       );
       if (existing) {
-        new ConfirmSubtypModal(this.app, {
-          paragraphs: [
-            `Subtyp ${existing} already exists in ${typ}. Merge ${subtyp} into it?`,
-            `${plural(countOf(subtyp), "note")} ${countOf(subtyp) === 1 ? "moves" : "move"} to ${existing}, and the properties of ${subtyp} move into the ${existing} block.`,
+        new ConfirmModal(this.app, {
+          title: [
+            "Merge ",
+            subtypNameNode(this.plugin, typ, subtyp),
+            " into ",
+            subtypNameNode(this.plugin, typ, existing),
+            "?",
+          ],
+          body: [
+            `${existing} already exists in ${typ}. ` +
+              `${plural(countOf(subtyp), "note")} ${countOf(subtyp) === 1 ? "moves" : "move"} to it, ` +
+              `and the properties of ${subtyp} move into its block.`,
           ],
           confirmText: "Merge",
-          confirmCls: "mod-warning",
+          warning: true,
+          focus: "cancel",
           onConfirm: async () => {
             mergeSubtyps(this.plugin.settings, typ, subtyp, existing);
             await this.plugin.saveSettings();
@@ -1398,10 +1253,19 @@ class TypPane extends ItemView {
         await applyRename(value, { withNotes: false });
         return;
       }
-      new ConfirmSubtypModal(this.app, {
-        paragraphs: [`Rename Subtyp ${subtyp} to ${value} and update ${plural(countOf(subtyp), "note")}?`],
+      // Same color for old and new name: the new one takes over the old one's
+      // offset (see renameSubtyp).
+      new ConfirmModal(this.app, {
+        title: [
+          "Rename ",
+          subtypNameNode(this.plugin, typ, subtyp),
+          " to ",
+          subtypNameNode(this.plugin, typ, value, subtyp),
+          "?",
+        ],
+        body: [`${plural(countOf(subtyp), "note")} will be updated.`],
         confirmText: "Rename",
-        confirmCls: "mod-cta",
+        focus: "confirm",
         onConfirm: () => applyRename(value, { withNotes: true }),
         onCancel: () => this.render(),
       }).open();
@@ -1578,7 +1442,7 @@ class TypPane extends ItemView {
   }
 
   showDeleteConfirm(typ) {
-    new ConfirmDeleteTypModal(this.plugin, typ, async () => {
+    const onConfirm = async () => {
       this.plugin.settings.typs = this.plugin.settings.typs.filter((t) => t !== typ);
       delete this.plugin.settings.typColors[typ];
       delete this.plugin.settings.typDescriptions[typ];
@@ -1593,6 +1457,13 @@ class TypPane extends ItemView {
       this.closeTypSettings();
       await this.plugin.saveSettings();
       this.plugin.refreshTypColors?.();
+    };
+    new ConfirmModal(this.app, {
+      title: ["Delete ", typNameNode(this.plugin, typ, this.plugin.settings.typColors[typ] ?? null), "?"],
+      confirmText: "Delete",
+      warning: true,
+      focus: "cancel",
+      onConfirm,
     }).open();
   }
 
@@ -1679,21 +1550,24 @@ class TypPane extends ItemView {
         return;
       }
 
-      // A bulk write across possibly many files - confirm first.
+      // A bulk write across possibly many files - confirm first. Same color
+      // for old and new name: the new one has no typColors entry yet but takes
+      // over the old one's (see applyRename).
       const { counts } = this.plugin.typIndex.typCounts();
-      new ConfirmRenameTypModal(
-        this.plugin,
-        typ,
-        value,
-        counts.get(typ) ?? 0,
-        async () => {
+      const color = this.plugin.settings.typColors[typ] ?? null;
+      new ConfirmModal(this.app, {
+        title: ["Rename ", typNameNode(this.plugin, typ, color), " to ", typNameNode(this.plugin, value, color), "?"],
+        body: [`${plural(counts.get(typ) ?? 0, "note")} will be updated.`],
+        confirmText: "Rename",
+        focus: "confirm",
+        onConfirm: async () => {
           await applyRename(value);
           const renamed = await renameTypInNotes(this.plugin, typ, value);
           new Notice(`TYP ${value}: ${plural(renamed, "note")} updated.`);
           this.render();
         },
-        () => this.render()
-      ).open();
+        onCancel: () => this.render(),
+      }).open();
     };
 
     titleEl.addEventListener("keydown", (event) => {
@@ -1713,16 +1587,33 @@ class TypPane extends ItemView {
     titleEl.addEventListener("blur", () => finish(true));
   }
 
+  // Renaming to the name of an already registered TYP (see startDetailRename)
+  // offers to merge both (see mergeTyp) instead of silently dropping the
+  // rename. It always rewrites the notes, whichever rename button started it:
+  // a merge in the settings only would leave the source TYP's notes as an
+  // unregistered entry.
   showMergeConfirm(source, target) {
-    const { counts } = this.plugin.typIndex.typCounts();
-    new ConfirmMergeTypModal(
-      this.plugin,
-      source,
-      target,
-      counts.get(source) ?? 0,
-      () => this.mergeTyp(source, target),
-      () => this.render()
-    ).open();
+    const { settings } = this.plugin;
+    const count = this.plugin.typIndex.typCounts().counts.get(source) ?? 0;
+    new ConfirmModal(this.app, {
+      title: [
+        "Merge ",
+        typNameNode(this.plugin, source, settings.typColors[source] ?? null),
+        " into ",
+        typNameNode(this.plugin, target, settings.typColors[target] ?? null),
+        "?",
+      ],
+      body: [
+        `${target} already exists. ${plural(count, "note")} ${count === 1 ? "moves" : "move"} to it. ` +
+          `The color, description and TYP-Frontmatter of ${source} are dropped. ` +
+          `Every Subtyp moves along; blocks with the same name are merged.`,
+      ],
+      confirmText: "Merge",
+      warning: true,
+      focus: "cancel",
+      onConfirm: () => this.mergeTyp(source, target),
+      onCancel: () => this.render(),
+    }).open();
   }
 
   // Merges source into target: notes are rewritten to target, source leaves

@@ -338,6 +338,8 @@ module.exports = {
   sortFrontmatterFor,
   placePropertyFor,
   normalizeGlobalOrder,
+  computeSortedKeys,
+  orderedDefaultKeys,
   DEFAULT_GLOBAL_ORDER,
   TYP_PROPERTY,
   SUBTYP_PROPERTY,

@@ -1,6 +1,7 @@
 const { Notice } = require("obsidian");
 const { runFrontmatterSort, sortSingleFileFrontmatter } = require("./frontmatter-sort");
 const { isBasesEnabled, createBaseCommand, activeBaseView, updateActiveView } = require("./bases");
+const { setTypOfActiveNote, createNoteWithTyp } = require("./set-typ");
 
 // Obsidian neither awaits a command callback (or a menu item's onClick) nor
 // catches its errors, so an exception would vanish into the console. These
@@ -16,6 +17,26 @@ const runOrReportError = (label, fn) => async () => {
 };
 
 function registerCommands(plugin) {
+
+  // TYP of a note without a Templater script of one's own, see set-typ.js.
+  plugin.addCommand({
+    id: "set-typ-of-active-note",
+    name: "Set TYP of active note",
+    checkCallback: (checking) => {
+      const file = plugin.app.workspace.getActiveFile();
+      if (!file || file.extension !== "md") return false;
+      if (checking) return true;
+
+      runOrReportError("Set TYP", () => setTypOfActiveNote(plugin, file))();
+      return true;
+    },
+  });
+
+  plugin.addCommand({
+    id: "new-note-with-typ",
+    name: "New note with TYP",
+    callback: runOrReportError("New note with TYP", () => createNoteWithTyp(plugin)),
+  });
 
   plugin.addCommand({
     id: "sort-frontmatter-all",

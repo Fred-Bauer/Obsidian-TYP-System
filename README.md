@@ -2,7 +2,7 @@
 
 TYP system for this vault: a **TYP-Pane** docked on the left (command "Open TYP-Pane"; on the very first start it opens there by itself, once), a native **TYP-Picker**, TYP-Frontmatter per TYP, frontmatter sorting, **Bases** generated from a TYP, and coloring of note names by their `TYP` property across many views. Split off from the **Fred** plugin.
 
-Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TYP names are uppercase, Subtyp names title case per word ("Kurz Geschichte").
+Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TYP names are uppercase, Subtyp names title case per word ("Kurz Geschichte"). The property names `TYP` and `SUBTYP` are fixed – they can't be changed in the settings (other spellings such as `typ` are read as well and rewritten to the canonical one when the plugin sets the value).
 
 ## TYP-List
 
@@ -46,7 +46,7 @@ Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TY
 Instead of a fixed value, a property can get a value computed when a note is created. Set via the button at the end of a property row:
 
 - `today` (YYYY-MM-DD), `now` (YYYY-MM-DD HH:mm), `created` (the file's creation date)
-- `tp.<script>` – runs Templater script `tp.user.<script>` and uses its return value. Offered are scripts in Templater's script folder whose comment starts with the marker `@typ-shortcut`; the text after it is the description
+- `tp.<script>` – runs Templater script `tp.user.<script>` and uses its return value (when a note gets its TYP, see [Setting a note's TYP](#setting-a-notes-typ)). Offered are scripts in Templater's script folder whose comment starts with the marker `@typ-shortcut`; the text after it is the description
 
 **Parameters:** parentheses after the marker declare the script's full argument list after `tp`:
 
@@ -97,6 +97,24 @@ Native replacement for `tp.system.suggester` (built on `FuzzySuggestModal`): col
 - Key hints at the bottom like Obsidian's own pickers: ↑↓ to navigate, ↵ to choose, esc to cancel (in the Subtyp-Picker: esc to go back)
 - **Matches are bold** wherever they are found: in the TYP name, in a Subtyp name of the row (each Subtyp separately), in the description, and in "(no Subtyp)". In names (TYP and Subtyp rows), which are semibold already, matches are also underlined in the name's own color. The search text of a TYP row is name, Subtyp names and description joined by spaces (`textParts` in `typ-picker.js` is the one definition); the match ranges are split back onto these parts for rendering
 
+## Setting a note's TYP
+
+Two commands give a note its TYP without any script of your own:
+
+- **"Set TYP of active note"** (only with a Markdown note open): TYP-Picker (TYP or Subtyp, see above), then the note gets its TYP-Frontmatter. Notice *"TYP of "X" set to TERMIN / Arzt."*
+- **"New note with TYP"**: TYP-Picker first, then a new note like Obsidian's "New note" – in the folder of *Settings → Files and links → Default location for new notes*, named *Untitled* (*Untitled 1*, … if taken; in Obsidian's language), opened in a new tab with the title selected for renaming. ESC in the picker creates nothing. The note is created with `TYP`/`SUBTYP` already in it, so a Templater "trigger on new file creation" that runs TYP.js with `skipIfNotEmpty` leaves it alone
+
+What happens to the note (the same in both, and what a [Templater script](#templater-setup-optional) should do as well):
+
+1. `TYP` and `SUBTYP` are written in canonical spelling (a variant like `typ` is renamed in place); without a Subtyp an existing `SUBTYP` is removed
+2. The TYP-Frontmatter (plus the Subtyp block, without floating properties) is added for every property the note doesn't have yet or has empty. Values already in the note always stay. Fixed shortcuts (`today`, `now`, `created`) are resolved; script shortcuts see below
+3. **Changing the TYP** of a note: empty properties left over from the previous TYP are removed – exactly those of the previous TYP's and Subtyp's blocks (floating ones included) that the new TYP doesn't have, not even as a floating property. Properties with a value always stay, and so does every other empty property: it may be empty on purpose
+4. The frontmatter is sorted (global order, TYP-Frontmatter with the Subtyp block)
+
+The write keeps comments and formatting (see [Comments and formatting are kept](#comments-and-formatting-are-kept)). If that isn't possible for the note, nothing is written: *"TYP of "X" couldn't be set without losing comments in its frontmatter."*
+
+**Script shortcuts** (`tp.<script>`) run through Templater, with the same rules as in TYP.js (see [Script shortcut convention](#script-shortcut-convention)): a property that already has a value doesn't run its script, a missing or failing script shows a notice and the fallback value is used, `ctx.after(fn)` runs after the write. The plugin builds Templater's `tp` object itself, the way Templater's own dynamic commands do – an undocumented part of Templater (tested with 2.25.1). **Without Templater** (not installed or disabled, or if that part of Templater has changed) every script shortcut gets its fallback value, with one notice: *"Script shortcuts need Templater – fallback values used for: Familie, Freunde."* `tp.hooks.on_all_templates_executed` works: the command runs as a Templater task for the note, so such a callback fires right after the frontmatter is written (after the `ctx.after` actions); `ctx.after` stays the clearer way.
+
 ## Bases
 
 Written only through Obsidian's Bases API and serialization, never self-parsed YAML. Both commands need the **Bases core plugin**: while it is off they don't appear in the command palette (a `.base` file couldn't be opened anyway).
@@ -146,7 +164,26 @@ Own tag/attachment colors in the graph are disabled since 2026-09-30 (`src/graph
 
 ## Templater integration
 
-The plugin has no Templater logic of its own but offers an API on `app.plugins.plugins["typ-system"]`, used by `_obsidian/templater-scripts/TYP.js`:
+Templater is optional. Without it the commands in [Setting a note's TYP](#setting-a-notes-typ) cover TYP, Subtyp and TYP-Frontmatter; script shortcuts then get their fallback values. With Templater the same commands run script shortcuts, and a Templater script can do the whole job inside your own templates.
+
+### Templater setup (optional)
+
+A Templater user script `TYP.js` (not included) can do what "Set TYP of active note" does, as part of a template, built on the [API](#api) below:
+
+1. Put `TYP.js` into Templater's script folder (*Settings → Templater → Script files folder location*); Templater then offers it as `tp.user.TYP`
+2. Create a template that calls it:
+   ```
+   <%* await tp.user.TYP(tp, tp.config.target_file) -%>
+   ```
+   Insert it into a note ("Templater: Insert template") to set that note's TYP. Options as third argument: `{ includeManualOff: true }` also offers TYPs and Subtyps whose *Manually creatable* switch is off
+3. Optional, for every new note: a second template with `<%* await tp.user.TYP(tp, tp.config.target_file, { skipIfNotEmpty: true }) -%>` as Templater's template for new files (*Trigger Templater on new file creation* plus a folder or file-regex template) – a note that already has content (dropped in, imported, or made by "New note with TYP") is left alone. ESC in the picker deletes the still-empty new note
+4. Script shortcuts: put scripts with the `@typ-shortcut` marker into the same folder (see [Shortcuts](#shortcuts) and [Script shortcut convention](#script-shortcut-convention))
+
+Without this script, script shortcuts still run when the TYP is set by the plugin's commands (as long as Templater is enabled), and only get their fallback value without Templater.
+
+### API
+
+The script uses this API on `app.plugins.plugins["typ-system"]`:
 
 - `getTyps({ includeManualOff })` → `[{ typ, description, count }]` in TYP-List order
 - `getTypDefaults(typ, { includeFloating, file, subtyp })` – resolved TYP-Frontmatter (plus the Subtyp block). Fixed shortcuts are resolved, script shortcuts are `null`. Pass `file` for `created`
@@ -158,7 +195,9 @@ The plugin has no Templater logic of its own but offers an API on `app.plugins.p
 - `pickTypAndSubtyp({ includeManualOff, includeUnregistered })` → `{ typ, subtyp }` or `null`
 - Inside `processFrontMatter`: `applyTypProperties(frontmatter, typ, subtyp)` (canonical spelling, removes SUBTYP if none), `sortFrontmatter(frontmatter, typ, subtyp)`, `placeProperty(frontmatter, key)` (used by Fred's property backlinking). They work on `processFrontMatter`'s object, so comments in that note's frontmatter are lost as with any `processFrontMatter` call (see [Comments and formatting are kept](#comments-and-formatting-are-kept))
 
-### Script shortcut convention (TYP.js)
+### Script shortcut convention
+
+Applies to script shortcuts run by the plugin's commands and by TYP.js alike.
 
 - `ctx = { typ, subtyp, key, values, after, args }`: `values` are the defaults resolved so far (scripts run in order), `args` the typed arguments
 - `after(fn)` queues an action that runs after the frontmatter is written, in order - for side effects like renaming the file (`quelleEditName`)
@@ -188,4 +227,5 @@ The plugin has no Templater logic of its own but offers an API on `app.plugins.p
 - **First start:** when the plugin is loaded without a `data.json` (`loadData()` resolves `null`, i.e. it has never saved settings in this vault), the TYP-Pane is created in the left sidebar and revealed. This happens once: afterwards a closed pane stays closed and only "Open TYP-Pane" brings it back. "Already created" is a marker in this device's `localStorage` for the vault (`app.saveLocalStorage("typ-system-pane-created")`), so a hot reload before the first save doesn't open the pane again. `data.json` is deliberately not written for this: with Obsidian Sync, a `data.json` full of defaults written on a second device before the real one arrives could replace the real settings. On another device (or after clearing the app's local data) the pane may therefore open once more if `data.json` hasn't arrived yet
 - **Frontmatter sorting runs in two phases** (`src/frontmatter-sort.js`): `sortCandidates()` goes through the notes using only the metadata cache and returns the number checked plus the notes whose order would change; `sortAllFrontmatter()` then writes just those (each checked once more against the cache; the file itself decides, read and written in one `editFrontmatter` call). `runFrontmatterSort()` is the single entry point of every run over many notes (both commands, play button, context menu): it asks with the first phase's count when the run is large, then runs the second and reports the result, so no caller has its own copy of the question. The progress notice counts the second phase
 - **Comment-preserving writes** (`src/frontmatter-text.js`): `editFrontmatter(app, file, mutate)` is the one write path for the plugin's own frontmatter changes. It reads and writes once through `vault.process` (an unchanged result writes nothing) and resolves to `{ status: "changed" | "unchanged" | "skipped" }`. `mutate(doc)` is synchronous and acts only through `doc`: `keys()`, `has(key)`, `get(key)`, `findKey(name)` (any case, exact spelling first), `toObject()`, `set(name, value)` (like `setCanonicalProperty`: renames a differently spelled variant in place, drops further ones, appends a missing property), `delete(name)` (every spelling, with the comments above it), `reorder(keys)`. The same interface exists twice – `TextDoc` on the cut text, `ObjectDoc` on the parsed object for the fallback – so `mutate` may run twice (text model first, object model if the text model gave up). A note without frontmatter gets a new block on `set`. `editFrontmatterText(content, mutate)` is the pure core (content in, `{ status, content }` out). The BOM is handled here because `getFrontMatterInfo` (and so `processFrontMatter`) doesn't find a block behind it, while the metadata cache does – `processFrontMatter` would put a second block in front of the BOM
+- **Setting a TYP** (`src/set-typ.js`): `setTypOfFile(plugin, file, { typ, subtyp })` is the shared core of both commands – script shortcuts first (the loop of TYP.js, `tp` built lazily on the first script that has to run), then one `editFrontmatter` call for TYP/SUBTYP, defaults, removing the previous TYP's empty leftovers (previous TYP and Subtyp read from the note's text, not the index, which may lag) and sorting, then the `ctx.after` actions. Templater access is guarded piece by piece (`create_running_config`, `functions_generator.generate_object` with RunMode DynamicProcessor 4 and FunctionsMode USER_INTERNAL 1, `start_templater_task`/`end_templater_task`); anything missing or throwing means "no Templater" and the fallback values
 - The global property order uses its own plain list instead of Obsidian's widget: re-running `synchronize()` from `saveFrontmatter` can cause a stack overflow

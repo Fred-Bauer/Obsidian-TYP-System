@@ -61,6 +61,15 @@ Instead of a fixed value, a property can get a value computed when a note is cre
 
 The shortcut is stored **next to** the value (`typShortcuts`, or `shortcuts` in a Subtyp block), never in it, so typed property widgets keep working. The fixed value stays as **fallback** when the script is missing or throws. For list properties, a fixed shortcut's value is wrapped in an array.
 
+**In the property row** a shortcut shows as a chip in place of the value field:
+
+- The button at the row's end shows **ƒ** (`square-function`, "Set shortcut") without a shortcut – only on hover/focus – and **×** ("Remove shortcut") while one is set. Removing can be undone (see Undo)
+- Clicking the **chip** opens the picker to change the shortcut (picking the same script again prefills its arguments)
+- **Script not found:** if the Templater script of a `tp.` shortcut no longer exists (deleted, renamed, marker removed), the × turns into the same orange warning triangle as Obsidian's type warning: *"Script not found – the fallback value will be used. Click to remove the shortcut."* A click removes the shortcut like the ×. The warning follows the script folder live – rename the script back and the × returns. It only appears once the folder has been read after startup, so nothing flashes. Without Templater (or without a script folder) every `tp.` shortcut shows it, which is accurate: only the fallback value would be written
+- A row with Obsidian's type warning and **no** shortcut keeps the triangle and hides the button; with a shortcut set, the button wins (the triangle would refer to the hidden fallback value)
+
+**Shortcut picker:** searches name and description (*"creation"* finds `created`), with the matched characters in bold; placeholder *Choose shortcut for "key"…* and the usual key hints (↑↓ to navigate, ↵ to choose, esc to cancel). A script with declared parameters then asks for its arguments (**Arguments for tp.…**, **Apply**; Enter applies, ESC keeps the current shortcut).
+
 ### Undo
 
 These actions change only plugin settings and show a notice with an **Undo** button for 8 seconds afterwards:
@@ -82,8 +91,10 @@ Undo restores the plugin settings as they were right before the action, saves th
 
 Native replacement for `tp.system.suggester` (built on `FuzzySuggestModal`): color, description and count per row. A TYP or Subtyp that isn't manually creatable is hidden unless requested.
 
-- Default: each Subtyp indented below its TYP; search works per group
-- Setting **"Separate Subtyp-Picker"**: TYP-Picker first (with the Subtyp list in each row), then a Subtyp-Picker with "TYP (no Subtyp)" first. ESC goes back. The Subtyp-Picker is pre-sorted by what was typed before ("Lehr" → ORGA → *Lehrveranstaltung* on top)
+- Default (placeholder *Choose TYP or Subtyp…*): each Subtyp indented below its TYP; search works per group
+- Setting **"Separate Subtyp-Picker"**: TYP-Picker first (*Choose TYP…*, with the Subtyp list in each row), then a Subtyp-Picker (*Choose Subtyp for ORGA…*) with "TYP (no Subtyp)" first. ESC goes back. The Subtyp-Picker is pre-sorted by what was typed before ("Lehr" → ORGA → *Lehrveranstaltung* on top)
+- Key hints at the bottom like Obsidian's own pickers: ↑↓ to navigate, ↵ to choose, esc to cancel (in the Subtyp-Picker: esc to go back)
+- **Matches are bold** wherever they are found: in the TYP name, in a Subtyp name of the row (each Subtyp separately), in the description, and in "(no Subtyp)". In names (TYP and Subtyp rows), which are semibold already, matches are also underlined in the name's own color. The search text of a TYP row is name, Subtyp names and description joined by spaces (`textParts` in `typ-picker.js` is the one definition); the match ranges are split back onto these parts for rendering
 
 ## Bases
 
@@ -140,7 +151,7 @@ The plugin has no Templater logic of its own but offers an API on `app.plugins.p
 - In the code TYP and Subtyp are fixed terms too (`typ`, `subtyp`, plural `typs`/`subtyps`)
 - **TYP index** (`src/typ-index.js`): holds TYP and SUBTYP of every note (property names case-insensitive) and fires its own `change` event only on real TYP/SUBTYP changes; all coloring hangs on it, so typing triggers no recoloring. Caches the counts
 - **Frontmatter blocks** (`src/frontmatter-blocks.js`): one Obsidian property editor per block - the only way to allow the same key in several blocks. Keyboard navigation across blocks and dragging rows between blocks are added on top of Obsidian's own behavior
-- **Shortcuts** (`src/shortcuts.js`, `shortcut-scripts.js`, `shortcut-picker.js`): button and chip hang on the row's `containerEl`, which `renderProperty()` never empties, so no hook into Obsidian's rendering is needed
+- **Shortcuts** (`src/shortcuts.js`, `shortcut-scripts.js`, `shortcut-picker.js`): button and chip hang on the row's `containerEl`, which `renderProperty()` never empties, so no hook into Obsidian's rendering is needed. The script list is read ahead and rescanned (debounced) on file events in Templater's script folder; its accessor `getShortcutScripts()` also offers `isLoaded()` and `onChange(fn)`, through which the TYP-Pane updates only the shortcut buttons (`refreshShortcutControls`) when a script appears or vanishes
 - Graph coloring patches `renderer.setData` (like graph-nested-tags); property rename sync wraps `app.fileManager.renameProperty`; the *Floating* menu entry patches `showPropertyMenu` of Obsidian's private property row class. All three are undone on unload
 - **Disabling the plugin cleans up at once**, without waiting for each view to re-render:
   - Inline colors in the file explorer, search, Recent Files, backlinks, bookmarks, the note title and "All properties" are set through `setInlineColor` (`src/typ-colors.js`), which marks each element with `data-typ-colored`. On unload exactly the marked elements lose their color, in every window; inline colors from themes or other plugins stay

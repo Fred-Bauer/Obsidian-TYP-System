@@ -1,5 +1,6 @@
-const { FuzzySuggestModal, Modal, Setting } = require("obsidian");
+const { FuzzySuggestModal, Modal, Setting, renderMatches } = require("obsidian");
 const { FIXED_SHORTCUTS, SCRIPT_PREFIX, buildArgs, inputParams } = require("./shortcuts");
+const { pickerInstructions } = require("./typ-utils");
 
 // List label: the name, plus the declared parameter names for a script, so
 // the picker already shows that (and how) it takes arguments.
@@ -17,24 +18,32 @@ class ShortcutPickerModal extends FuzzySuggestModal {
     this.items = items;
     this.resolve = resolve;
     this.chosen = false;
-    this.setPlaceholder(`Shortcut für „${key}“ – ESC für Abbruch`);
+    this.setPlaceholder(`Choose shortcut for "${key}"…`);
+    this.setInstructions(pickerInstructions());
   }
 
   getItems() {
     return this.items;
   }
 
-  // Fuzzy search also covers the description: "Erstellungsdatum" finds "created".
+  // Fuzzy search also covers the description: "creation" finds "created".
   getItemText(item) {
     const label = itemLabel(item);
     return item.description ? `${label} ${item.description}` : label;
   }
 
+  // Matched characters marked like in Obsidian's own suggesters. The ranges
+  // refer to the whole search text (getItemText), so the description's are
+  // shifted back by the label and the space before it.
   renderSuggestion(match, el) {
     const item = match.item;
+    const label = itemLabel(item);
+    const matches = match.match?.matches?.length ? match.match.matches : null;
     el.addClass("typ-shortcut-suggestion");
-    el.createEl("code", { cls: "typ-shortcut-suggestion-name", text: itemLabel(item) });
-    if (item.description) el.createSpan({ cls: "typ-shortcut-suggestion-desc", text: item.description });
+    renderMatches(el.createEl("code", { cls: "typ-shortcut-suggestion-name" }), label, matches, 0);
+    if (item.description) {
+      renderMatches(el.createSpan({ cls: "typ-shortcut-suggestion-desc" }), item.description, matches, -(label.length + 1));
+    }
   }
 
   // Obsidian's selectSuggestion() calls close() BEFORE onChooseItem(), so
@@ -75,7 +84,7 @@ class ShortcutArgsModal extends Modal {
   }
 
   onOpen() {
-    this.titleEl.setText(`Argumente für ${this.item.name}`);
+    this.titleEl.setText(`Arguments for ${this.item.name}`);
     if (this.item.description) {
       this.contentEl.createDiv({ cls: "typ-shortcut-args-desc", text: this.item.description });
     }
@@ -97,7 +106,7 @@ class ShortcutArgsModal extends Modal {
     }
     new Setting(this.contentEl).addButton((button) =>
       button
-        .setButtonText("Übernehmen")
+        .setButtonText("Apply")
         .setCta()
         .onClick(() => this.submit())
     );

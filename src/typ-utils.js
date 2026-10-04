@@ -18,6 +18,17 @@ function joinAnd(parts) {
   return parts.length <= 1 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
+// Key hints at the bottom of a picker, worded like those of Obsidian's own
+// suggesters. escPurpose: the Subtyp-Picker says "to go back", since ESC there
+// returns to the TYP choice.
+function pickerInstructions(escPurpose = "to cancel") {
+  return [
+    { command: "↑↓", purpose: "to navigate" },
+    { command: "↵", purpose: "to choose" },
+    { command: "esc", purpose: escPurpose },
+  ];
+}
+
 // Hue (0-360°) of a hex color, so colors sort along the spectrum instead of by
 // hex string. Achromatic colors (gray/black/white) have no hue and return null;
 // compareTyps keeps them last in both directions.
@@ -75,4 +86,4 @@ function sortTypsByMode(typs, mode, counts, typColors) {
   return [...typs].sort((a, b) => compareTyps(mode, a, b, counts, typColors));
 }
 
-module.exports = { normalizeTypName, plural, joinAnd, hexToHue, compareTyps, sortTypsByMode };
+module.exports = { normalizeTypName, plural, joinAnd, pickerInstructions, hexToHue, compareTyps, sortTypsByMode };

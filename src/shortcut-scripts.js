@@ -34,12 +34,20 @@ function parseParams(raw) {
 // Keeps the list of marked Templater scripts current. It is read ahead of time
 // and updated on changes, so the picker opens without waiting and without file
 // access. Returns an accessor for the list ([{ name, params, description }],
-// sorted by name).
+// sorted by name), with two additions for the "script not found" warning of
+// the property rows (see renderShortcutControls in typ-frontmatter-editor.js):
+//   accessor.isLoaded()   false until the folder was read once - before that
+//                         an empty list means "not known yet", not "missing",
+//                         and no row may warn
+//   accessor.onChange(fn) fn runs after the first read and whenever the list
+//                         changed; returns a function that unsubscribes
 function registerShortcutScripts(plugin) {
   const { app } = plugin;
 
   let scriptFolder = null;
   let scripts = [];
+  let loaded = false;
+  const listeners = new Set();
 
   const currentScriptFolder = () => {
     const folder = app.plugins.plugins["templater-obsidian"]?.settings?.user_scripts_folder;
@@ -80,7 +88,20 @@ function registerShortcutScripts(plugin) {
     // Folder changed in Templater meanwhile: drop this result, the run for the
     // new folder is already scheduled.
     if (folderPath !== scriptFolder) return;
-    scripts = found.sort((a, b) => a.name.localeCompare(b.name));
+    found.sort((a, b) => a.name.localeCompare(b.name));
+    // Editing a script triggers a rescan too; only a real change (a script
+    // added, removed, renamed or its marker changed) is passed on.
+    const changed = !loaded || JSON.stringify(found) !== JSON.stringify(scripts);
+    scripts = found;
+    loaded = true;
+    if (!changed) return;
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.error("TYP-System: shortcut script listener failed", error);
+      }
+    }
   }
 
   const scheduleRefresh = debounce(refreshScripts, 300, true);
@@ -93,12 +114,18 @@ function registerShortcutScripts(plugin) {
   plugin.registerEvent(app.vault.on("rename", onFileChange));
   app.workspace.onLayoutReady(refreshScripts);
 
-  return () => {
+  const accessor = () => {
     // Templater folder changed: reload for the next call, answer with the
     // current list for now.
     if (currentScriptFolder() !== scriptFolder) scheduleRefresh();
     return scripts;
   };
+  accessor.isLoaded = () => loaded;
+  accessor.onChange = (listener) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+  return accessor;
 }
 
 module.exports = { registerShortcutScripts, SHORTCUT_MARKER, parseParams };

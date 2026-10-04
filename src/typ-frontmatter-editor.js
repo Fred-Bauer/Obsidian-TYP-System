@@ -1,5 +1,5 @@
 const { MarkdownView, Menu, WorkspaceLeaf, setIcon } = require("obsidian");
-const { shortcutLabel } = require("./shortcuts");
+const { shortcutLabel, scriptNameOf } = require("./shortcuts");
 const { pickShortcut } = require("./shortcut-picker");
 const { getSubtyp, ensureSubtyp } = require("./subtyps");
 const { TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
@@ -270,7 +270,7 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
   if (!EditorClass) {
     containerEl.createEl("p", {
       cls: "typ-frontmatter-unavailable",
-      text: "Zum Initialisieren des Editors bitte zuerst einmal eine Notiz öffnen.",
+      text: "Open a note once to initialize the editor.",
     });
     return null;
   }
@@ -379,16 +379,31 @@ const CHIP_TEXT_CLASS = "typ-shortcut-chip-text";
 const BUTTON_CLASS = "typ-shortcut-button";
 const ROW_CLASS = "typ-has-shortcut";
 const WARNING_CLASS = "typ-shortcut-blocked";
+const MISSING_CLASS = "typ-shortcut-missing";
+
+// The button's three looks. "missing": a "tp." shortcut whose Templater
+// script is gone (deleted, renamed, marker removed) - TYP.js would write the
+// fallback value. Same triangle as Obsidian's type warning, and a click
+// removes the shortcut like the "x" (the chip still changes it).
+const BUTTON_STATES = {
+  none: { icon: "square-function", label: "Set shortcut" },
+  set: { icon: "x", label: "Remove shortcut" },
+  missing: { icon: "alert-triangle", label: "Script not found – the fallback value will be used. Click to remove the shortcut." },
+};
 
 // Button and chip per property row. Both hang on the row's containerEl, NOT its
 // valueEl: renderProperty() only ever empties valueEl, so anything attached to
 // containerEl survives every type or value change without touching
 // Obsidian's render pipeline.
 //
-// The button toggles: without a shortcut it opens the picker, with one it
-// removes it. The chip itself is for CHANGING it. CSS shows the button only on
-// row hover/focus (and permanently while a shortcut is set) - otherwise every
-// row would carry a control most never need.
+// The button toggles: without a shortcut it opens the picker ("square-function"),
+// with one it removes it ("x", or the warning triangle if the script is
+// missing - see BUTTON_STATES). The chip itself is for CHANGING it. CSS shows
+// the button only on row hover/focus (and permanently while a shortcut is
+// set) - otherwise every row would carry a control most never need.
+//
+// Called again whenever the script list changes (see refreshShortcutControls
+// in typ-pane.js), so the warning follows a script being renamed or restored.
 //
 // Hiding the value field while a shortcut is set is pure CSS (ROW_CLASS in
 // styles.css); the native widget keeps rendering underneath. Setting and
@@ -396,6 +411,10 @@ const WARNING_CLASS = "typ-shortcut-blocked";
 // would be risky here anyway (see stripTypProperty).
 function renderShortcutControls(view, editor, store) {
   const shortcuts = store.getShortcuts();
+  // Before the script folder was read once, nothing counts as missing -
+  // otherwise every "tp." shortcut would flash the warning on startup.
+  const getScripts = view.plugin.getShortcutScripts;
+  const scriptNames = getScripts?.isLoaded?.() ? new Set(getScripts().map((script) => script.name)) : null;
   for (const row of editor.rendered ?? []) {
     const containerEl = row.containerEl;
     const key = row.entry?.key ?? "";
@@ -421,8 +440,8 @@ function renderShortcutControls(view, editor, store) {
       continue;
     }
     if (!buttonEl) {
+      // Icon and label follow below, per state.
       buttonEl = containerEl.createDiv({ cls: `clickable-icon ${BUTTON_CLASS}` });
-      setIcon(buttonEl, "square-function");
       // Read the key on click, not here: a rename changes row.entry.key
       // without recreating the row.
       buttonEl.addEventListener("click", () => {
@@ -430,7 +449,16 @@ function renderShortcutControls(view, editor, store) {
         else openShortcutPicker(view, editor, store, row);
       });
     }
-    buttonEl.setAttr("aria-label", record ? "Shortcut entfernen" : "Shortcut setzen");
+    const scriptName = record ? scriptNameOf(record.name) : null;
+    const missing = scriptName !== null && scriptNames !== null && !scriptNames.has(scriptName);
+    const state = !record ? "none" : missing ? "missing" : "set";
+    // Only on a change: setIcon would replace the SVG on every call.
+    if (buttonEl.dataset.typState !== state) {
+      buttonEl.dataset.typState = state;
+      setIcon(buttonEl, BUTTON_STATES[state].icon);
+      buttonEl.setAttr("aria-label", BUTTON_STATES[state].label);
+      buttonEl.toggleClass(MISSING_CLASS, state === "missing");
+    }
 
     let chipEl = containerEl.querySelector(`:scope > .${CHIP_CLASS}`);
     if (!record) {
@@ -443,7 +471,7 @@ function renderShortcutControls(view, editor, store) {
       // centering like the real value field), and text-overflow: ellipsis
       // only works on a block element.
       chipEl.createSpan({ cls: CHIP_TEXT_CLASS });
-      chipEl.setAttr("aria-label", "Shortcut ändern");
+      chipEl.setAttr("aria-label", "Change shortcut");
       chipEl.addEventListener("click", () => openShortcutPicker(view, editor, store, row));
       // Before the button, so the row always reads "name | chip | button".
       containerEl.insertBefore(chipEl, buttonEl);
@@ -503,4 +531,12 @@ function addBlankProperty(editor) {
   ensurePropertyMenuPatch(editor.owner.app, editor);
 }
 
-module.exports = { mountFrontmatterEditor, addBlankProperty, ensurePropertyMenuPatch, removePropertyMenuPatch, typStore, subtypStore };
+module.exports = {
+  mountFrontmatterEditor,
+  addBlankProperty,
+  renderShortcutControls,
+  ensurePropertyMenuPatch,
+  removePropertyMenuPatch,
+  typStore,
+  subtypStore,
+};

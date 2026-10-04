@@ -934,6 +934,22 @@ input[type="range"].typ-subtyp-color-slider:disabled {
   display: none !important;
 }
 
+/* The script of a "tp." shortcut is missing (MISSING_CLASS, see
+   renderShortcutControls): the button shows the warning triangle in place of
+   the "x", in the look of Obsidian's own ".metadata-property-warning-icon"
+   (color and hover copied from there). That class itself isn't used - the
+   rule above would hide it. */
+.typ-frontmatter-editor .typ-shortcut-button.typ-shortcut-missing {
+  color: var(--text-warning);
+}
+
+@media (hover: hover) {
+  .typ-frontmatter-editor .typ-shortcut-button.typ-shortcut-missing:hover {
+    color: var(--text-warning);
+    background-color: color-mix(in oklch, var(--color-orange) 15%, transparent);
+  }
+}
+
 /* Visible only on row hover/focus - otherwise every property would carry a
    control most never need. With a shortcut set it always stays visible: it is
    the only way to remove it. :focus-within covers keyboard use. */
@@ -1130,6 +1146,17 @@ input[type="range"].typ-subtyp-color-slider:disabled {
 .typ-picker-name {
   font-weight: 600;
   flex-shrink: 0;
+}
+
+/* Matched characters in a name (see highlight in typ-picker.js): the name is
+   already semibold, so Obsidian's bold .suggestion-highlight alone hardly
+   shows. Underlined in the name's own color (currentColor keeps the TYP or
+   Subtyp color). */
+.typ-picker-name .suggestion-highlight {
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 
 /* "TYP (Subtyp 1, Subtyp 2)" in the TYP choice of the separate flow (see

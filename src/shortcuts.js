@@ -28,19 +28,19 @@ const { moment } = require("obsidian");
 const FIXED_SHORTCUTS = [
   {
     name: "today",
-    description: "Heutiges Datum (JJJJ-MM-TT)",
+    description: "Today's date (YYYY-MM-DD)",
     resolve: () => moment().format("YYYY-MM-DD"),
   },
   {
     name: "now",
-    description: "Aktuelles Datum mit Uhrzeit (JJJJ-MM-TT HH:mm)",
+    description: "Current date and time (YYYY-MM-DD HH:mm)",
     resolve: () => moment().format("YYYY-MM-DD HH:mm"),
   },
   {
     // The file's creation date (file.stat.ctime), not the call time; falls
     // back to now without a file.
     name: "created",
-    description: "Erstellungsdatum der Datei (JJJJ-MM-TT)",
+    description: "The file's creation date (YYYY-MM-DD)",
     resolve: (file) => moment(file?.stat?.ctime ?? Date.now()).format("YYYY-MM-DD"),
   },
 ];

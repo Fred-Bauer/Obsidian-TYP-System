@@ -1,6 +1,36 @@
-const { FuzzySuggestModal, Notice, prepareFuzzySearch } = require("obsidian");
+const { FuzzySuggestModal, Notice, prepareFuzzySearch, renderMatches } = require("obsidian");
 const { compareTyps, DEFAULT_SORT_ORDER } = require("./typ-pane");
 const { nameColor, paintColorDot } = require("./typ-colors");
+const { pickerInstructions } = require("./typ-utils");
+
+// The search text of a TYP row, as the parts the row renders separately:
+// [{ key: "typ" | "subtyps" | "description", text, start }], start being the
+// part's position in the search text. getItemText joins exactly these with
+// " ", so this is the one place that defines it - the match ranges Obsidian
+// returns refer to the joined text and are split back onto the parts by
+// start (see highlight). The Subtyp names are one part, joined with " " as in
+// the search text, though the row shows them with ", ".
+function textParts(item) {
+  const parts = [];
+  let start = 0;
+  const add = (key, text) => {
+    if (!text) return;
+    parts.push({ key, text, start });
+    start += text.length + 1;
+  };
+  add("typ", item.typ);
+  add("subtyps", item.subtyps?.join(" "));
+  add("description", item.description);
+  return parts;
+}
+
+// Writes text into el with the matched characters marked like in Obsidian's
+// own suggesters (.suggestion-highlight). start is the text's position in the
+// whole search text; renderMatches shifts every range by its offset and
+// clips what falls outside, so -start maps the ranges onto this part.
+function highlight(el, text, matches, start = 0) {
+  renderMatches(el, text, matches?.length ? matches : null, -start);
+}
 
 // Native replacement for Templater's tp.system.suggester when choosing a TYP
 // (see _obsidian/templater-scripts/TYP.js), built on Obsidian's
@@ -14,7 +44,8 @@ class TypPickerModal extends FuzzySuggestModal {
     this.items = items;
     this.resolve = resolve;
     this.chosen = false;
-    this.setPlaceholder("ESC to cancel");
+    this.setPlaceholder("Choose TYP…");
+    this.setInstructions(pickerInstructions());
   }
 
   getItems() {
@@ -24,24 +55,28 @@ class TypPickerModal extends FuzzySuggestModal {
   // Search also covers the description and, where shown in the row
   // (showSubtyps), the Subtyp names: what you see you expect to be able to type.
   getItemText(item) {
-    return [item.typ, item.subtyps?.join(" "), item.description].filter(Boolean).join(" ");
+    return textParts(item)
+      .map((part) => part.text)
+      .join(" ");
   }
 
   renderSuggestion(match, el) {
     const item = match.item;
+    const matches = match.match?.matches ?? [];
+    const parts = Object.fromEntries(textParts(item).map((part) => [part.key, part]));
     el.addClass("typ-picker-suggestion");
     if (item.unregistered) el.addClass("typ-picker-unregistered");
 
     if (item.unregistered) {
-      el.createSpan({ cls: "typ-picker-name", text: item.typ });
+      highlight(el.createSpan({ cls: "typ-picker-name" }), item.typ, matches);
     } else {
-      this.renderColoredName(el, item.typ, item.typ);
+      this.renderColoredName(el, item.typ, item.typ, null, matches);
     }
 
-    if (item.subtyps?.length) this.renderSubtypPreview(el, item);
+    if (item.subtyps?.length) this.renderSubtypPreview(el, item, matches, parts.subtyps.start);
 
     if (item.description) {
-      el.createSpan({ cls: "typ-picker-desc", text: item.description });
+      highlight(el.createSpan({ cls: "typ-picker-desc" }), item.description, matches, parts.description.start);
     }
 
     el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
@@ -49,27 +84,32 @@ class TypPickerModal extends FuzzySuggestModal {
 
   // Name in the color of colorTyp (or of the Subtyp, see nameColor in
   // typ-colors.js) - as colored text or with a dot before it, depending on
-  // the "TYP-Pane" coloring setting.
-  renderColoredName(el, text, colorTyp, subtyp = null) {
+  // the "TYP-Pane" coloring setting. matches/start as in highlight().
+  renderColoredName(el, text, colorTyp, subtyp = null, matches = [], start = 0) {
     const { color, isDefault } = nameColor(this.plugin.settings, colorTyp, subtyp);
-    if (this.plugin.settings.colorViews.typList) {
-      el.createSpan({ cls: "typ-picker-name", text }).style.color = color;
-    } else {
-      paintColorDot(el.createSpan({ cls: "typ-picker-dot" }), color, isDefault);
-      el.createSpan({ cls: "typ-picker-name", text });
-    }
+    const colorize = this.plugin.settings.colorViews.typList;
+    if (!colorize) paintColorDot(el.createSpan({ cls: "typ-picker-dot" }), color, isDefault);
+    const nameEl = el.createSpan({ cls: "typ-picker-name" });
+    if (colorize) nameEl.style.color = color;
+    highlight(nameEl, text, matches, start);
   }
 
   // "TYP (Subtyp 1, Subtyp 2)" - shows what lies below the TYP before the
   // separate Subtyp-Picker comes. Each Subtyp in its own color, brackets and
   // commas muted; uncolored like the name when "TYP-Pane" coloring is off.
-  renderSubtypPreview(el, item) {
+  // start is where the Subtyp names begin in the search text; there they are
+  // separated by one space instead of ", ", so each name starts one character
+  // after the end of the one before.
+  renderSubtypPreview(el, item, matches = [], start = 0) {
     const colorize = this.plugin.settings.colorViews.typList;
     const wrap = el.createSpan({ cls: "typ-picker-subtyps" });
     wrap.appendText("(");
+    let position = start;
     item.subtyps.forEach((subtyp, index) => {
       if (index > 0) wrap.appendText(", ");
-      const span = wrap.createSpan({ text: subtyp });
+      const span = wrap.createSpan();
+      highlight(span, subtyp, matches, position);
+      position += subtyp.length + 1;
       if (colorize) span.style.color = nameColor(this.plugin.settings, item.typ, subtyp).color;
     });
     wrap.appendText(")");
@@ -106,7 +146,8 @@ class SubtypPickerModal extends TypPickerModal {
   constructor(app, plugin, typ, items, resolve, query = "") {
     super(app, plugin, items, resolve);
     this.typ = typ;
-    this.setPlaceholder(`Subtyp for ${typ} – ESC to go back`);
+    this.setPlaceholder(`Choose Subtyp for ${typ}…`);
+    this.setInstructions(pickerInstructions("to go back"));
     this.items = sortByQuery(items, query, (item) => this.getItemText(item));
   }
 
@@ -118,15 +159,21 @@ class SubtypPickerModal extends TypPickerModal {
 
   renderSuggestion(match, el) {
     const item = match.item;
+    const matches = match.match?.matches ?? [];
     el.addClass("typ-picker-suggestion");
     if (item.none) {
       // "ORGA (no Subtyp)": the TYP in its color, the suffix in normal text
       // color rather than muted - it is a real choice, not a grayed-out
-      // non-choice, and it stands apart from the Subtyp rows below.
-      this.renderColoredName(el, this.typ, this.typ);
-      el.createSpan({ cls: "typ-picker-none", text: `(${item.typ})` });
+      // non-choice, and it stands apart from the Subtyp rows below. The
+      // search text is "ORGA no Subtyp" (see getItemText), so the suffix
+      // starts one character after the TYP name.
+      this.renderColoredName(el, this.typ, this.typ, null, matches);
+      const noneEl = el.createSpan({ cls: "typ-picker-none" });
+      noneEl.appendText("(");
+      highlight(noneEl, item.typ, matches, this.typ.length + 1);
+      noneEl.appendText(")");
     } else {
-      this.renderColoredName(el, item.typ, this.typ, item.typ);
+      this.renderColoredName(el, item.typ, this.typ, item.typ, matches);
     }
     el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
   }
@@ -146,6 +193,7 @@ class TypSubtypPickerModal extends TypPickerModal {
   constructor(app, plugin, groups, resolve) {
     super(app, plugin, groups.map((group) => group.item), resolve);
     this.groups = groups;
+    this.setPlaceholder("Choose TYP or Subtyp…");
   }
 
   getSuggestions(query) {
@@ -175,7 +223,8 @@ class TypSubtypPickerModal extends TypPickerModal {
       return;
     }
     el.addClass("typ-picker-suggestion", "typ-picker-subtyp");
-    this.renderColoredName(el, item.subtyp, item.typ, item.subtyp);
+    // Matched against the Subtyp name alone (see getSuggestions).
+    this.renderColoredName(el, item.subtyp, item.typ, item.subtyp, match.match?.matches ?? []);
     el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
   }
 

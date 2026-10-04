@@ -2,6 +2,7 @@ const { ItemView, Menu, Notice, setIcon, debounce } = require("obsidian");
 const { ConfirmModal, typNameNode, subtypNameNode } = require("./confirm-modal");
 const { snapshotSettings, offerUndo } = require("./undo");
 const { mountFrontmatterBlocks } = require("./frontmatter-blocks");
+const { renderShortcutControls } = require("./typ-frontmatter-editor");
 const { moveTypSettings, deleteTypSettings } = require("./typ-settings");
 const { runOrReportError } = require("./commands");
 const { isBasesEnabled, createBaseFor } = require("./bases");
@@ -346,6 +347,17 @@ class TypPane extends ItemView {
     for (const editor of this.frontmatterEditors ?? []) this.removeChild(editor);
     this.frontmatterEditors = [];
     this.frontmatterBlocks = null;
+  }
+
+  // The list of Templater scripts changed (see registerTypPane): only the
+  // shortcut buttons of the open editors follow - their "script not found"
+  // warning depends on it. No render(): nothing else changed, and a rebuild
+  // would cost the focus of a field being typed in.
+  refreshShortcutControls() {
+    for (const editor of this.frontmatterEditors ?? []) {
+      const store = editor.owner?.typStore;
+      if (store) renderShortcutControls(this, editor, store);
+    }
   }
 
   // Focus in one of the pane's fields (see isField).
@@ -1809,6 +1821,15 @@ function registerTypPane(plugin) {
   plugin.registerEvent(plugin.typIndex.on("change", debouncedRefresh));
   // The "Excluded files" list changed (Hide Folders toggling a folder, say).
   plugin.registerEvent(plugin.app.vault.on("config-changed", debouncedRefresh));
+
+  // A Templater script appeared, vanished or was renamed: the shortcut
+  // buttons update their "script not found" warning (refreshShortcutControls).
+  // The list is read once the layout is ready - only then does the warning
+  // show at all (see renderShortcutControls).
+  const offScripts = plugin.getShortcutScripts?.onChange?.(() => {
+    for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_TYP_PANE)) leaf.view?.refreshShortcutControls?.();
+  });
+  if (offScripts) plugin.register(offScripts);
 
   // For plugin.refreshTypColors(Except): re-renders the list or the detail
   // view.

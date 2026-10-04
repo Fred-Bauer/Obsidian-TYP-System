@@ -2,6 +2,7 @@ const { Notice } = require("obsidian");
 const { getSubtyp } = require("./subtyps");
 const { typKeyOf, propertyValue, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 const { plural } = require("./typ-utils");
+const { ConfirmModal, typNameNode } = require("./confirm-modal");
 
 // The four placeholders of the global order; the order editor lets you move
 // them but not remove them. "typValue" is the TYP property itself,
@@ -124,15 +125,20 @@ function cachedFrontmatterKeys(app, file) {
   return Object.keys(frontmatter).filter((key) => key !== "position");
 }
 
-async function sortFileFrontmatter(app, file, globalOrder, typDefaultKeys) {
-  // Cheap pre-check against the in-memory cache: most notes are already
-  // sorted, and this skips opening them at all - that is where repeated vault
-  // runs get their speed. processFrontMatter stays the source of truth for the
-  // actual write, since the cache can lag behind.
+// Cheap pre-check against the in-memory cache: most notes are already sorted,
+// and this skips opening them at all - that is where repeated vault runs get
+// their speed. Also what the play button counts with before it asks.
+function cacheNeedsSorting(app, file, globalOrder, typDefaultKeys) {
   const cachedKeys = cachedFrontmatterKeys(app, file);
   if (!cachedKeys || cachedKeys.length <= 1) return false;
   const cachedSorted = computeSortedKeys(cachedKeys, globalOrder, typDefaultKeys);
-  if (cachedSorted.every((key, i) => key === cachedKeys[i])) return false;
+  return !cachedSorted.every((key, i) => key === cachedKeys[i]);
+}
+
+async function sortFileFrontmatter(app, file, globalOrder, typDefaultKeys) {
+  // processFrontMatter stays the source of truth for the actual write, since
+  // the cache can lag behind.
+  if (!cacheNeedsSorting(app, file, globalOrder, typDefaultKeys)) return false;
 
   let changed = false;
   await app.fileManager.processFrontMatter(file, (frontmatter) => {
@@ -202,16 +208,25 @@ async function sortSingleFileFrontmatter(app, plugin, file) {
   return sortFileFrontmatter(app, file, globalOrder, typDefaultKeys);
 }
 
+// From this many notes to re-sort on, a run is "large": it asks first (see
+// runFrontmatterSort) and shows its progress in a notice, updated every
+// PROGRESS_STEP notes. One number for both, so a run that asked also shows
+// how far it got, and a small one does neither.
+const LARGE_SORT_THRESHOLD = 50;
+const PROGRESS_STEP = 10;
+
+// First half of a run, from the metadata cache alone (no note is opened): how
+// many notes the run checks and which of them it would re-sort.
+// runFrontmatterSort counts with it before asking; sortAllFrontmatter writes
+// exactly these candidates.
+//
 // onlyTyp (optional) limits the run to notes of that TYP. Without it every
 // note is checked, including notes without a TYP: pinned properties such as
 // cssclasses apply regardless of TYP.
-async function sortAllFrontmatter(app, plugin, onlyTyp) {
-  let checked = 0;
-  let changed = 0;
+function sortCandidates(app, plugin, onlyTyp) {
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
-  // Only meaningful for a single TYP: lets the command explain a run that
-  // changed nothing because the TYP has no TYP-Frontmatter.
-  const hasTypDefaults = onlyTyp ? orderedDefaultKeys(plugin, onlyTyp) !== null : null;
+  let checked = 0;
+  const candidates = [];
 
   for (const file of app.vault.getMarkdownFiles()) {
     if (!plugin.settings.includeIgnoredFiles && app.metadataCache.isUserIgnored(file.path)) continue;
@@ -221,27 +236,81 @@ async function sortAllFrontmatter(app, plugin, onlyTyp) {
 
     const typDefaultKeys = orderedDefaultKeys(plugin, typ, plugin.typIndex.subtypOf(file));
     checked++;
-    if (await sortFileFrontmatter(app, file, globalOrder, typDefaultKeys)) changed++;
+    if (cacheNeedsSorting(app, file, globalOrder, typDefaultKeys)) candidates.push({ file, typDefaultKeys });
+  }
+
+  return { checked, candidates, globalOrder };
+}
+
+async function sortAllFrontmatter(app, plugin, onlyTyp) {
+  // Counted afresh, not taken over from runFrontmatterSort's question: the
+  // dialog may have been open for a while.
+  const { checked, candidates, globalOrder } = sortCandidates(app, plugin, onlyTyp);
+  // Only meaningful for a single TYP: lets the command explain a run that
+  // changed nothing because the TYP has no TYP-Frontmatter.
+  const hasTypDefaults = onlyTyp ? orderedDefaultKeys(plugin, onlyTyp) !== null : null;
+
+  const label = onlyTyp ? `Frontmatter sorting ${onlyTyp}` : "Frontmatter sorting";
+  const progressText = (done) => `${label}: ${done} of ${plural(candidates.length, "note")}…`;
+  // Duration 0: stays until hidden below, a timed one could vanish mid-run.
+  const notice = candidates.length >= LARGE_SORT_THRESHOLD ? new Notice(progressText(0), 0) : null;
+
+  let changed = 0;
+  try {
+    for (const [index, { file, typDefaultKeys }] of candidates.entries()) {
+      // sortFileFrontmatter checks the cache once more - a note may have been
+      // sorted or edited since the count.
+      if (await sortFileFrontmatter(app, file, globalOrder, typDefaultKeys)) changed++;
+      if (notice && (index + 1) % PROGRESS_STEP === 0) notice.setMessage(progressText(index + 1));
+    }
+  } finally {
+    notice?.hide();
   }
 
   return { checked, changed, hasTypDefaults };
 }
 
-// Sorts every note of one TYP and reports it in a notice - the command "Sort
-// frontmatter for one TYP" (after its picker) and the TYP-Pane's context menu
-// (with the TYP of the row).
-async function sortTypFrontmatter(plugin, typ) {
-  const { checked, changed, hasTypDefaults } = await sortAllFrontmatter(plugin.app, plugin, typ);
-  let message = sortSummary(`Frontmatter sorting ${typ}`, checked, changed);
+// Resolves true for "Sort", false for Cancel, Escape or a click outside.
+function confirmLargeSort(plugin, onlyTyp, count, checked) {
+  const noun = checked === 1 ? "note" : "notes";
+  const title = onlyTyp
+    ? [`Re-sort ${count} of ${checked} `, typNameNode(plugin, onlyTyp, plugin.settings.typColors[onlyTyp] ?? null), ` ${noun}?`]
+    : `Re-sort ${count} of ${checked} ${noun}?`;
+  return new Promise((resolve) =>
+    new ConfirmModal(plugin.app, {
+      title,
+      body: ["Only the order of their properties changes, values stay as they are."],
+      confirmText: "Sort",
+      // Like "Rename and update notes": Enter confirms the run just asked for.
+      focus: "confirm",
+      onConfirm: () => resolve(true),
+      onCancel: () => resolve(false),
+    }).open()
+  );
+}
+
+// The one entry point of every sorting run over many notes: the commands "Sort
+// frontmatter in all notes" and "Sort frontmatter for one TYP" (after its
+// picker), the play button of the global order and the TYP-Pane's context
+// menu. onlyTyp null = all notes.
+//
+// A large run (LARGE_SORT_THRESHOLD notes to re-sort, counted from the cache)
+// asks first; the question can't be switched off, the run rewrites notes and
+// has no undo. A small one just runs. Either way a notice reports the result.
+async function runFrontmatterSort(plugin, onlyTyp = null) {
+  const { checked, candidates } = sortCandidates(plugin.app, plugin, onlyTyp);
+  if (candidates.length >= LARGE_SORT_THRESHOLD && !(await confirmLargeSort(plugin, onlyTyp, candidates.length, checked))) return;
+
+  const { changed, hasTypDefaults, checked: checkedNow } = await sortAllFrontmatter(plugin.app, plugin, onlyTyp);
+  let message = sortSummary(onlyTyp ? `Frontmatter sorting ${onlyTyp}` : "Frontmatter sorting", checkedNow, changed);
   // Not an error, but explains why nothing may have changed.
   if (hasTypDefaults === false) {
-    message += ` Note: ${typ} has no TYP-Frontmatter, so only the global order was applied.`;
+    message += ` Note: ${onlyTyp} has no TYP-Frontmatter, so only the global order was applied.`;
   }
   new Notice(message);
 }
 
-// Result notice of a sorting run, shared by the commands and the play button
-// of the global order.
+// Result notice of a sorting run over many notes (runFrontmatterSort).
 function sortSummary(label, checked, changed) {
   return changed > 0
     ? `${label}: checked ${plural(checked, "note")}, sorted ${changed}.`
@@ -249,13 +318,11 @@ function sortSummary(label, checked, changed) {
 }
 
 module.exports = {
-  sortAllFrontmatter,
   sortSingleFileFrontmatter,
-  sortTypFrontmatter,
+  runFrontmatterSort,
   sortFrontmatterFor,
   placePropertyFor,
   normalizeGlobalOrder,
-  sortSummary,
   DEFAULT_GLOBAL_ORDER,
   TYP_PROPERTY,
   SUBTYP_PROPERTY,

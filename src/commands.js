@@ -1,5 +1,5 @@
 const { Notice } = require("obsidian");
-const { sortAllFrontmatter, sortSingleFileFrontmatter, sortTypFrontmatter, sortSummary } = require("./frontmatter-sort");
+const { runFrontmatterSort, sortSingleFileFrontmatter } = require("./frontmatter-sort");
 const { isBasesEnabled, createBaseCommand, activeBaseView, updateActiveView } = require("./bases");
 
 // Obsidian neither awaits a command callback (or a menu item's onClick) nor
@@ -20,10 +20,8 @@ function registerCommands(plugin) {
   plugin.addCommand({
     id: "sort-frontmatter-all",
     name: "Sort frontmatter in all notes",
-    callback: runOrReportError("Frontmatter sorting", async () => {
-      const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
-      new Notice(sortSummary("Frontmatter sorting", checked, changed));
-    }),
+    // Asks first when the run is large, see runFrontmatterSort.
+    callback: runOrReportError("Frontmatter sorting", () => runFrontmatterSort(plugin, null)),
   });
 
   plugin.addCommand({
@@ -34,7 +32,7 @@ function registerCommands(plugin) {
       // or not.
       const typ = await plugin.pickTyp({ includeManualOff: true, includeUnregistered: true });
       if (!typ) return;
-      await sortTypFrontmatter(plugin, typ);
+      await runFrontmatterSort(plugin, typ);
     }),
   });
 

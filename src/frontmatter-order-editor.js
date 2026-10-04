@@ -1,5 +1,5 @@
 const { setIcon, Notice } = require("obsidian");
-const { TYP_PROPERTY, SUBTYP_PROPERTY, sortAllFrontmatter, sortSummary } = require("./frontmatter-sort");
+const { TYP_PROPERTY, SUBTYP_PROPERTY, runFrontmatterSort } = require("./frontmatter-sort");
 
 // Labels of the four placeholder rows; computeSortedKeys in frontmatter-sort.js
 // resolves what each one stands for.
@@ -8,6 +8,15 @@ const PLACEHOLDER_LABELS = {
   subtypValue: "SUBTYP",
   typ: "TYP-Frontmatter",
   other: "Other properties",
+};
+
+// What each placeholder row stands for, as its tooltip - the setting's
+// description below the list stays short that way.
+const PLACEHOLDER_DESCRIPTIONS = {
+  typValue: "The TYP property itself.",
+  subtypValue: "The SUBTYP property itself.",
+  typ: "The TYP's TYP-Frontmatter list, followed by the note's Subtyp block.",
+  other: "Every property not placed by another row.",
 };
 
 // Editor for settings.globalPropertyOrder: a plain list of names with drag &
@@ -21,13 +30,13 @@ function mountGlobalOrderEditor(containerEl, plugin) {
   // direct child would float in the middle instead of next to the title.
   const titleGroup = header.createDiv({ cls: "typ-frontmatter-title-group" });
 
-  // Same run as the "Sort frontmatter in all notes" command.
+  // Same run as the "Sort frontmatter in all notes" command, including its
+  // question before a large run (see runFrontmatterSort).
   const applyBtn = titleGroup.createDiv({ cls: "clickable-icon", attr: { "aria-label": "Apply to all notes" } });
   setIcon(applyBtn, "play");
   applyBtn.addEventListener("click", async () => {
     try {
-      const { checked, changed } = await sortAllFrontmatter(plugin.app, plugin, null);
-      new Notice(sortSummary("Frontmatter sorting", checked, changed));
+      await runFrontmatterSort(plugin, null);
     } catch (error) {
       console.error("[Frontmatter sorting]", error);
       new Notice(`Frontmatter sorting failed: ${error.message}`);
@@ -69,7 +78,12 @@ function mountGlobalOrderEditor(containerEl, plugin) {
       setIcon(dragHandle, "grip-vertical");
 
       if (isPlaceholder) {
-        row.createDiv({ cls: "typ-order-label", text: PLACEHOLDER_LABELS[entry.kind] });
+        // On the label, not the row: the drag handle has a tooltip of its own.
+        row.createDiv({
+          cls: "typ-order-label",
+          text: PLACEHOLDER_LABELS[entry.kind],
+          attr: { "aria-label": PLACEHOLDER_DESCRIPTIONS[entry.kind] },
+        });
       } else {
         const input = row.createEl("input", {
           type: "text",

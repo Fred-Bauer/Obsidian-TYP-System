@@ -6,7 +6,7 @@ const { renderShortcutControls } = require("./typ-frontmatter-editor");
 const { moveTypSettings, deleteTypSettings } = require("./typ-settings");
 const { runOrReportError } = require("./commands");
 const { isBasesEnabled, createBaseFor } = require("./bases");
-const { sortTypFrontmatter } = require("./frontmatter-sort");
+const { runFrontmatterSort } = require("./frontmatter-sort");
 const {
   normalizeSubtypName,
   getSubtypNames,
@@ -860,7 +860,7 @@ class TypPane extends ItemView {
       item
         .setTitle("Sort frontmatter for this TYP")
         .setIcon("arrow-down-up")
-        .onClick(runOrReportError("Frontmatter sorting", () => sortTypFrontmatter(this.plugin, typ)))
+        .onClick(runOrReportError("Frontmatter sorting", () => runFrontmatterSort(this.plugin, typ)))
     );
     menu.showAtMouseEvent(event);
   }

@@ -113,7 +113,7 @@ class TypSystemSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new SettingGroup(containerEl)
-      .setHeading("TYP-List")
+      .setHeading("General")
       .addSetting((setting) =>
         setting
           .setName("Include excluded files")
@@ -140,21 +140,20 @@ class TypSystemSettingTab extends PluginSettingTab {
               await this.plugin.saveSettings();
             })
           )
+      )
+      .addSetting((setting) =>
+        setting
+          .setName("Separate Subtyp-Picker")
+          .setDesc(
+            "After choosing a TYP, choose the Subtyp in a second picker. When off, each Subtyp is listed indented below its TYP."
+          )
+          .addToggle((toggle) =>
+            toggle.setValue(this.plugin.settings.separateSubtypPicker).onChange(async (value) => {
+              this.plugin.settings.separateSubtypPicker = value;
+              await this.plugin.saveSettings();
+            })
+          )
       );
-
-    new SettingGroup(containerEl).setHeading("TYP-Picker").addSetting((setting) =>
-      setting
-        .setName("Separate Subtyp-Picker")
-        .setDesc(
-          "After choosing a TYP, choose the Subtyp in a second picker. When off, each Subtyp is listed indented below its TYP."
-        )
-        .addToggle((toggle) =>
-          toggle.setValue(this.plugin.settings.separateSubtypPicker).onChange(async (value) => {
-            this.plugin.settings.separateSubtypPicker = value;
-            await this.plugin.saveSettings();
-          })
-        )
-    );
 
     // subtypKey (optional): two labeled toggles instead of one - "TYP" for the
     // setting itself and below it "Subtyp", shown only while "TYP" is on. The
@@ -455,7 +454,7 @@ class TypSystemSettingTab extends PluginSettingTab {
       setting.infoEl.createDiv({
         cls: "setting-item-description",
         text:
-          'Order applied by the "Sort frontmatter" commands; values are never changed. Pin single properties such as cssclasses or aliases. TYP and SUBTYP are the properties themselves, "TYP-Frontmatter" is the TYP\'s list followed by its Subtyp block, "Other properties" is everything else. Drag to reorder; the four placeholder rows can\'t be removed.',
+          'Order applied by the "Sort frontmatter" commands; values are never changed. Pin single properties such as cssclasses or aliases. Drag to reorder; hover a placeholder row for what it stands for. Placeholder rows can\'t be removed.',
       });
     });
 

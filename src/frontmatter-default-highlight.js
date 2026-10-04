@@ -1,5 +1,5 @@
 const { getSubtypNames, getSubtyp } = require("./subtyps");
-const { subtypColor } = require("./typ-colors");
+const { subtypColor, setInlineColor, allDocuments } = require("./typ-colors");
 const { VIEW_TYPE_TYP_PANE } = require("./typ-pane");
 
 const ALL_PROPERTIES_VIEW_TYPE = "all-properties";
@@ -153,10 +153,9 @@ function applyToAllPropertiesView(plugin) {
           : plugin.settings.typColors[onlyTyp];
         // !important, because the bold rule in styles.css also sets color
         // !important and could still be attached from an earlier state.
-        if (color) titleEl.style.setProperty("color", color, "important");
-        else titleEl.style.removeProperty("color");
+        setInlineColor(titleEl, color, "important");
       } else {
-        titleEl.style.removeProperty("color");
+        setInlineColor(titleEl, null);
       }
     }
   }
@@ -198,6 +197,18 @@ function registerFrontmatterDefaultHighlight(plugin) {
   plugin.registerEvent(plugin.app.workspace.on("active-leaf-change", refresh));
 
   plugin.app.workspace.onLayoutReady(refresh);
+
+  // Bold/italic marks would otherwise stay on property names in open notes,
+  // the properties sidebar and "All properties" after the plugin is disabled.
+  // The color in "All properties" goes with the other inline colors
+  // (clearInlineColors, see main.js).
+  plugin.register(() => {
+    for (const doc of allDocuments(plugin.app)) {
+      for (const el of doc.querySelectorAll(`.${HIGHLIGHT_CLASS}, .${FLOATING_CLASS}`)) {
+        el.classList.remove(HIGHLIGHT_CLASS, FLOATING_CLASS);
+      }
+    }
+  });
 
   return refresh;
 }

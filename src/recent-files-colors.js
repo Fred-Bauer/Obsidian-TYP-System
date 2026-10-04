@@ -1,4 +1,4 @@
-const { colorForFile } = require("./typ-colors");
+const { colorForFile, setInlineColor } = require("./typ-colors");
 
 const RECENT_FILES_VIEW_TYPE = "recent-files";
 
@@ -14,8 +14,7 @@ function applyRecentFilesColors(plugin) {
       const entry = recentFiles[index];
       const file = entry ? plugin.app.vault.getAbstractFileByPath(entry.path) : null;
       const color = plugin.settings.colorViews.recentFiles ? colorForFile(plugin, file, "recentFiles") : null;
-      if (color) titleEl.style.color = color;
-      else titleEl.style.removeProperty("color");
+      setInlineColor(titleEl, color);
     });
   }
 }

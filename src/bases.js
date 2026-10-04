@@ -24,6 +24,15 @@ const FILE_NAME_ID = "file.name";
 const NOTE_PREFIX = "note.";
 const TAGS_PROPERTY = "tags";
 const BASE_EXTENSION = "base";
+// Id of the Bases core plugin (as in .obsidian/core-plugins.json).
+const BASES_PLUGIN_ID = "bases";
+
+// Without the Bases core plugin a .base file can't be opened, so creating one
+// would only leave a dead file behind (see "create-base-for-typ" in
+// commands.js).
+function isBasesEnabled(app) {
+  return !!app.internalPlugins?.getEnabledPluginById?.(BASES_PLUGIN_ID);
+}
 
 function noteId(key) {
   return NOTE_PREFIX + key;
@@ -272,10 +281,15 @@ async function openBase(app, file) {
 // Bases writes when it saves (verified: the round trip reproduces existing
 // files byte for byte, formula blocks and special keys included); only the
 // views list is touched.
+//
+// vault.process rather than vault.modify, as Obsidian recommends for changes
+// to a file that may be open: it writes atomically. The callback ignores the
+// file text on purpose - data comes from the parsed query, which the open
+// Base keeps in step with the file.
 async function appendViews(app, view, views) {
   const data = view.query.getSerializable();
   data.views = [...(data.views ?? []), ...views.map(serializeView)];
-  await app.vault.modify(view.file, stringifyYaml(data));
+  await app.vault.process(view.file, () => stringifyYaml(data));
 }
 
 /* --- Command: Create Base for TYP ---------------------------------------- */
@@ -339,8 +353,10 @@ async function createBaseCommand(plugin) {
 
 /* --- Command: Update columns of Base view -------------------------------- */
 
+// The most recent leaf of the main area, not workspace.activeLeaf (deprecated):
+// that is also a sidebar leaf, e.g. the TYP-Pane when it was clicked last.
 function activeBaseView(plugin) {
-  const leaf = plugin.app.workspace.activeLeaf ?? plugin.app.workspace.getMostRecentLeaf?.();
+  const leaf = plugin.app.workspace.getMostRecentLeaf();
   const view = leaf?.view;
   if (!view || typeof view.getViewType !== "function" || view.getViewType() !== "bases") return null;
   return view.query ? view : null;
@@ -408,6 +424,7 @@ async function updateActiveView(plugin, view) {
 }
 
 module.exports = {
+  isBasesEnabled,
   createBaseCommand,
   activeBaseView,
   updateActiveView,

@@ -1,4 +1,4 @@
-const { colorForFile } = require("./typ-colors");
+const { colorForFile, setInlineColor } = require("./typ-colors");
 
 const SEARCH_VIEW_TYPE = "search";
 
@@ -14,8 +14,7 @@ function applySearchColors(plugin) {
       if (!titleEl) continue;
 
       const color = plugin.settings.colorViews.search ? colorForFile(plugin, file, "search") : null;
-      if (color) titleEl.style.color = color;
-      else titleEl.style.removeProperty("color");
+      setInlineColor(titleEl, color);
     }
   }
 }

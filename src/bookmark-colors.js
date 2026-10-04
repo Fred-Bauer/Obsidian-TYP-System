@@ -1,4 +1,4 @@
-const { colorForFile } = require("./typ-colors");
+const { colorForFile, setInlineColor } = require("./typ-colors");
 
 const BOOKMARKS_VIEW_TYPE = "bookmarks";
 const BOOKMARKS_PLUGIN_ID = "bookmarks";
@@ -28,8 +28,7 @@ function applyBookmarksColors(plugin) {
 
       const file = plugin.app.vault.getAbstractFileByPath(item.path);
       const color = plugin.settings.colorViews.bookmarks ? colorForFile(plugin, file, "bookmarks") : null;
-      if (color) titleEl.style.color = color;
-      else titleEl.style.removeProperty("color");
+      setInlineColor(titleEl, color);
     });
   }
 }

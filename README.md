@@ -79,11 +79,12 @@ Native replacement for `tp.system.suggester` (built on `FuzzySuggestModal`): col
 
 ## Bases
 
-Written only through Obsidian's Bases API and serialization, never self-parsed YAML.
+Written only through Obsidian's Bases API and serialization, never self-parsed YAML. Both commands need the **Bases core plugin**: while it is off they don't appear in the command palette (a `.base` file couldn't be opened anyway).
 
 - **"Create Base for TYP"**: pick a TYP or Subtyp, choose options (*Floating properties*, *All Subtyp properties*, *tags*, with a live column preview). Creates `<name>.base` in the vault root: root filter `TYP == "…"`, a main view grouped by SUBTYP and one view per registered Subtyp. A Subtyp target filters by SUBTYP only (grouped by TYP if several TYP entries share the name). An existing file only gets the missing views
 - **"Update columns of Base view"** (only with a Base open): reads the TYP from the filter (AND only), otherwise asks and stores it as a filter. Adds and reorders silently; columns that don't belong are offered for removal. Only the column list is touched
 - Column order: `file.name`, then the global property order; `TYP`/`SUBTYP` are never columns
+- "Update columns" looks for the Base in the most recently active tab of the main area (or a pop-out window), so it also works while a sidebar (the TYP-Pane, say) has focus. New views are appended to an existing file with `vault.process`
 
 ## Frontmatter sorting
 
@@ -133,6 +134,13 @@ The plugin has no Templater logic of its own but offers an API on `app.plugins.p
 - **Frontmatter blocks** (`src/frontmatter-blocks.js`): one Obsidian property editor per block - the only way to allow the same key in several blocks. Keyboard navigation across blocks and dragging rows between blocks are added on top of Obsidian's own behavior
 - **Shortcuts** (`src/shortcuts.js`, `shortcut-scripts.js`, `shortcut-picker.js`): button and chip hang on the row's `containerEl`, which `renderProperty()` never empties, so no hook into Obsidian's rendering is needed
 - Graph coloring patches `renderer.setData` (like graph-nested-tags); property rename sync wraps `app.fileManager.renameProperty`; the *Floating* menu entry patches `showPropertyMenu` of Obsidian's private property row class. All three are undone on unload
+- **Disabling the plugin cleans up at once**, without waiting for each view to re-render:
+  - Inline colors in the file explorer, search, Recent Files, backlinks, bookmarks, the note title and "All properties" are set through `setInlineColor` (`src/typ-colors.js`), which marks each element with `data-typ-colored`. On unload exactly the marked elements lose their color, in every window; inline colors from themes or other plugins stay
+  - Note title and property block lose dot, badge, their `data-typ` attribute and color variables; property names lose the bold/italic classes (`typ-default-property`, `typ-floating-property`)
+  - Open graphs are re-rendered once with the original `setData`, so the TYP colors disappear immediately
+  - Link colors: the editor extension goes away with the plugin; the `--link-color` variables on rendered links are removed
+- **Link colors in Live Preview** are refreshed through a CodeMirror effect, dispatched at most once per animation frame and never synchronously: a refresh can arrive while an editor is in the middle of its own update, which CodeMirror refuses ("Calls to EditorView.update are not allowed while an update is in progress"). An editor still busy is retried a frame later
+- Settings start from a deep copy (`structuredClone`) of the defaults, so a fresh install without `data.json` never changes the defaults themselves
 - **Confirmation dialog** (`src/confirm-modal.js`): one `ConfirmModal` on top of Obsidian's public `ConfirmationModal` (since 1.13.0) for every confirmation; title and body take text and nodes, so names can be colored. Both callbacks run once the dialog has closed; the `dontAskAgain` option adds Obsidian's checkbox (`addCheckbox`, desktop only) and hands its state to `onConfirm`
 - **Undo** (`src/undo.js`): a `structuredClone` of the settings before the action, restored in place (the `plugin.settings` object stays the same). `saveSettings()` and `onExternalSettingsChange()` bump `plugin.settingsRevision`; an undo whose recorded revision no longer matches is refused
 - The TYP-Pane (view type `typ-system-pane`) reconnects itself after hot reload

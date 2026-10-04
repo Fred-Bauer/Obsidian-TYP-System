@@ -1,5 +1,5 @@
 const { TFile, TFolder } = require("obsidian");
-const { colorForFile } = require("./typ-colors");
+const { colorForFile, setInlineColor } = require("./typ-colors");
 
 const FILE_EXPLORER_VIEW_TYPE = "file-explorer";
 const FOLDER_NOTES_PLUGIN_ID = "folder-notes";
@@ -26,8 +26,7 @@ function applyColorToTitle(plugin, titleEl, file) {
   if (!contentEl) return;
 
   const color = plugin.settings.colorViews.fileExplorer ? colorForFile(plugin, file, "fileExplorer") : null;
-  if (color) contentEl.style.color = color;
-  else contentEl.style.removeProperty("color");
+  setInlineColor(contentEl, color);
 }
 
 function applyFileExplorerColors(plugin) {

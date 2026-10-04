@@ -267,7 +267,43 @@ function colorForFile(plugin, file, viewKey = null) {
   return subtypColor(settings, typ, plugin.typIndex.subtypOf(file));
 }
 
+// --- Inline colors in other views -------------------------------------------
+// Explorer, search, Recent Files, backlinks, bookmarks, the note title and
+// "All properties" are colored through style.color on Obsidian's own
+// elements. Those views only re-render now and then, so the colors would stay
+// after the plugin is disabled. Every element colored this way is marked, and
+// on unload exactly the marked ones are cleared - never an inline color some
+// other plugin or theme put there.
+const COLORED_ATTR = "data-typ-colored";
+
+// color null/"" removes the color, but only from an element we colored.
+// priority: "important" where a CSS rule with !important competes.
+function setInlineColor(el, color, priority = "") {
+  if (color) {
+    el.style.setProperty("color", color, priority);
+    el.setAttribute(COLORED_ATTR, "");
+  } else if (el.hasAttribute(COLORED_ATTR)) {
+    el.style.removeProperty("color");
+    el.removeAttribute(COLORED_ATTR);
+  }
+}
+
+function clearInlineColors(doc) {
+  for (const el of doc.querySelectorAll(`[${COLORED_ATTR}]`)) setInlineColor(el, null);
+}
+
+// The documents of all windows (pop-outs included), collected through their
+// leaves.
+function allDocuments(app) {
+  const docs = new Set();
+  app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.view.containerEl.ownerDocument));
+  return docs;
+}
+
 module.exports = {
+  setInlineColor,
+  clearInlineColors,
+  allDocuments,
   colorForFile,
   nameColor,
   DEFAULT_TYP_COLOR,

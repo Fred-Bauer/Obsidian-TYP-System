@@ -1,4 +1,4 @@
-const { colorForFile } = require("./typ-colors");
+const { colorForFile, setInlineColor } = require("./typ-colors");
 
 const BACKLINK_VIEW_TYPE = "backlink";
 
@@ -19,8 +19,7 @@ function getResultDomLookups(view) {
 
 function colorTitleEl(plugin, el, file) {
   const color = plugin.settings.colorViews.backlinks ? colorForFile(plugin, file, "backlinks") : null;
-  if (color) el.style.color = color;
-  else el.style.removeProperty("color");
+  setInlineColor(el, color);
 }
 
 function applyBacklinkPaneColors(plugin) {

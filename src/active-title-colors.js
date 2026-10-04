@@ -1,5 +1,5 @@
 const { TFile } = require("obsidian");
-const { colorForFile, subtypColor, subtypHasOwnColor } = require("./typ-colors");
+const { colorForFile, subtypColor, subtypHasOwnColor, setInlineColor } = require("./typ-colors");
 const { getSubtyp } = require("./subtyps");
 
 const DOT_CLASS = "typ-title-dot";
@@ -132,8 +132,7 @@ function applyActiveTitleColors(plugin) {
       applyStyleToTitle(titleEl, marker);
 
       const textColor = plugin.settings.colorViews.noteTitleColor ? colorForFile(plugin, typedFile, "noteTitleColor") : null;
-      if (textColor) titleEl.style.color = textColor;
-      else titleEl.style.removeProperty("color");
+      setInlineColor(titleEl, textColor);
     }
 
     const blockEl = containerEl.querySelector(".metadata-container");
@@ -150,6 +149,21 @@ function registerActiveTitleColors(plugin) {
   plugin.registerEvent(plugin.app.workspace.on("layout-change", refresh));
 
   plugin.app.workspace.onLayoutReady(refresh);
+
+  // Dot, badge and their data attribute and color variables would otherwise
+  // stay on open notes after the plugin is disabled, until the note is
+  // re-rendered. The title text color is cleared with the other inline colors
+  // (clearInlineColors, see main.js).
+  plugin.register(() => {
+    const none = { kind: "none" };
+    for (const leaf of plugin.app.workspace.getLeavesOfType("markdown")) {
+      const containerEl = leaf.view.containerEl;
+      const titleEl = containerEl.querySelector(".inline-title");
+      if (titleEl) applyStyleToTitle(titleEl, none);
+      const blockEl = containerEl.querySelector(".metadata-container");
+      if (blockEl) applyStyleToBlock(plugin, blockEl, none);
+    }
+  });
 
   return refresh;
 }

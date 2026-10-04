@@ -1,6 +1,6 @@
 const { Notice } = require("obsidian");
 const { sortAllFrontmatter, sortSingleFileFrontmatter, sortSummary } = require("./frontmatter-sort");
-const { createBaseCommand, activeBaseView, updateActiveView } = require("./bases");
+const { isBasesEnabled, createBaseCommand, activeBaseView, updateActiveView } = require("./bases");
 
 function registerCommands(plugin) {
 
@@ -60,10 +60,17 @@ function registerCommands(plugin) {
   });
 
   // Creates a .base for the chosen TYP or Subtyp in the vault root, see bases.js.
+  // Hidden while the Bases core plugin is off: the file couldn't be opened.
   plugin.addCommand({
     id: "create-base-for-typ",
     name: "Create Base for TYP",
-    callback: runOrReportError("Create Base", () => createBaseCommand(plugin)),
+    checkCallback: (checking) => {
+      if (!isBasesEnabled(plugin.app)) return false;
+      if (checking) return true;
+
+      runOrReportError("Create Base", () => createBaseCommand(plugin))();
+      return true;
+    },
   });
 
   // Brings the columns of the visible Base view in line with its TYP. Without

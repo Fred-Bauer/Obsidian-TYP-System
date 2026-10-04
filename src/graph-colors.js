@@ -70,6 +70,14 @@ function registerGraphColors(plugin) {
     }
   };
 
+  // Registered before any patchRenderer() cleanup, so it runs after them on
+  // unload (Obsidian runs these callbacks last-in, first-out): with setData
+  // back to the original, one render() draws the graph without TYP colors at
+  // once instead of on its next change.
+  plugin.register(() => {
+    for (const leaf of getGraphLeaves(plugin.app)) (leaf.view?.dataEngine ?? leaf.view?.engine)?.render();
+  });
+
   plugin.registerEvent(plugin.app.workspace.on("layout-change", refresh));
   plugin.registerEvent(plugin.typIndex.on("change", refresh));
   plugin.app.workspace.onLayoutReady(refresh);

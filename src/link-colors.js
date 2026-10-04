@@ -2,7 +2,7 @@ const { editorInfoField, getLinkpath } = require("obsidian");
 const { ViewPlugin, Decoration } = require("@codemirror/view");
 const { Prec, RangeSetBuilder, StateEffect } = require("@codemirror/state");
 const { syntaxTree } = require("@codemirror/language");
-const { colorForFile } = require("./typ-colors");
+const { colorForFile, allDocuments } = require("./typ-colors");
 
 // Colors links in note text by the TYP of their target. Obsidian colors
 // internal links through var(--link-color), so only that variable is set per
@@ -48,11 +48,9 @@ function applyToAnchor(plugin, anchorEl) {
 
 // Recolors links that are already rendered. The post-processor stores each
 // link's source note on it, which ambiguous link text needs to resolve.
-// Collects all windows (pop-outs included) through their leaves.
+// Covers all windows (pop-outs included).
 function refreshRenderedLinks(plugin) {
-  const docs = new Set();
-  plugin.app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.view.containerEl.ownerDocument));
-  for (const doc of docs) {
+  for (const doc of allDocuments(plugin.app)) {
     for (const anchorEl of doc.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) applyToAnchor(plugin, anchorEl);
   }
 }
@@ -119,10 +117,46 @@ function buildLinkViewPlugin(plugin) {
   );
 }
 
-function refreshEditors(plugin) {
-  plugin.app.workspace.iterateAllLeaves((leaf) => {
-    leaf.view?.editor?.cm?.dispatch({ effects: refreshEffect.of(null) });
+// Returns schedule(): asks every editor to rebuild its link decorations, at
+// most once per animation frame.
+//
+// Never dispatched synchronously: a refresh can arrive while an editor is in
+// the middle of its own update (CodeMirror then throws "Calls to
+// EditorView.update are not allowed while an update is in progress"), for
+// instance when something an update sets off ends in refreshTypColors(). The
+// frame also bundles bursts of refreshes - dragging a color slider sends one
+// per input event. An editor still busy when the frame comes (updateState is
+// CodeMirror's internal flag, 0 = idle; it is also non-zero while measuring)
+// is retried a frame later.
+function createEditorRefresher(plugin) {
+  let frame = null;
+  const run = () => {
+    frame = null;
+    let busy = false;
+    plugin.app.workspace.iterateAllLeaves((leaf) => {
+      const cm = leaf.view?.editor?.cm;
+      if (!cm) return;
+      if (cm.updateState !== 0) {
+        busy = true;
+        return;
+      }
+      try {
+        cm.dispatch({ effects: refreshEffect.of(null) });
+      } catch (error) {
+        // One editor failing must not keep the others from refreshing.
+        console.error("[TYP link colors]", error);
+      }
+    });
+    if (busy) schedule();
+  };
+  const schedule = () => {
+    if (frame === null) frame = window.requestAnimationFrame(run);
+  };
+  plugin.register(() => {
+    if (frame !== null) window.cancelAnimationFrame(frame);
+    frame = null;
   });
+  return schedule;
 }
 
 // ------------------------------------------------------------------------
@@ -141,9 +175,10 @@ function registerLinkColors(plugin) {
   // Lowest priority at least wraps ".cm-underline", covering the whole text.
   plugin.registerEditorExtension(Prec.lowest(buildLinkViewPlugin(plugin)));
 
+  const refreshEditors = createEditorRefresher(plugin);
   const refresh = () => {
     refreshRenderedLinks(plugin);
-    refreshEditors(plugin);
+    refreshEditors();
   };
   plugin.registerEvent(plugin.typIndex.on("change", refresh));
   // Editor decorations go away with the extension on unload, the inline

@@ -23,10 +23,20 @@ const {
   pickTypAndSubtyp: pickTypAndSubtypModal,
 } = require("./typ-picker");
 const { registerShortcutScripts } = require("./shortcut-scripts");
+const { clearInlineColors, allDocuments } = require("./typ-colors");
 
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
+
+    // Disabling the plugin takes its inline colors out of the explorer,
+    // search, Recent Files, backlinks, bookmarks, note titles and "All
+    // properties" (see setInlineColor in typ-colors.js); those views would
+    // keep them until they happen to re-render. Registered first so it runs
+    // last on unload, after the modules have stopped observing and listening.
+    this.register(() => {
+      for (const doc of allDocuments(this.app)) clearInlineColors(doc);
+    });
 
     // Before all other modules: they listen to its "change" event and read
     // TYP/SUBTYP only through it (see typ-index.js).
@@ -260,7 +270,11 @@ module.exports = class TypSystemPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // A deep copy as the base: without data.json (a fresh install) or with keys
+    // missing from it, settings.typs, typColors and so on would otherwise BE
+    // the objects in DEFAULT_SETTINGS, and every change would alter the
+    // defaults along with them.
+    this.settings = Object.assign(structuredClone(DEFAULT_SETTINGS), await this.loadData());
     // Object.assign replaces nested objects whole; views added later (e.g.
     // colorViews.links) would otherwise be silently off in older settings.
     this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };

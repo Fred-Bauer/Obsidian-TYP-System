@@ -27,7 +27,12 @@ const { clearInlineColors, allDocuments } = require("./typ-colors");
 
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
-    await this.loadSettings();
+    // Read once here: no data.json (loadData() resolves null) means the plugin
+    // is loaded for the very first time in this vault, and the TYP-Pane opens
+    // on its own once (see registerTypPane).
+    const data = await this.loadData();
+    this.isFirstRun = data == null;
+    await this.loadSettings(data);
 
     // Disabling the plugin takes its inline colors out of the explorer,
     // search, Recent Files, backlinks, bookmarks, note titles and "All
@@ -269,12 +274,15 @@ module.exports = class TypSystemPlugin extends Plugin {
     return pickTypAndSubtypModal(this.app, this, options);
   }
 
-  async loadSettings() {
+  // data: what loadData() returned, if the caller already has it (onload);
+  // without it (onExternalSettingsChange) data.json is read here.
+  async loadSettings(data) {
+    if (data === undefined) data = await this.loadData();
     // A deep copy as the base: without data.json (a fresh install) or with keys
     // missing from it, settings.typs, typColors and so on would otherwise BE
     // the objects in DEFAULT_SETTINGS, and every change would alter the
     // defaults along with them.
-    this.settings = Object.assign(structuredClone(DEFAULT_SETTINGS), await this.loadData());
+    this.settings = Object.assign(structuredClone(DEFAULT_SETTINGS), data);
     // Object.assign replaces nested objects whole; views added later (e.g.
     // colorViews.links) would otherwise be silently off in older settings.
     this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };

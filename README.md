@@ -1,6 +1,6 @@
 # TYP-System
 
-TYP system for this vault: a **TYP-Pane** docked on the left (command "Open TYP-Pane"), a native **TYP-Picker**, TYP-Frontmatter per TYP, frontmatter sorting, **Bases** generated from a TYP, and coloring of note names by their `TYP` property across many views. Split off from the **Fred** plugin.
+TYP system for this vault: a **TYP-Pane** docked on the left (command "Open TYP-Pane"; on the very first start it opens there by itself, once), a native **TYP-Picker**, TYP-Frontmatter per TYP, frontmatter sorting, **Bases** generated from a TYP, and coloring of note names by their `TYP` property across many views. Split off from the **Fred** plugin.
 
 Every note has at most one `TYP` and one `SUBTYP`, each a single clean value. TYP names are uppercase, Subtyp names title case per word ("Kurz Geschichte").
 
@@ -144,4 +144,5 @@ The plugin has no Templater logic of its own but offers an API on `app.plugins.p
 - **Confirmation dialog** (`src/confirm-modal.js`): one `ConfirmModal` on top of Obsidian's public `ConfirmationModal` (since 1.13.0) for every confirmation; title and body take text and nodes, so names can be colored. Both callbacks run once the dialog has closed; the `dontAskAgain` option adds Obsidian's checkbox (`addCheckbox`, desktop only) and hands its state to `onConfirm`
 - **Undo** (`src/undo.js`): a `structuredClone` of the settings before the action, restored in place (the `plugin.settings` object stays the same). `saveSettings()` and `onExternalSettingsChange()` bump `plugin.settingsRevision`; an undo whose recorded revision no longer matches is refused
 - The TYP-Pane (view type `typ-system-pane`) reconnects itself after hot reload
+- **First start:** when the plugin is loaded without a `data.json` (`loadData()` resolves `null`, i.e. it has never saved settings in this vault), the TYP-Pane is created in the left sidebar and revealed. This happens once: afterwards a closed pane stays closed and only "Open TYP-Pane" brings it back. "Already created" is a marker in this device's `localStorage` for the vault (`app.saveLocalStorage("typ-system-pane-created")`), so a hot reload before the first save doesn't open the pane again. `data.json` is deliberately not written for this: with Obsidian Sync, a `data.json` full of defaults written on a second device before the real one arrives could replace the real settings. On another device (or after clearing the app's local data) the pane may therefore open once more if `data.json` hasn't arrived yet
 - The global property order uses its own plain list instead of Obsidian's widget: re-running `synchronize()` from `saveFrontmatter` can cause a stack overflow

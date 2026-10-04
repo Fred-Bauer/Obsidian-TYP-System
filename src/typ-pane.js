@@ -1741,7 +1741,7 @@ function registerTypPane(plugin) {
   // "instanceof TypPane" fails against the reloaded class, and getViewType()
   // comes from leaf.view alone. `app` survives unchanged, so the leaf
   // reference is kept there.
-  plugin.app.workspace.onLayoutReady(() => activateTypPane(plugin, false, false));
+  plugin.app.workspace.onLayoutReady(() => openTypPaneOnStart(plugin));
 
   const refresh = () => {
     for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_TYP_PANE)) {
@@ -1762,10 +1762,27 @@ function registerTypPane(plugin) {
   return refresh;
 }
 
-// createIfMissing: false for the automatic onLayoutReady call (see
-// registerTypPane), which should only reconnect an existing leaf orphaned by
-// hot reload, not create one on every start. A pane that was closed stays
-// closed.
+// localStorage key (per vault, see openTypPaneOnStart).
+const PANE_CREATED_KEY = "typ-system-pane-created";
+
+// The automatic call once the layout is ready, on every start and hot reload.
+// Normally it only reconnects an existing leaf orphaned by hot reload
+// (createIfMissing: false), so a pane that was closed stays closed. Only on the
+// very first start in this vault (no data.json yet, plugin.isFirstRun) it
+// creates the pane in the left sidebar and reveals it, so a new user finds it
+// without knowing the command.
+// "Already created" is remembered in this device's localStorage for the vault
+// (app.saveLocalStorage), not in data.json: data.json is still missing then,
+// so a hot reload would otherwise open the pane again. Writing data.json just
+// for this marker could let Sync put defaults over the real settings on a
+// second device where the plugin arrives before its data.json.
+async function openTypPaneOnStart(plugin) {
+  const app = plugin.app;
+  const firstRun = plugin.isFirstRun && !app.loadLocalStorage(PANE_CREATED_KEY);
+  await activateTypPane(plugin, firstRun, firstRun);
+  if (firstRun) app.saveLocalStorage(PANE_CREATED_KEY, true);
+}
+
 async function activateTypPane(plugin, reveal = true, createIfMissing = true) {
   const app = plugin.app;
   const { workspace } = app;

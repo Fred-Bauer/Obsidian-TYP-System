@@ -1,9 +1,9 @@
 const { ItemView, Menu, Notice, setIcon, debounce } = require("obsidian");
-const { ConfirmModal, typNameNode, subtypNameNode } = require("./confirm-modal");
-const { snapshotSettings, offerUndo } = require("./undo");
+const { ConfirmModal, RenameModal, typNameNode, subtypNameNode } = require("./confirm-modal");
+const { snapshotSettings, offerUndo, registerUndoCommand } = require("./undo");
 const { mountFrontmatterBlocks } = require("./frontmatter-blocks");
 const { renderShortcutControls } = require("./typ-frontmatter-editor");
-const { moveTypSettings, deleteTypSettings } = require("./typ-settings");
+const { moveTypSettings, deleteTypSettings, mergeTypSettings, typHasMergeableSettings } = require("./typ-settings");
 const { runOrReportError } = require("./commands");
 const { isBasesEnabled, createBaseFor } = require("./bases");
 const { runFrontmatterSort } = require("./frontmatter-sort");
@@ -13,7 +13,7 @@ const {
   normalizeSubtypName,
   getSubtypNames,
   ensureSubtyp,
-  mergeTypSubtyps,
+  blockHasProperties,
   getSubtyp,
   isSubtypManual,
   setSubtypManual,
@@ -116,7 +116,7 @@ const NO_NOTES = Object.freeze({ changed: 0, skipped: 0 });
 // Cleaned form of a raw value for registerTyp(): a single value trimmed and
 // uppercased; a list is deliberately NOT reduced to one item but joined into
 // one value "A, B" - which a rename can then turn into another TYP (see
-// startDetailRename/showMergeConfirm). normalize spells the single names -
+// commitTypRename/openTypRenameModal). normalize spells the single names -
 // normalizeSubtypName for Subtyps.
 function normalizeRawTyp(raw, normalize = normalizeTypName) {
   if (Array.isArray(raw)) {
@@ -696,7 +696,8 @@ class TypPane extends ItemView {
   }
 
   // The shared "Manually creatable" button of TYP (renderManualToggle) and
-  // Subtyp (renderSubtypManualToggle), each between rename and delete. An
+  // Subtyp (renderSubtypManualToggle), each first of the actions, left of
+  // rename. An
   // icon button rather than a labeled toggle - too small a setting for its own
   // row. State via a class (is-active, see styles.css), meaning in the tooltip;
   // role/aria-checked keep it readable as a switch.
@@ -730,8 +731,8 @@ class TypPane extends ItemView {
     return btn;
   }
 
-  // The TYP's "Manually creatable", in the detail header between rename and
-  // delete. On by default, so only "off" (false) is stored. Decides whether
+  // The TYP's "Manually creatable", in the detail header left of rename. On
+  // by default, so only "off" (false) is stored. Decides whether
   // getTyps() (main.js) returns the TYP.
   //
   // The TYP always takes its Subtyps along: the picker only reaches them
@@ -747,8 +748,8 @@ class TypPane extends ItemView {
     });
   }
 
-  // A Subtyp's "Manually creatable", in its block footer between rename and
-  // delete (see renderSectionFooter). Unlike the TYP button it pulls only one
+  // A Subtyp's "Manually creatable", in its block footer left of rename (see
+  // renderSectionFooter). Unlike the TYP button it pulls only one
   // way: switching a Subtyp on also switches its TYP on (else it would be
   // unreachable), the other Subtyps stay as they are - that is the point.
   renderSubtypManualToggle(parent, typ, subtyp) {
@@ -874,7 +875,10 @@ class TypPane extends ItemView {
     const menu = new Menu();
     menu.addItem((item) => item.setTitle("Search notes").setIcon("search").onClick(() => this.openSearch(typ)));
     menu.addSeparator();
-    this.addRenameItems(menu, (options) => this.startListRename(typ, self, nameEl, options));
+    this.addRenameItems(menu, {
+      rename: () => this.startListRename(typ, self, nameEl),
+      renameWithNotes: () => this.openTypRenameModal(typ),
+    });
     menu.addItem((item) =>
       item
         .setTitle("Delete")
@@ -904,8 +908,8 @@ class TypPane extends ItemView {
 
   // Right-click on a Subtyp row in the list or on a Subtyp block's heading or
   // footer in the detail view: like showTypMenu, with the actions of the
-  // block's footer. startRename(options) puts the name where it was clicked
-  // into input mode. "Create Base" makes the standalone Subtyp Base, as the
+  // block's footer. startRename() puts the name where it was clicked into
+  // input mode. "Create Base" makes the standalone Subtyp Base, as the
   // command does when a Subtyp is picked (see createBaseCommand).
   showSubtypMenu(event, typ, subtyp, startRename) {
     const menu = new Menu();
@@ -916,7 +920,10 @@ class TypPane extends ItemView {
         .onClick(() => this.openSubtypSearch(typ, subtyp))
     );
     menu.addSeparator();
-    this.addRenameItems(menu, startRename);
+    this.addRenameItems(menu, {
+      rename: startRename,
+      renameWithNotes: () => this.openSubtypRenameModal(typ, subtyp),
+    });
     menu.addItem((item) =>
       item
         .setTitle("Delete")
@@ -942,24 +949,43 @@ class TypPane extends ItemView {
     menu.showAtMouseEvent(event);
   }
 
-  // "Rename" and "Rename and update notes" of both context menus. The latter
-  // in accent color like its button in the detail view
-  // (.typ-detail-rename-notes): it also rewrites notes. MenuItem has no API
-  // for a color, so the class goes on its element (item.dom, which
-  // setWarning() styles the same way).
-  addRenameItems(menu, startRename) {
+  // "Rename" and "Rename and update notes" of the context menus and of the
+  // rename button (renderRenameButton). rename edits the name inline and
+  // changes only the settings; renameWithNotes opens the rename dialog (see
+  // openTypRenameModal), which also rewrites notes - hence the accent color.
+  // MenuItem has no API for a color, so the class goes on its element
+  // (item.dom, which setWarning() styles the same way).
+  addRenameItems(menu, { rename, renameWithNotes }) {
     menu.addItem((item) =>
       item
         .setTitle("Rename")
         .setIcon("pencil")
-        .onClick(() => startRename({}))
+        .onClick(() => rename())
     );
     menu.addItem((item) => {
       item
         .setTitle("Rename and update notes")
         .setIcon("pencil")
-        .onClick(() => startRename({ updateNotes: true }));
+        .onClick(() => renameWithNotes());
       item.dom?.addClass("typ-menu-accent");
+    });
+  }
+
+  // The one rename button of the detail header and of a Subtyp block's
+  // footer: opens the two rename items (addRenameItems) right below it, like
+  // Obsidian's own buttons with a menu. The button stays highlighted while
+  // the menu is open (has-active-menu, set by Menu.setParentElement); a second
+  // click on it only closes the menu.
+  renderRenameButton(parent, actions) {
+    const button = parent.createDiv({ cls: "clickable-icon typ-detail-rename", attr: { "aria-label": "Rename" } });
+    setIcon(button, "pencil");
+    button.addEventListener("click", () => {
+      if (button.hasClass("has-active-menu")) return;
+      const menu = new Menu();
+      this.addRenameItems(menu, actions);
+      const rect = button.getBoundingClientRect();
+      menu.setParentElement(button);
+      menu.showAtPosition({ x: rect.left, y: rect.bottom, width: rect.width, overlap: true }, button.doc);
     });
   }
 
@@ -1024,7 +1050,7 @@ class TypPane extends ItemView {
       if (this.isEditing) return;
       this.openTypSettings(typ, subtyp);
     });
-    this.attachSubtypMenu(self, typ, subtyp, (options) => this.startListSubtypRename(typ, subtyp, self, nameEl, options));
+    this.attachSubtypMenu(self, typ, subtyp, () => this.startListSubtypRename(typ, subtyp, self, nameEl));
   }
 
   // Opens showSubtypMenu on right-click (on touch: long press) on el. While a
@@ -1165,23 +1191,14 @@ class TypPane extends ItemView {
     const { counts } = this.plugin.typIndex.typCounts();
     header.createSpan({ cls: "typ-detail-count", text: String(counts.get(typ) ?? 0) });
 
-    // Left of the plain rename button, highlighted in accent color: this one
-    // also rewrites the TYP of every affected note (after confirmation, see
-    // startDetailRename).
-    const renameWithNotesBtn = header.createDiv({
-      cls: "clickable-icon typ-detail-rename-notes",
-      attr: { "aria-label": "Rename and update notes" },
-    });
-    setIcon(renameWithNotesBtn, "pencil");
-    renameWithNotesBtn.addEventListener("click", () => this.startDetailRename(typ, titleEl, { updateNotes: true }));
-
-    const renameBtn = header.createDiv({ cls: "clickable-icon typ-detail-rename", attr: { "aria-label": "Rename" } });
-    setIcon(renameBtn, "pencil");
-    renameBtn.addEventListener("click", () => this.startDetailRename(typ, titleEl));
-
-    // Between rename and delete, in the same spot as for a Subtyp (see
-    // renderSectionFooter).
+    // Manually creatable, rename, delete - the same order as for a Subtyp
+    // (see renderSectionFooter).
     this.renderManualToggle(header, typ);
+
+    this.renderRenameButton(header, {
+      rename: () => this.startDetailRename(typ, titleEl),
+      renameWithNotes: () => this.openTypRenameModal(typ),
+    });
 
     const deleteBtn = header.createDiv({ cls: "clickable-icon typ-detail-delete", attr: { "aria-label": "Delete" } });
     setIcon(deleteBtn, "trash");
@@ -1261,7 +1278,7 @@ class TypPane extends ItemView {
 
   // A block's heading (see frontmatter-blocks.js): title with note count (for
   // the TYP-Frontmatter the notes without SUBTYP, the only ones it applies to
-  // alone), search on click, and the two add buttons for a blank row in this
+  // alone), search on click, and the add button for a blank row in this
   // block.
   renderSectionHeader(el, typ, section, bucket, blocks) {
     const titleGroup = el.createDiv({ cls: "typ-frontmatter-title-group" });
@@ -1275,38 +1292,25 @@ class TypPane extends ItemView {
     // too (see renderSectionFooter). Not the property rows in between, which
     // have Obsidian's own menu.
     if (section !== null) {
-      this.attachSubtypMenu(el, typ, section, (options) => this.startSubtypRename(typ, section, titleEl, options));
+      this.attachSubtypMenu(el, typ, section, () => this.startSubtypRename(typ, section, titleEl));
     }
 
-    // Floating properties share the list and order of the others (which
-    // frontmatter sorting relies on), so they land wherever drag & drop puts
-    // them instead of at the end of a second list.
+    // Only normal properties: a row becomes floating by right-click (see
+    // ensurePropertyMenuPatch in typ-frontmatter-editor.js).
     const addButtons = el.createDiv({ cls: "typ-frontmatter-add-group" });
-
-    // Left of the plain button, in accent color: marks the next added (or,
-    // until saved, renamed) property as floating (see
-    // editor.typPendingFloatingAdd). Floating properties aren't created for new
-    // notes (see getTypDefaults()) and show in italics where present.
-    const addFloatingPropertyBtn = addButtons.createDiv({
-      cls: "clickable-icon typ-frontmatter-add-floating",
-      attr: { "aria-label": "Add floating property" },
-    });
-    setIcon(addFloatingPropertyBtn, "plus");
-    addFloatingPropertyBtn.addEventListener("click", () => blocks.addBlank(section, true));
-
     const addPropertyBtn = addButtons.createDiv({
       cls: "clickable-icon typ-frontmatter-add",
       attr: { "aria-label": "Add property" },
     });
     setIcon(addPropertyBtn, "plus");
-    addPropertyBtn.addEventListener("click", () => blocks.addBlank(section, false));
+    addPropertyBtn.addEventListener("click", () => blocks.addBlank(section));
   }
 
   // Footer of a Subtyp block: on the left the Subtyp color (a dot opening the
   // sliders, reset next to it), on the right the same actions in the same order
-  // as the detail header (rename and update notes, rename, manually creatable,
-  // delete). The TYP-Frontmatter has no footer. The title is looked up on
-  // click - heading and footer are rebuilt on every synchronize().
+  // as the detail header (manually creatable, rename, delete). The
+  // TYP-Frontmatter has no footer. The title is looked up on click - heading
+  // and footer are rebuilt on every synchronize().
   renderSectionFooter(el, typ, subtyp) {
     el.addClass("typ-subtyp-actions");
     const colorGroup = el.createDiv({ cls: "typ-subtyp-color-group" });
@@ -1341,24 +1345,17 @@ class TypPane extends ItemView {
       while (sibling && !sibling.hasClass("typ-section-header")) sibling = sibling.previousElementSibling;
       return sibling?.querySelector(".typ-detail-section-title") ?? null;
     };
-    const rename = (updateNotes) => {
+    const rename = () => {
       const target = titleEl();
-      if (target) this.startSubtypRename(typ, subtyp, target, { updateNotes });
+      if (target) this.startSubtypRename(typ, subtyp, target);
     };
-    this.attachSubtypMenu(el, typ, subtyp, ({ updateNotes = false }) => rename(updateNotes));
-
-    const renameWithNotesBtn = actions.createDiv({
-      cls: "clickable-icon typ-detail-rename-notes",
-      attr: { "aria-label": "Rename and update notes" },
-    });
-    setIcon(renameWithNotesBtn, "pencil");
-    renameWithNotesBtn.addEventListener("click", () => rename(true));
-
-    const renameBtn = actions.createDiv({ cls: "clickable-icon typ-detail-rename", attr: { "aria-label": "Rename" } });
-    setIcon(renameBtn, "pencil");
-    renameBtn.addEventListener("click", () => rename(false));
+    this.attachSubtypMenu(el, typ, subtyp, rename);
 
     this.renderSubtypManualToggle(actions, typ, subtyp);
+    this.renderRenameButton(actions, {
+      rename,
+      renameWithNotes: () => this.openSubtypRenameModal(typ, subtyp),
+    });
 
     const deleteBtn = actions.createDiv({ cls: "clickable-icon typ-detail-delete", attr: { "aria-label": "Delete" } });
     setIcon(deleteBtn, "trash");
@@ -1533,101 +1530,137 @@ class TypPane extends ItemView {
   }
 
   // Like startDetailRename(), on a Subtyp block's title. The block keeps its
-  // position; updateNotes: true also rewrites the SUBTYP of the affected notes
-  // after confirmation. An existing name offers a merge instead (which always
-  // rewrites the notes).
-  startSubtypRename(typ, subtyp, titleEl, { updateNotes = false } = {}) {
+  // position; only the settings change (see commitSubtypRename).
+  startSubtypRename(typ, subtyp, titleEl) {
     this.startInlineEdit(titleEl, {
       classes: ["typ-subtyp-name-input", "is-being-renamed"],
       // The title sits among Obsidian's property editors, whose keyboard
       // navigation would react too.
       stopAllKeys: true,
-      onFinish: (commit, text) =>
-        commit ? this.commitSubtypRename(typ, subtyp, text, { updateNotes }) : this.render(),
+      onFinish: (commit, text) => (commit ? this.commitSubtypRename(typ, subtyp, text) : this.render()),
     });
   }
 
   // The same from a Subtyp row's context menu: only the Subtyp part of the row
   // becomes the input (the TYP part stays as it is).
-  startListSubtypRename(typ, subtyp, self, nameEl, { updateNotes = false } = {}) {
+  startListSubtypRename(typ, subtyp, self, nameEl) {
     this.startInlineEdit(nameEl, {
       classEl: self,
-      onFinish: (commit, text) =>
-        commit ? this.commitSubtypRename(typ, subtyp, text, { updateNotes }) : this.render(),
+      onFinish: (commit, text) => (commit ? this.commitSubtypRename(typ, subtyp, text) : this.render()),
     });
   }
 
-  async commitSubtypRename(typ, subtyp, rawText, { updateNotes }) {
+  // "Rename" of a Subtyp: settings only, notes keep their SUBTYP (and then
+  // show it as unregistered). An existing name merges into it the same way
+  // (mergeSubtypSettingsOnly).
+  async commitSubtypRename(typ, subtyp, rawText) {
     const value = normalizeSubtypName(rawText);
     if (!value || value === subtyp) {
       this.render();
       return;
     }
+    const existing = this.existingSubtyp(typ, subtyp, value);
+    if (existing) {
+      this.mergeSubtypSettingsOnly(typ, subtyp, existing);
+      return;
+    }
+    renameSubtyp(this.plugin.settings, typ, subtyp, value);
+    await this.plugin.saveSettings();
+    this.refreshOtherViews();
+    this.render();
+  }
 
-    const countOf = (name) => this.plugin.typIndex.subtypBucket(typ).counts.get(name) ?? 0;
-    const applyRename = async ({ withNotes }) => {
-      renameSubtyp(this.plugin.settings, typ, subtyp, value);
-      await this.plugin.saveSettings();
-      const { changed, skipped } = withNotes ? await renameSubtypInNotes(this.plugin, typ, subtyp, value) : NO_NOTES;
-      this.refreshOtherViews();
-      if (withNotes) new Notice(`Subtyp ${value}: ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`);
-      this.render();
-    };
-
-    const existing = getSubtypNames(this.plugin.settings, typ).find(
+  // Another registered Subtyp of typ named like value in any case, or
+  // undefined.
+  existingSubtyp(typ, subtyp, value) {
+    return getSubtypNames(this.plugin.settings, typ).find(
       (name) => name.toLowerCase() === value.toLowerCase() && name !== subtyp
     );
-    if (existing) {
-      new ConfirmModal(this.app, {
-        title: [
-          "Merge ",
-          subtypNameNode(this.plugin, typ, subtyp),
-          " into ",
-          subtypNameNode(this.plugin, typ, existing),
-          "?",
-        ],
-        body: [
-          `${existing} already exists in ${typ}. ` +
-            `${plural(countOf(subtyp), "note")} ${countOf(subtyp) === 1 ? "moves" : "move"} to it, ` +
-            `and the properties of ${subtyp} move into its block.`,
-        ],
-        confirmText: "Merge",
-        warning: true,
-        focus: "cancel",
-        onConfirm: async () => {
-          mergeSubtyps(this.plugin.settings, typ, subtyp, existing);
-          await this.plugin.saveSettings();
-          const { changed, skipped } = await renameSubtypInNotes(this.plugin, typ, subtyp, existing);
-          this.refreshOtherViews();
-          new Notice(
-            `Subtyp ${subtyp} merged into ${existing}, ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`
-          );
-          this.render();
-        },
-        onCancel: () => this.render(),
-      }).open();
-      return;
-    }
+  }
 
-    if (!updateNotes) {
-      await applyRename({ withNotes: false });
+  subtypCount(typ, subtyp) {
+    return this.plugin.typIndex.subtypBucket(typ).counts.get(subtyp) ?? 0;
+  }
+
+  // "Rename" onto an existing Subtyp: only the block's properties move into
+  // the target (see mergeSubtyps); no note is touched, so the notes of the old
+  // name show up as an unregistered Subtyp, and the merge can be undone. Asks
+  // only if there are properties to move - without them it is the same as
+  // deleting the Subtyp, which can be undone too.
+  mergeSubtypSettingsOnly(typ, source, target) {
+    const apply = async () => {
+      const snapshot = snapshotSettings(this.plugin);
+      mergeSubtyps(this.plugin.settings, typ, source, target);
+      await this.plugin.saveSettings();
+      offerUndo(this.plugin, `Subtyp ${source} merged into ${target}.`, snapshot);
+      this.refreshOtherViews();
+      this.render();
+    };
+    if (!blockHasProperties(getSubtyp(this.plugin.settings, typ, source)?.frontmatter)) {
+      apply();
       return;
     }
-    // Same color for old and new name: the new one takes over the old one's
-    // offset (see renameSubtyp).
     new ConfirmModal(this.app, {
-      title: [
-        "Rename ",
-        subtypNameNode(this.plugin, typ, subtyp),
-        " to ",
-        subtypNameNode(this.plugin, typ, value, subtyp),
-        "?",
+      title: ["Merge ", subtypNameNode(this.plugin, typ, source), " into ", subtypNameNode(this.plugin, typ, target), "?"],
+      body: [
+        `${target} already exists in ${typ}. The properties of ${source} move into its block. ` +
+          `Notes keep their SUBTYP ${source}.`,
       ],
-      body: [`${plural(countOf(subtyp), "note")} will be updated.`],
-      confirmText: "Rename",
+      confirmText: "Merge",
       focus: "confirm",
-      onConfirm: () => applyRename({ withNotes: true }),
+      onConfirm: apply,
       onCancel: () => this.render(),
+    }).open();
+  }
+
+  // "Rename and update notes" of a Subtyp: the new name typed into the rename
+  // dialog, which is also the confirmation (see RenameModal). Renames the
+  // Subtyp and rewrites the SUBTYP of its notes; an existing name turns the
+  // dialog into a merge, which moves the notes and the block's properties.
+  // The new name keeps the old one's color offset (see renameSubtyp).
+  openSubtypRenameModal(typ, subtyp) {
+    const count = this.subtypCount(typ, subtyp);
+    new RenameModal(this.app, {
+      title: ["Rename ", subtypNameNode(this.plugin, typ, subtyp)],
+      value: subtyp,
+      preview: (text) => {
+        const value = normalizeSubtypName(text);
+        const existing = value && this.existingSubtyp(typ, subtyp, value);
+        if (existing) {
+          return {
+            confirmText: "Merge",
+            warning: true,
+            ready: true,
+            body: [
+              [
+                subtypNameNode(this.plugin, typ, existing),
+                ` already exists in ${typ}. ${plural(count, "note")} ${count === 1 ? "moves" : "move"} to it, ` +
+                  `and the properties of ${subtyp} move into its block.`,
+              ],
+            ],
+          };
+        }
+        return {
+          confirmText: "Rename",
+          ready: !!value && value !== subtyp,
+          body: [`${plural(count, "note")} will be updated.`],
+        };
+      },
+      onSubmit: async (text) => {
+        const value = normalizeSubtypName(text);
+        const target = this.existingSubtyp(typ, subtyp, value) ?? value;
+        const merge = target !== value;
+        if (merge) mergeSubtyps(this.plugin.settings, typ, subtyp, target);
+        else renameSubtyp(this.plugin.settings, typ, subtyp, target);
+        await this.plugin.saveSettings();
+        const { changed, skipped } = await renameSubtypInNotes(this.plugin, typ, subtyp, target);
+        this.refreshOtherViews();
+        new Notice(
+          (merge ? `Subtyp ${subtyp} merged into ${target}, ` : `Subtyp ${target}: `) +
+            `${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`
+        );
+        this.render();
+      },
     }).open();
   }
 
@@ -1730,7 +1763,7 @@ class TypPane extends ItemView {
   startAddSubtyp(typ) {
     if (this.isEditing || !this.subtypAddBtnEl) return;
 
-    // Built like the finished (empty) block, with the "+" buttons and footer
+    // Built like the finished (empty) block, with the "+" button and footer
     // actions that do nothing yet, just without a count - so nothing jumps
     // when the input is done (see .typ-subtyp-pending).
     const block = createDiv({ cls: "typ-frontmatter-block typ-subtyp-block typ-subtyp-pending" });
@@ -1739,18 +1772,16 @@ class TypPane extends ItemView {
     const titleGroup = header.createDiv({ cls: "typ-frontmatter-title-group" });
     const nameEl = titleGroup.createDiv({ cls: "typ-detail-section-title typ-subtyp-name-input is-being-renamed" });
     const addButtons = header.createDiv({ cls: "typ-frontmatter-add-group" });
-    setIcon(addButtons.createDiv({ cls: "clickable-icon typ-frontmatter-add-floating" }), "plus");
     setIcon(addButtons.createDiv({ cls: "clickable-icon typ-frontmatter-add" }), "plus");
     const footer = block.createDiv({ cls: "typ-section-footer typ-subtyp-actions" });
     const colorGroup = footer.createDiv({ cls: "typ-subtyp-color-group" });
     paintColorDot(colorGroup.createDiv({ cls: "typ-subtyp-color-dot" }), this.plugin.settings.typColors[typ] ?? DEFAULT_TYP_COLOR, true);
     setIcon(colorGroup.createDiv({ cls: "clickable-icon typ-color-reset is-disabled" }), "rotate-ccw");
     const actions = footer.createDiv({ cls: "typ-subtyp-action-group" });
-    setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-rename-notes" }), "pencil");
-    setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-rename" }), "pencil");
     // The state ensureSubtyp will give the new Subtyp: that of its TYP.
     const manualCls = "clickable-icon typ-manual-icon" + (this.ensureTypManual()[typ] !== false ? " is-active" : "");
     setIcon(actions.createDiv({ cls: manualCls }), "file-pen-line");
+    setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-rename" }), "pencil");
     setIcon(actions.createDiv({ cls: "clickable-icon typ-detail-delete" }), "trash");
 
     this.startInlineEdit(nameEl, {
@@ -1793,65 +1824,44 @@ class TypPane extends ItemView {
     );
   }
 
-  // "Rename" / "Rename and update notes" from the list's context menu: the
-  // name in the row becomes the input, the rest is the same as in the detail
-  // view (commitTypRename).
-  startListRename(typ, self, nameEl, options = {}) {
+  // "Rename" from the list's context menu: the name in the row becomes the
+  // input, the rest is the same as in the detail view (commitTypRename).
+  startListRename(typ, self, nameEl) {
     if (this.isEditing) return;
     this.startInlineEdit(nameEl, {
       classEl: self,
-      onFinish: (commit, text) => (commit ? this.commitTypRename(typ, text, options) : this.render()),
+      onFinish: (commit, text) => (commit ? this.commitTypRename(typ, text) : this.render()),
     });
   }
 
-  // The rename buttons of the detail header, on the title.
-  startDetailRename(typ, titleEl, options = {}) {
+  // "Rename" of the detail header's rename button, on the title.
+  startDetailRename(typ, titleEl) {
     this.startInlineEdit(titleEl, {
-      onFinish: (commit, text) => (commit ? this.commitTypRename(typ, text, options) : this.render()),
+      onFinish: (commit, text) => (commit ? this.commitTypRename(typ, text) : this.render()),
     });
   }
 
-  // The rename itself, shared by list and detail view. updateNotes: true (the
-  // highlighted button) also rewrites the TYP of every affected note after
-  // confirmation (see renameTypInNotes) instead of only the settings. An
-  // existing name offers a merge (showMergeConfirm).
-  async commitTypRename(typ, rawText, { updateNotes = false } = {}) {
+  // "Rename" of a TYP, shared by list and detail view: settings only, notes
+  // keep their TYP (and then show it as unregistered). An existing name
+  // merges into it the same way (mergeTypSettingsOnly).
+  async commitTypRename(typ, rawText) {
     const value = normalizeTypName(rawText);
     if (!value || value === typ) {
       this.render();
       return;
     }
-
-    const existing = this.plugin.settings.typs.find((t) => t.toLowerCase() === value.toLowerCase() && t !== typ);
+    const existing = this.existingTyp(typ, value);
     if (existing) {
-      this.showMergeConfirm(typ, existing);
+      this.mergeTypSettingsOnly(typ, existing);
       return;
     }
+    await this.renameTypSettings(typ, value);
+    this.render();
+  }
 
-    if (!updateNotes) {
-      await this.renameTypSettings(typ, value);
-      this.render();
-      return;
-    }
-
-    // A bulk write across possibly many files - confirm first. Same color for
-    // old and new name: the new one has no typColors entry yet but takes over
-    // the old one's (see renameTypSettings).
-    const { counts } = this.plugin.typIndex.typCounts();
-    const color = this.plugin.settings.typColors[typ] ?? null;
-    new ConfirmModal(this.app, {
-      title: ["Rename ", typNameNode(this.plugin, typ, color), " to ", typNameNode(this.plugin, value, color), "?"],
-      body: [`${plural(counts.get(typ) ?? 0, "note")} will be updated.`],
-      confirmText: "Rename",
-      focus: "confirm",
-      onConfirm: async () => {
-        await this.renameTypSettings(typ, value);
-        const { changed, skipped } = await renameTypInNotes(this.plugin, typ, value);
-        new Notice(`TYP ${value}: ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`);
-        this.render();
-      },
-      onCancel: () => this.render(),
-    }).open();
+  // Another registered TYP named like value in any case, or undefined.
+  existingTyp(typ, value) {
+    return this.plugin.settings.typs.find((t) => t.toLowerCase() === value.toLowerCase() && t !== typ);
   }
 
   // Moves only the settings (list position, color, description,
@@ -1865,14 +1875,26 @@ class TypPane extends ItemView {
     this.refreshOtherViews();
   }
 
-  // Renaming to the name of an already registered TYP (see commitTypRename)
-  // offers to merge both (see mergeTyp) instead of silently dropping the
-  // rename. It always rewrites the notes, whichever rename button started it:
-  // a merge in the settings only would leave the source TYP's notes as an
-  // unregistered entry.
-  showMergeConfirm(source, target) {
+  // "Rename" onto an existing TYP: the settings merge (mergeTypSettings -
+  // TYP-Frontmatter and Subtyps move into target), no note is touched. The
+  // notes of source then show up as an unregistered TYP, and the merge can be
+  // undone. Asks only if source has something to move (properties or
+  // Subtyps); otherwise it is the same as deleting source, which can be undone
+  // too.
+  mergeTypSettingsOnly(source, target) {
     const { settings } = this.plugin;
-    const count = this.plugin.typIndex.typCounts().counts.get(source) ?? 0;
+    const apply = async () => {
+      const snapshot = snapshotSettings(this.plugin);
+      this.applyTypMerge(source, target);
+      await this.plugin.saveSettings();
+      offerUndo(this.plugin, `TYP ${source} merged into ${target}.`, snapshot);
+      this.refreshOtherViews();
+      this.render();
+    };
+    if (!typHasMergeableSettings(settings, source)) {
+      apply();
+      return;
+    }
     new ConfirmModal(this.app, {
       title: [
         "Merge ",
@@ -1881,23 +1903,26 @@ class TypPane extends ItemView {
         typNameNode(this.plugin, target, settings.typColors[target] ?? null),
         "?",
       ],
-      body: [
-        `${target} already exists. ${plural(count, "note")} ${count === 1 ? "moves" : "move"} to it. ` +
-          `The color, description and TYP-Frontmatter of ${source} are dropped. ` +
-          `Every Subtyp moves along; blocks with the same name are merged.`,
-      ],
+      body: [`${target} already exists. ${this.typMergeText(source)} Notes keep their TYP ${source}.`],
       confirmText: "Merge",
-      warning: true,
-      focus: "cancel",
-      onConfirm: () => this.mergeTyp(source, target),
+      focus: "confirm",
+      onConfirm: apply,
       onCancel: () => this.render(),
     }).open();
   }
 
-  // Merges source into target: notes are rewritten to target, source leaves
-  // the list with its settings (target keeps its own). Source's Subtyps move
-  // over first, same-named blocks are combined (see mergeTypSubtyps in
-  // subtyps.js); then the rest of source goes like a deleted TYP.
+  // What a merge does with source's settings, for both merge dialogs.
+  typMergeText(source) {
+    const subtyps = getSubtypNames(this.plugin.settings, source).length > 0;
+    return (
+      `The TYP-Frontmatter of ${source} moves into it` +
+      (subtyps ? `, and every Subtyp moves along (blocks with the same name are merged)` : "") +
+      `. Its color and description are dropped.`
+    );
+  }
+
+  // The settings side of every TYP merge: source goes into target (see
+  // mergeTypSettings in typ-settings.js).
   //
   // "Manually creatable" is where a merge does more than move data: the moved
   // Subtyps bring source's toggles but end up under target's. With source on
@@ -1908,15 +1933,68 @@ class TypPane extends ItemView {
   //
   // An open detail view of source moves to target; a merge started from the
   // list stays in the list.
-  async mergeTyp(source, target) {
-    const settings = this.plugin.settings;
-    const { changed, skipped } = await renameTypInNotes(this.plugin, source, target);
-
-    mergeTypSubtyps(settings, source, target);
-    deleteTypSettings(settings, source);
+  applyTypMerge(source, target) {
+    const { settings } = this.plugin;
+    mergeTypSettings(settings, source, target);
     if (this.ensureTypManual()[target] === false) setAllSubtypsManual(settings, target, false);
-
     if (this.selectedTyp === source) this.selectedTyp = target;
+  }
+
+  // "Rename and update notes" of a TYP: the new name typed into the rename
+  // dialog, which is also the confirmation (see RenameModal). Renames the TYP
+  // and rewrites the TYP of every affected note (renameTypInNotes); an
+  // existing name turns the dialog into a merge, which moves the notes and
+  // source's settings (applyTypMerge). Same color for old and new name: the
+  // new one takes over the old one's (see renameTypSettings).
+  openTypRenameModal(typ) {
+    const { settings } = this.plugin;
+    const count = this.plugin.typIndex.typCounts().counts.get(typ) ?? 0;
+    new RenameModal(this.app, {
+      title: ["Rename ", typNameNode(this.plugin, typ, settings.typColors[typ] ?? null)],
+      value: typ,
+      preview: (text) => {
+        const value = normalizeTypName(text);
+        const existing = value && this.existingTyp(typ, value);
+        if (existing) {
+          return {
+            confirmText: "Merge",
+            warning: true,
+            ready: true,
+            body: [
+              [
+                typNameNode(this.plugin, existing, settings.typColors[existing] ?? null),
+                ` already exists. ${plural(count, "note")} ${count === 1 ? "moves" : "move"} to it. ` +
+                  this.typMergeText(typ),
+              ],
+            ],
+          };
+        }
+        return {
+          confirmText: "Rename",
+          ready: !!value && value !== typ,
+          body: [`${plural(count, "note")} will be updated.`],
+        };
+      },
+      onSubmit: async (text) => {
+        const value = normalizeTypName(text);
+        const existing = this.existingTyp(typ, value);
+        if (existing) {
+          await this.mergeTyp(typ, existing);
+          return;
+        }
+        await this.renameTypSettings(typ, value);
+        const { changed, skipped } = await renameTypInNotes(this.plugin, typ, value);
+        new Notice(`TYP ${value}: ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`);
+        this.render();
+      },
+    }).open();
+  }
+
+  // Merges source into target with its notes: the notes are rewritten to
+  // target, then the settings merge (applyTypMerge).
+  async mergeTyp(source, target) {
+    const { changed, skipped } = await renameTypInNotes(this.plugin, source, target);
+    this.applyTypMerge(source, target);
     await this.plugin.saveSettings();
     this.refreshOtherViews();
     new Notice(`TYP ${source} merged into ${target}, ${plural(changed, "note")} updated.${skippedText(skipped, "updated")}`);
@@ -1954,6 +2032,8 @@ function registerTypPane(plugin) {
     name: "Add TYP-Frontmatter property",
     callback: () => addTypPropertyCommand(plugin),
   });
+
+  registerUndoCommand(plugin);
 
   // On hot reload the old leaf object survives (only our module reloads), but
   // "instanceof TypPane" fails against the reloaded class, and getViewType()

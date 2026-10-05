@@ -27,8 +27,8 @@ function normalizeSubtypName(raw) {
 
 // "Still to be filled": when two blocks or two properties merge, such a value
 // is filled from the other instead of overwriting the existing entry (see
-// mergeSubtyps and mergeTypSubtyps here, moveProperty in
-// frontmatter-blocks.js and renameInStore in property-rename-sync.js).
+// mergeBlockInto here, moveProperty in frontmatter-blocks.js and
+// renameInStore in property-rename-sync.js).
 function isEmptyValue(value) {
   return value === null || value === undefined || value === "";
 }
@@ -92,36 +92,49 @@ function deleteTypSubtyps(settings, typ) {
   if (settings.typSubtyps) delete settings.typSubtyps[typ];
 }
 
+// Combines two property blocks shaped { frontmatter, floatingKeys, shortcuts }
+// (a Subtyp block, or a TYP-Frontmatter put together from its three tables -
+// see mergeTypSettings in typ-settings.js): source's properties go to the end
+// of target. For a shared key (in any case) target keeps position, value,
+// floating flag and shortcut; only an empty target value is filled from
+// source (same pattern as renameInStore in property-rename-sync.js). Changes
+// target in place; target.shortcuts is created if a shortcut moves.
+function mergeBlockInto(target, source) {
+  const targetKeys = new Map(Object.keys(target.frontmatter).map((key) => [key.toLowerCase(), key]));
+  for (const [key, value] of Object.entries(source.frontmatter)) {
+    if (key === "") continue;
+    const existing = targetKeys.get(key.toLowerCase());
+    if (existing !== undefined) {
+      if (isEmptyValue(target.frontmatter[existing])) target.frontmatter[existing] = value;
+      continue;
+    }
+    target.frontmatter[key] = value;
+    targetKeys.set(key.toLowerCase(), key);
+    if (source.floatingKeys.includes(key) && !target.floatingKeys.includes(key)) target.floatingKeys.push(key);
+    // The shortcut belongs to the key and moves with it.
+    const shortcut = source.shortcuts?.[key];
+    if (shortcut) (target.shortcuts ??= {})[key] = shortcut;
+  }
+}
+
+// Whether a block has any property (a blank row being typed doesn't count).
+function blockHasProperties(frontmatter) {
+  return Object.keys(frontmatter ?? {}).some((key) => key !== "");
+}
+
 // Merging two TYP entries: Subtyps only in source move over. Blocks with the
-// same name are combined like mergeSubtyps does it: for a shared key the
-// target keeps position, value, floating flag and shortcut, only an empty
-// target value is filled from source; keys only in source are appended. A
-// moved key that is also in the target's TYP-Frontmatter stays in both, which
-// is the normal override.
+// same name are combined (mergeBlockInto). A moved key that is also in the
+// target's TYP-Frontmatter stays in both, which is the normal override.
 function mergeTypSubtyps(settings, source, target) {
   const sourceSubtyps = settings.typSubtyps?.[source];
   if (!sourceSubtyps) return;
   for (const [name, sourceData] of Object.entries(sourceSubtyps)) {
     const targetData = getSubtyp(settings, target, name);
-    if (!targetData) {
+    if (targetData) {
+      mergeBlockInto(targetData, sourceData);
+    } else {
       ensureSubtyp(settings, target, name);
       settings.typSubtyps[target][name] = sourceData;
-      continue;
-    }
-    const targetKeys = new Map(Object.keys(targetData.frontmatter).map((key) => [key.toLowerCase(), key]));
-    for (const [key, value] of Object.entries(sourceData.frontmatter)) {
-      if (key === "") continue;
-      const existing = targetKeys.get(key.toLowerCase());
-      if (existing !== undefined) {
-        if (isEmptyValue(targetData.frontmatter[existing])) targetData.frontmatter[existing] = value;
-        continue;
-      }
-      targetData.frontmatter[key] = value;
-      targetKeys.set(key.toLowerCase(), key);
-      if (sourceData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
-      // The shortcut belongs to the key and moves with it.
-      const shortcut = sourceData.shortcuts?.[key];
-      if (shortcut) (targetData.shortcuts ??= {})[key] = shortcut;
     }
   }
   delete settings.typSubtyps[source];
@@ -163,29 +176,12 @@ function deleteSubtyp(settings, typ, name) {
 }
 
 // Merging two Subtyps of one TYP: source's properties go to the end of the
-// target block, source disappears. If the target already has a key, it keeps
-// position, value and floating flag; only an empty target value is filled
-// from source (same pattern as renameInStore in property-rename-sync.js).
+// target block (mergeBlockInto), source disappears.
 function mergeSubtyps(settings, typ, source, target) {
   const sourceData = getSubtyp(settings, typ, source);
   const targetData = getSubtyp(settings, typ, target);
   if (!sourceData || !targetData || source === target) return;
-
-  const targetKeys = new Map(Object.keys(targetData.frontmatter).map((key) => [key.toLowerCase(), key]));
-  for (const [key, value] of Object.entries(sourceData.frontmatter)) {
-    if (key === "") continue;
-    const existing = targetKeys.get(key.toLowerCase());
-    if (existing === undefined) {
-      targetData.frontmatter[key] = value;
-      targetKeys.set(key.toLowerCase(), key);
-      if (sourceData.floatingKeys.includes(key) && !targetData.floatingKeys.includes(key)) targetData.floatingKeys.push(key);
-      // The shortcut belongs to the key and moves with it.
-      const shortcut = sourceData.shortcuts?.[key];
-      if (shortcut) (targetData.shortcuts ??= {})[key] = shortcut;
-    } else if (isEmptyValue(targetData.frontmatter[existing])) {
-      targetData.frontmatter[existing] = value;
-    }
-  }
+  mergeBlockInto(targetData, sourceData);
   deleteSubtyp(settings, typ, source);
 }
 
@@ -209,6 +205,8 @@ async function renameSubtypInNotes(plugin, typ, oldKey, newValue) {
 module.exports = {
   normalizeSubtypName,
   isEmptyValue,
+  mergeBlockInto,
+  blockHasProperties,
   getSubtypNames,
   getSubtyp,
   ensureSubtyp,

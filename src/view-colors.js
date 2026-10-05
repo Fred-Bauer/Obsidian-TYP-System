@@ -56,6 +56,9 @@ function registerColorView(plugin, { key, enabled = () => !!plugin.settings.colo
 //   applyInserted  optional (plugin, nodes) => void: colors only the elements
 //                  inserted since the last frame. Without it every DOM change
 //                  asks for a full round
+//   attributes     optional attribute names: an element whose attribute changes
+//                  counts as inserted. For rows a view fills in after inserting
+//                  them (the explorer sets data-path on first render)
 //   events         optional (component, refresh) => void: further events, each
 //                  registered on the component
 //   clearKept      optional (plugin) => void: clears rows the view keeps out of
@@ -65,7 +68,7 @@ function registerColorView(plugin, { key, enabled = () => !!plugin.settings.colo
 //   clearRoots     optional (plugin) => elements: more places to clear, e.g.
 //                  embedded backlinks inside markdown views
 // key and enabled as in registerColorView.
-function registerLeafColors(plugin, { key, enabled, viewTypes, apply, applyInserted = null, events = null, clearKept = null, clearRoots = null }) {
+function registerLeafColors(plugin, { key, enabled, viewTypes, apply, applyInserted = null, attributes = null, events = null, clearKept = null, clearRoots = null }) {
   const leaves = () => viewTypes.flatMap((viewType) => plugin.app.workspace.getLeavesOfType(viewType));
 
   const start = (component) => {
@@ -96,14 +99,16 @@ function registerLeafColors(plugin, { key, enabled, viewTypes, apply, applyInser
         return;
       }
       for (const record of records) {
+        if (record.type === "attributes") insertedNodes.add(record.target);
         for (const node of record.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) insertedNodes.add(node);
         }
       }
       if (insertedNodes.size) flush();
     });
+    const options = attributes ? { childList: true, subtree: true, attributeFilter: attributes } : { childList: true, subtree: true };
     const observeLeaves = () => {
-      for (const leaf of leaves()) observer.observe(leaf.view.containerEl, { childList: true, subtree: true });
+      for (const leaf of leaves()) observer.observe(leaf.view.containerEl, options);
     };
     component.register(() => observer.disconnect());
 

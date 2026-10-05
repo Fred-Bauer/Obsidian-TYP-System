@@ -199,10 +199,10 @@ body:not(.typ-system-show-list-description) .typ-list:not(.typ-list-subtyp-brack
   color: var(--text-faint);
 }
 
-/* "Rename and update notes" in the context menus (see addRenameItems in
-   typ-pane.js): accent color like its button in the detail view
-   (.typ-detail-rename-notes) - the same way Obsidian marks a warning item
-   (.menu-item.is-warning): text and icon, no hover of its own. */
+/* "Rename and update notes" in the context menus and the rename button's
+   menu (see addRenameItems in typ-pane.js): accent color, as it also rewrites
+   notes - the same way Obsidian marks a warning item (.menu-item.is-warning):
+   text and icon, no hover of its own. */
 .menu-item.typ-menu-accent:not(.is-disabled),
 .menu-item.typ-menu-accent .menu-item-icon {
   color: var(--interactive-accent);
@@ -564,7 +564,6 @@ body.typ-system-subtyps-right .typ-list-subtyps {
 
 .typ-color-reset,
 .typ-detail-rename,
-.typ-detail-rename-notes,
 .typ-detail-delete {
   flex-shrink: 0;
 }
@@ -576,15 +575,11 @@ body.typ-system-subtyps-right .typ-list-subtyps {
   pointer-events: none;
 }
 
-/* Accent color instead of neutral like the other header icons - marks the
-   more consequential rename button that also rewrites notes (see
-   startDetailRename in typ-pane.js). */
-.typ-detail-rename-notes {
-  color: var(--interactive-accent);
-}
-
-.typ-detail-rename-notes:hover {
-  color: var(--interactive-accent-hover);
+/* The rename button while its menu is open (see renderRenameButton in
+   typ-pane.js), like Obsidian's own buttons with a menu. */
+.typ-detail-rename.has-active-menu {
+  background-color: var(--background-modifier-hover);
+  color: var(--icon-color-hover);
 }
 
 .typ-detail-body {
@@ -609,7 +604,7 @@ body.typ-system-subtyps-right .typ-list-subtyps {
    for a disabled button (unlike .typ-color-reset.is-disabled, which also
    turns off pointer-events).
 
-   It sits between rename and delete: for a TYP in the detail header, for
+   It sits first, left of rename and delete: for a TYP in the detail header, for
    each Subtyp in its block footer (.typ-subtyp-action-group, see
    renderSectionFooter) - same setting, same look, one level down; the icon
    size there comes from the footer. */
@@ -693,22 +688,12 @@ body.typ-system-subtyps-right .typ-list-subtyps {
   gap: 4px;
 }
 
-/* Groups the two add buttons (normal + floating, see renderSectionHeader in
-   typ-pane.js) on the right of the header, for the same reason as
-   .typ-frontmatter-title-group above. */
+/* Holds the add button (see renderSectionHeader in typ-pane.js) on the
+   right of the header, for the same reason as .typ-frontmatter-title-group
+   above. */
 .typ-frontmatter-add-group {
   display: flex;
   align-items: center;
-}
-
-/* Accent color like .typ-detail-rename-notes - adds a floating property
-   instead of a normal one (see typPendingFloatingAdd). */
-.typ-frontmatter-add-floating {
-  color: var(--interactive-accent);
-}
-
-.typ-frontmatter-add-floating:hover {
-  color: var(--interactive-accent-hover);
 }
 
 /* Subtyp blocks without a property editor (unregistered Subtyps, a new one

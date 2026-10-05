@@ -82,6 +82,11 @@ function registerFileExplorerColors(plugin) {
     viewTypes: [FILE_EXPLORER_VIEW_TYPE],
     apply: applyFileExplorerColors,
     applyInserted: applyToInsertedNodes,
+    // A row is inserted before it is rendered: Obsidian sets its text and
+    // data-path only when the virtualized list first draws it (onRender),
+    // which at startup can come after the insertion. Seeing data-path being
+    // set catches those rows too.
+    attributes: ["data-path"],
     events: (component, refresh) => component.registerEvent(plugin.app.vault.on("rename", refresh)),
     clearKept: clearKeptRows,
   });

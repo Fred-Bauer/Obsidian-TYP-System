@@ -1,4 +1,4 @@
-const { moveTypSubtyps, deleteTypSubtyps } = require("./subtyps");
+const { moveTypSubtyps, deleteTypSubtyps, mergeTypSubtyps, mergeBlockInto, blockHasProperties, getSubtypNames } = require("./subtyps");
 
 // The per-TYP tables of the settings, each keyed by TYP name - the one list
 // that renaming, merging and deleting a TYP go through, so a table added later
@@ -38,4 +38,37 @@ function deleteTypSettings(settings, typ) {
   deleteTypSubtyps(settings, typ);
 }
 
-module.exports = { TYP_SETTING_TABLES, moveTypSettings, deleteTypSettings };
+// Merging source into target in the settings: source's TYP-Frontmatter goes
+// to the end of target's (same rule as two Subtyp blocks, see mergeBlockInto -
+// target wins per key), its Subtyps move over (mergeTypSubtyps), and the rest
+// of source (color, description, manual toggle, list position) goes like a
+// deleted TYP. Notes are not touched here - see mergeTyp/mergeTypSettingsOnly
+// in typ-pane.js.
+function mergeTypSettings(settings, source, target) {
+  for (const table of ["typDefaultFrontmatter", "typFloatingKeys", "typShortcuts"]) settings[table] ??= {};
+  const merged = {
+    frontmatter: settings.typDefaultFrontmatter[target] ?? {},
+    floatingKeys: settings.typFloatingKeys[target] ?? [],
+    shortcuts: settings.typShortcuts[target] ?? {},
+  };
+  mergeBlockInto(merged, {
+    frontmatter: settings.typDefaultFrontmatter[source] ?? {},
+    floatingKeys: settings.typFloatingKeys[source] ?? [],
+    shortcuts: settings.typShortcuts[source] ?? {},
+  });
+  // Stored like the TYP-Frontmatter editor does it: empty tables leave no entry.
+  if (Object.keys(merged.frontmatter).length > 0) settings.typDefaultFrontmatter[target] = merged.frontmatter;
+  if (merged.floatingKeys.length > 0) settings.typFloatingKeys[target] = merged.floatingKeys;
+  if (Object.keys(merged.shortcuts).length > 0) settings.typShortcuts[target] = merged.shortcuts;
+
+  mergeTypSubtyps(settings, source, target);
+  deleteTypSettings(settings, source);
+}
+
+// Whether merging typ into another TYP moves anything: TYP-Frontmatter
+// properties or Subtyps (even empty ones - they become Subtyps of the target).
+function typHasMergeableSettings(settings, typ) {
+  return blockHasProperties(settings.typDefaultFrontmatter?.[typ]) || getSubtypNames(settings, typ).length > 0;
+}
+
+module.exports = { TYP_SETTING_TABLES, moveTypSettings, deleteTypSettings, mergeTypSettings, typHasMergeableSettings };

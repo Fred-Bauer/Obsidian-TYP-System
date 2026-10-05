@@ -120,4 +120,91 @@ class ConfirmModal extends ConfirmationModal {
   }
 }
 
-module.exports = { ConfirmModal, appendTypName, appendSubtypName, typNameNode, subtypNameNode };
+// "Rename and update notes": the name typed into a dialog that is the
+// confirmation at the same time. Built like Obsidian's own "Rename file"
+// dialog (a ConfirmationModal with .mod-file-rename and a one-line
+// .rename-textarea, the old name selected, Enter submits), plus the text of
+// a confirmation below the field, updated while typing.
+//
+//   title    - like ConfirmModal's ("Rename TERMIN")
+//   value    - the current name, prefilled and selected
+//   preview  - preview(text) for the typed text: { confirmText, warning,
+//              body } as in ConfirmModal, plus ready - false while there is
+//              nothing to submit (empty or unchanged name), which disables
+//              the action button. Typing an existing name can switch
+//              "Rename" to a red "Merge".
+//   onSubmit - onSubmit(text), from onClose like ConfirmModal's onConfirm, so
+//              a long run (rewriting many notes) doesn't keep the dialog open.
+//
+// Buttons [Cancel] [Action] like every other dialog of the plugin (see
+// ConfirmModal); the field keeps the focus, Enter is the action button.
+class RenameModal extends ConfirmationModal {
+  constructor(app, { title, value, preview, onSubmit }) {
+    super(app);
+    this.title = title;
+    this.preview = preview;
+    this.onSubmit = onSubmit;
+    this.submitted = null;
+    this.state = null;
+    this.addClass("mod-file-rename");
+
+    const inputEl = (this.inputEl = createEl("textarea", { cls: "rename-textarea", attr: { rows: 1, spellcheck: "false" } }));
+    inputEl.value = value;
+    inputEl.addEventListener("keypress", (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      if (this.state.ready) {
+        this.submitted = inputEl.value;
+        this.close();
+      }
+    });
+    inputEl.addEventListener("input", () => {
+      this.fitInput();
+      this.update();
+    });
+    this.bodyEl = createDiv();
+
+    this.addButton((button) => button.setButtonText("Cancel").setCancel());
+    this.addButton((button) => {
+      this.actionButton = button;
+      button.setCta();
+      // As in ConfirmModal: braces, no return value (a truthy one would keep
+      // the dialog open). Disabled while there is nothing to submit.
+      button.onClick(() => {
+        this.submitted = inputEl.value;
+      });
+    });
+  }
+
+  // One line that grows with a long name, as in Obsidian's dialog.
+  fitInput() {
+    this.inputEl.style.height = "auto";
+    this.inputEl.style.height = `${this.inputEl.scrollHeight}px`;
+  }
+
+  update() {
+    this.state = this.preview(this.inputEl.value);
+    const { confirmText, warning = false, body = [], ready } = this.state;
+    this.actionButton.setButtonText(confirmText).setDisabled(!ready);
+    this.actionButton.buttonEl.toggleClass("mod-destructive", warning);
+    this.bodyEl.empty();
+    for (const paragraph of body) appendParts(this.bodyEl.createEl("p"), paragraph);
+  }
+
+  onOpen() {
+    appendParts(this.titleEl, this.title);
+    this.contentEl.append(this.inputEl, this.bodyEl);
+    this.update();
+    window.requestAnimationFrame(() => this.fitInput());
+    this.inputEl.select();
+    this.inputEl.focus();
+  }
+
+  onClose() {
+    super.onClose();
+    this.contentEl.empty();
+    if (this.submitted !== null && this.preview(this.submitted).ready) this.onSubmit(this.submitted);
+  }
+}
+
+module.exports = { ConfirmModal, RenameModal, appendTypName, appendSubtypName, typNameNode, subtypNameNode };

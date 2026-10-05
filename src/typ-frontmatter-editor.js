@@ -149,8 +149,8 @@ function getPropertyRowClass(app, editor) {
 
 // Adds a "Floating" toggle at the very top of a property row's context menu -
 // only for rows of the plugin's own TYP-Pane (recognized by owner.typStore),
-// never in real notes. Unlike the extra "+" button (typPendingFloatingAdd),
-// which only affects a NEW property, this works on any existing one, both ways.
+// never in real notes. The one way to make a property floating (or normal
+// again), for any row, both ways.
 //
 // The property menu is no official extension point: on desktop it builds a
 // NATIVE Electron menu from an internal Menu and shows it within
@@ -261,9 +261,8 @@ function registerFocusChain(editor, onShiftFocus) {
 //
 // One editor per block (TYP or Subtyp), bound to `store`. Standard and
 // floating properties share one list and order; getTypDefaults() just leaves
-// the floating ones out. editor.typPendingFloatingAdd, set before
-// addBlankProperty(), marks the next added (or renamed) property as floating -
-// see saveFrontmatter.
+// the floating ones out. A new property is never floating; the row's context
+// menu switches it (see ensurePropertyMenuPatch).
 function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {}) {
   const app = view.app;
   const EditorClass = getMetadataEditorClass(app);
@@ -316,12 +315,8 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
       if (removedKeys.length === 1 && addedKeys.length === 1) {
         // A rename: the floating flag moves along.
         floating = floating.map((key) => (key === removedKeys[0] ? addedKeys[0] : key));
-      } else {
-        if (removedKeys.length > 0) floating = floating.filter((key) => !removedKeys.includes(key));
-        if (editor.typPendingFloatingAdd && addedKeys.length === 1) {
-          floating = [...floating, addedKeys[0]];
-          editor.typPendingFloatingAdd = false;
-        }
+      } else if (removedKeys.length > 0) {
+        floating = floating.filter((key) => !removedKeys.includes(key));
       }
       // Shortcuts belong to the key too: they move on rename and go on delete.
       const shortcuts = { ...store.getShortcuts() };
@@ -359,7 +354,6 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
   };
 
   const editor = new EditorClass(app, owner);
-  editor.typPendingFloatingAdd = false;
   if (onShiftFocus) registerFocusChain(editor, onShiftFocus);
   editor.containerEl.addClass(EDITOR_CLASS);
   containerEl.appendChild(editor.containerEl);

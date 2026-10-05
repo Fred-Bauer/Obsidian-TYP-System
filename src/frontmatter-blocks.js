@@ -42,13 +42,10 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
     // children and unloads them before each rebuild.
     editors: [],
     // Adds a blank row at the end of the block with focus in the key field
-    // (see addBlankProperty). floating marks the next named property as
-    // floating.
-    addBlank(section, floating = false) {
+    // (see addBlankProperty).
+    addBlank(section) {
       const editor = editors.get(section);
-      if (!editor) return;
-      editor.typPendingFloatingAdd = floating;
-      addBlankProperty(editor);
+      if (editor) addBlankProperty(editor);
     },
   };
 
@@ -301,8 +298,8 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
   // Moves key from block `from` to block `to` at position index. If the target
   // already has the name (unique within a block), the two merge: the existing
   // entry keeps position, value, floating flag and shortcut; only an empty
-  // value is filled from the dragged one - same rule as mergeSubtyps and
-  // mergeTypSubtyps (subtyps.js) and renameInStore (property-rename-sync.js).
+  // value is filled from the dragged one - same rule as mergeBlockInto
+  // (subtyps.js) and renameInStore (property-rename-sync.js).
   async function moveProperty(from, to, key, index) {
     const source = stores.get(from);
     const target = stores.get(to);

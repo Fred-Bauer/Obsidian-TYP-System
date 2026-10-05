@@ -60,6 +60,13 @@ settings:
   color: var(--text-muted);
 }
 
+/* A sub-row of the coloring row above it (nested in colorViewToggle, see
+   settings.js), shown only while that row is on. Only name and description
+   move in; the row keeps Obsidian's padding and separator. */
+.typ-nested-setting > .setting-item-info {
+  padding-inline-start: var(--size-4-6);
+}
+
 /* The global order editor in the "TYP-Frontmatter" group has no control, so
    infoEl takes the full width instead of leaving room for one. */
 .typ-order-setting > .setting-item-info {

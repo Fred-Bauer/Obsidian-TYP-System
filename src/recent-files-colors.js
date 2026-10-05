@@ -1,5 +1,5 @@
 const { colorForFile, setInlineColor } = require("./typ-colors");
-const { coalesceFrame } = require("./typ-utils");
+const { registerLeafColors } = require("./view-colors");
 
 const RECENT_FILES_VIEW_TYPE = "recent-files";
 
@@ -14,40 +14,19 @@ function applyRecentFilesColors(plugin) {
     titleEls.forEach((titleEl, index) => {
       const entry = recentFiles[index];
       const file = entry ? plugin.app.vault.getAbstractFileByPath(entry.path) : null;
-      const color = plugin.settings.colorViews.recentFiles ? colorForFile(plugin, file, "recentFiles") : null;
-      setInlineColor(titleEl, color);
+      setInlineColor(titleEl, colorForFile(plugin, file, "recentFiles"));
     });
   }
 }
 
+// One full round per frame at most, however many DOM changes and events come
+// in between. Rows are matched by index, so the whole (short) list is redone.
 function registerRecentFilesColors(plugin) {
-  // One full round per frame at most, however many DOM changes and events come
-  // in between. Rows are matched by index, so the whole (short) list is redone.
-  const refresh = coalesceFrame(() => applyRecentFilesColors(plugin));
-  plugin.register(refresh.cancel);
-
-  const observer = new MutationObserver(refresh);
-  const observeLeaves = () => {
-    for (const leaf of plugin.app.workspace.getLeavesOfType(RECENT_FILES_VIEW_TYPE)) {
-      observer.observe(leaf.view.containerEl, { childList: true, subtree: true });
-    }
-  };
-  plugin.register(() => observer.disconnect());
-
-  plugin.registerEvent(plugin.typIndex.on("change", refresh));
-  plugin.registerEvent(
-    plugin.app.workspace.on("layout-change", () => {
-      observeLeaves();
-      refresh();
-    })
-  );
-
-  plugin.app.workspace.onLayoutReady(() => {
-    observeLeaves();
-    refresh();
+  return registerLeafColors(plugin, {
+    key: "recentFiles",
+    viewTypes: [RECENT_FILES_VIEW_TYPE],
+    apply: applyRecentFilesColors,
   });
-
-  return refresh;
 }
 
 module.exports = { registerRecentFilesColors };

@@ -288,8 +288,10 @@ function setInlineColor(el, color, priority = "") {
   }
 }
 
-function clearInlineColors(doc) {
-  for (const el of doc.querySelectorAll(`[${COLORED_ATTR}]`)) setInlineColor(el, null);
+// root: a document (unload, see main.js) or an element (one view switched off,
+// see view-colors.js).
+function clearInlineColors(root) {
+  for (const el of root.querySelectorAll(`[${COLORED_ATTR}]`)) setInlineColor(el, null);
 }
 
 // The documents of all windows (pop-outs included), collected through their

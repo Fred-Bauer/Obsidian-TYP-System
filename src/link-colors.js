@@ -4,6 +4,7 @@ const { Prec, RangeSetBuilder, StateEffect } = require("@codemirror/state");
 const { syntaxTree } = require("@codemirror/language");
 const { colorForFile, allDocuments } = require("./typ-colors");
 const { coalesceFrame } = require("./typ-utils");
+const { registerColorView } = require("./view-colors");
 
 // Colors links in note text by the TYP of their target. Obsidian colors
 // internal links through var(--link-color), so only that variable is set per
@@ -20,7 +21,8 @@ const { coalesceFrame } = require("./typ-utils");
 //    a link.
 //
 // Recoloring otherwise only happens on a real TYP change (typIndex "change")
-// or a settings change, not on every save.
+// or a settings change, not on every save. While the toggle is off, editors
+// carry no extension and TYP changes recolor nothing (see registerLinkColors).
 
 const COLOR_VAR = "--link-color";
 const SOURCE_ATTR = "data-typ-src";
@@ -117,7 +119,6 @@ function buildLinkViewPlugin(plugin) {
   };
 
   const build = (view) => {
-    if (!plugin.settings.colorViews.links) return Decoration.none;
     const sourcePath = view.state.field(editorInfoField, false)?.file?.path ?? "";
     const tree = syntaxTree(view.state);
     const builder = new RangeSetBuilder();
@@ -192,8 +193,9 @@ function buildLinkViewPlugin(plugin) {
 // frame also bundles bursts of refreshes - dragging a color slider sends one
 // per input event. An editor still busy when the frame comes (updateState is
 // CodeMirror's internal flag, 0 = idle; it is also non-zero while measuring)
-// is retried a frame later.
-function createEditorRefresher(plugin) {
+// is retried a frame later. A pending run is cancelled with the component
+// (switched off or unloaded).
+function createEditorRefresher(plugin, component) {
   const run = () => {
     let busy = false;
     plugin.app.workspace.iterateAllLeaves((leaf) => {
@@ -213,47 +215,78 @@ function createEditorRefresher(plugin) {
     if (busy) schedule();
   };
   const schedule = coalesceFrame(run);
-  plugin.register(schedule.cancel);
+  component.register(schedule.cancel);
   return schedule;
 }
 
 // ------------------------------------------------------------------------
 
+// Clears the inline variables on rendered links (all windows, hover previews
+// included). The source attribute stays, so turning on again or the next load
+// finds it.
+function clearRenderedLinks(plugin) {
+  for (const doc of allDocuments(plugin.app)) {
+    for (const anchorEl of doc.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) {
+      anchorEl.style.removeProperty(COLOR_VAR);
+    }
+  }
+}
+
 function registerLinkColors(plugin) {
+  // Runs while coloring is off too, but only to store each link's source, so
+  // turning it on later also covers links that are already rendered
+  // (applyToAnchor then just checks the toggle).
   plugin.registerMarkdownPostProcessor((el, ctx) => {
-    // Store the source even while coloring is off, so turning it on later
-    // also covers links that are already rendered.
     for (const anchorEl of el.querySelectorAll("a.internal-link")) {
       anchorEl.setAttribute(SOURCE_ATTR, ctx.sourcePath);
       applyToAnchor(plugin, anchorEl);
     }
   });
+
+  // The editor extension lives in an array Obsidian keeps a reference to:
+  // filled while the toggle is on, empty while it is off, and
+  // workspace.updateOptions() hands the change to every open editor. So an
+  // editor of a note costs nothing per keystroke while links aren't colored.
+  //
   // Obsidian's ".cm-hmd-internal-link" (wikilink) and ".cm-link" (Markdown
   // link text) spans always end up outside our mark, whatever the priority, so
   // rules in styles.css (.typ-link) set the color.
   // Lowest priority at least wraps ".cm-underline", covering the whole text.
-  plugin.registerEditorExtension(Prec.lowest(buildLinkViewPlugin(plugin)));
+  const editorExtensions = [];
+  plugin.registerEditorExtension(editorExtensions);
+  const linkViewPlugin = Prec.lowest(buildLinkViewPlugin(plugin));
 
-  const refreshEditors = createEditorRefresher(plugin);
-  const refresh = () => {
-    refreshRenderedLinks(plugin);
-    refreshEditors();
-  };
-  plugin.registerEvent(plugin.typIndex.on("change", refresh));
-  // After enabling or a reload, links rendered earlier get their colors right
-  // away instead of waiting for a re-render.
-  plugin.app.workspace.onLayoutReady(() => refreshRenderedLinks(plugin));
-  // Editor decorations go away with the extension on unload, the inline
-  // variables on rendered links don't. The source attribute stays, so the next
-  // load finds it.
-  plugin.register(() => {
-    for (const doc of allDocuments(plugin.app)) {
-      for (const anchorEl of doc.querySelectorAll(`a.internal-link[${SOURCE_ATTR}]`)) {
-        anchorEl.style.removeProperty(COLOR_VAR);
-      }
-    }
+  return registerColorView(plugin, {
+    key: "links",
+    start: (component) => {
+      editorExtensions.push(linkViewPlugin);
+      plugin.app.workspace.updateOptions();
+      component.register(() => {
+        editorExtensions.length = 0;
+        plugin.app.workspace.updateOptions();
+      });
+
+      const refreshEditors = createEditorRefresher(plugin, component);
+      const refresh = () => {
+        refreshRenderedLinks(plugin);
+        refreshEditors();
+      };
+      component.registerEvent(plugin.typIndex.on("change", refresh));
+      // After enabling, turning on or a reload, links rendered earlier get
+      // their colors right away instead of waiting for a re-render. The
+      // callback can't be removed, hence the check that this component still
+      // runs.
+      let running = true;
+      component.register(() => (running = false));
+      plugin.app.workspace.onLayoutReady(() => {
+        if (running) refreshRenderedLinks(plugin);
+      });
+      return refresh;
+    },
+    // Editor decorations go with the extension (see above), the inline
+    // variables on rendered links don't.
+    clear: () => clearRenderedLinks(plugin),
   });
-  return refresh;
 }
 
 module.exports = { registerLinkColors };

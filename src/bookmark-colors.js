@@ -1,5 +1,5 @@
 const { colorForFile, setInlineColor } = require("./typ-colors");
-const { coalesceFrame } = require("./typ-utils");
+const { registerLeafColors } = require("./view-colors");
 
 const BOOKMARKS_VIEW_TYPE = "bookmarks";
 const BOOKMARKS_PLUGIN_ID = "bookmarks";
@@ -15,7 +15,9 @@ function forEachFileBookmark(items, callback) {
   }
 }
 
-function applyBookmarksColors(plugin) {
+// Every row of a file bookmark, collapsed groups included (their rows stay in
+// itemDoms, detached from the DOM).
+function forEachBookmarkTitle(plugin, callback) {
   const bookmarksPlugin = plugin.app.internalPlugins.getEnabledPluginById(BOOKMARKS_PLUGIN_ID);
   if (!bookmarksPlugin) return;
 
@@ -25,44 +27,29 @@ function applyBookmarksColors(plugin) {
 
     forEachFileBookmark(bookmarksPlugin.items, (item) => {
       const titleEl = itemDoms.get(item)?.titleEl;
-      if (!titleEl) return;
-
-      const file = plugin.app.vault.getAbstractFileByPath(item.path);
-      const color = plugin.settings.colorViews.bookmarks ? colorForFile(plugin, file, "bookmarks") : null;
-      setInlineColor(titleEl, color);
+      if (titleEl) callback(titleEl, item);
     });
   }
 }
 
-function registerBookmarksColors(plugin) {
-  // One full round per frame at most, however many DOM changes and events come
-  // in between. Rows are looked up per bookmark, so the whole list is redone.
-  const refresh = coalesceFrame(() => applyBookmarksColors(plugin));
-  plugin.register(refresh.cancel);
-
-  // Rows are re-rendered when groups expand/collapse or bookmarks change.
-  const observer = new MutationObserver(refresh);
-  const observeLeaves = () => {
-    for (const leaf of plugin.app.workspace.getLeavesOfType(BOOKMARKS_VIEW_TYPE)) {
-      observer.observe(leaf.view.containerEl, { childList: true, subtree: true });
-    }
-  };
-  plugin.register(() => observer.disconnect());
-
-  plugin.registerEvent(plugin.typIndex.on("change", refresh));
-  plugin.registerEvent(
-    plugin.app.workspace.on("layout-change", () => {
-      observeLeaves();
-      refresh();
-    })
-  );
-
-  plugin.app.workspace.onLayoutReady(() => {
-    observeLeaves();
-    refresh();
+function applyBookmarksColors(plugin) {
+  forEachBookmarkTitle(plugin, (titleEl, item) => {
+    const file = plugin.app.vault.getAbstractFileByPath(item.path);
+    setInlineColor(titleEl, colorForFile(plugin, file, "bookmarks"));
   });
+}
 
-  return refresh;
+// One full round per frame at most, however many DOM changes and events come
+// in between. Rows are looked up per bookmark, so the whole list is redone.
+// The observer catches rows re-rendered when groups expand/collapse or
+// bookmarks change.
+function registerBookmarksColors(plugin) {
+  return registerLeafColors(plugin, {
+    key: "bookmarks",
+    viewTypes: [BOOKMARKS_VIEW_TYPE],
+    apply: applyBookmarksColors,
+    clearKept: (plugin) => forEachBookmarkTitle(plugin, (titleEl) => setInlineColor(titleEl, null)),
+  });
 }
 
 module.exports = { registerBookmarksColors };

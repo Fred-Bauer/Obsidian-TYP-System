@@ -158,16 +158,27 @@ class TypSystemSettingTab extends PluginSettingTab {
     // subtypKey (optional): two labeled toggles instead of one - "TYP" for the
     // setting itself and below it "Subtyp", shown only while "TYP" is on. The
     // default tooltips fit the coloring toggles.
+    //
+    // nested: an indented sub-row of the row above (.typ-nested-setting). Its
+    // own toggles work as usual; the caller adds it only while the main row is
+    // on - the main row's "TYP" toggle re-renders the page via display(), so
+    // sub-rows come and go with it:
+    //   colorViewToggle(group, "main", "Main", "…", "mainSubtyp");
+    //   if (this.plugin.settings.colorViews.main) {
+    //     colorViewToggle(group, "mainPart", "Main part", "…", "mainPartSubtyp", { nested: true });
+    //   }
+    // The module behind it checks both toggles (enabled in view-colors.js).
     const colorViewToggle = (
       group,
       key,
       name,
       desc,
       subtypKey = null,
-      { typTooltip = "Color by TYP", subtypTooltip = "Use Subtyp color instead of TYP color" } = {}
+      { typTooltip = "Color by TYP", subtypTooltip = "Use Subtyp color instead of TYP color", nested = false } = {}
     ) =>
       group.addSetting((setting) => {
         setting.setName(name).setDesc(desc);
+        if (nested) setting.settingEl.addClass("typ-nested-setting");
         const save = async (settingKey, value) => {
           this.plugin.settings.colorViews[settingKey] = value;
           await this.plugin.saveSettings();

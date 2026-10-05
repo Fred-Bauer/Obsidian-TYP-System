@@ -38,7 +38,9 @@ module.exports = class TypSystemPlugin extends Plugin {
     // search, Recent Files, backlinks, bookmarks, note titles and "All
     // properties" (see setInlineColor in typ-colors.js); those views would
     // keep them until they happen to re-render. Registered first so it runs
-    // last on unload, after the modules have stopped observing and listening.
+    // last on unload, after the modules have stopped observing and listening
+    // and have cleared the rows their views keep out of the DOM (see
+    // registerColorView in view-colors.js).
     this.register(() => {
       for (const doc of allDocuments(this.app)) clearInlineColors(doc);
     });

@@ -1,7 +1,9 @@
 const { colorForFile, setInlineColor } = require("./typ-colors");
-const { coalesceFrame } = require("./typ-utils");
+const { registerLeafColors } = require("./view-colors");
 
 const BACKLINK_VIEW_TYPE = "backlink";
+const TITLE_SELECTOR = ".search-result-file-title .tree-item-inner";
+const EMBEDDED_SELECTOR = ".embedded-backlinks";
 
 // The backlinks pane renders results with the same SearchResultDom class as
 // search. Linked and unlinked mentions are two resultDomLookup maps on the
@@ -19,8 +21,7 @@ function getResultDomLookups(view) {
 }
 
 function colorTitleEl(plugin, el, file) {
-  const color = plugin.settings.colorViews.backlinks ? colorForFile(plugin, file, "backlinks") : null;
-  setInlineColor(el, color);
+  setInlineColor(el, colorForFile(plugin, file, "backlinks"));
 }
 
 function applyBacklinkPaneColors(plugin) {
@@ -29,7 +30,7 @@ function applyBacklinkPaneColors(plugin) {
       for (const [file, resultDom] of lookup) {
         // Rows out of view (virtualized list) are colored once inserted.
         if (!resultDom.el?.isConnected) continue;
-        const titleEl = resultDom.el.querySelector(".search-result-file-title .tree-item-inner");
+        const titleEl = resultDom.el.querySelector(TITLE_SELECTOR);
         if (titleEl) colorTitleEl(plugin, titleEl, file);
       }
     }
@@ -41,11 +42,11 @@ function applyBacklinkPaneColors(plugin) {
 // so the file is resolved from the shown name, the way Obsidian resolves links.
 function applyEmbeddedBacklinkColors(plugin) {
   for (const leaf of plugin.app.workspace.getLeavesOfType("markdown")) {
-    const paneEl = leaf.view.containerEl.querySelector(".embedded-backlinks .backlink-pane");
+    const paneEl = leaf.view.containerEl.querySelector(`${EMBEDDED_SELECTOR} .backlink-pane`);
     if (!paneEl) continue;
 
     const sourcePath = leaf.view.file?.path ?? "";
-    const titleEls = paneEl.querySelectorAll(".search-result-file-title .tree-item-inner");
+    const titleEls = paneEl.querySelectorAll(TITLE_SELECTOR);
     for (const titleEl of titleEls) {
       const basename = titleEl.textContent;
       const file = basename ? plugin.app.metadataCache.getFirstLinkpathDest(basename, sourcePath) : null;
@@ -59,40 +60,46 @@ function applyBacklinkColors(plugin) {
   applyEmbeddedBacklinkColors(plugin);
 }
 
-function registerBacklinkColors(plugin) {
-  // One full round per frame at most, however many DOM changes and events come
-  // in between: one update of the pane brings a burst of DOM changes.
-  const refresh = coalesceFrame(() => applyBacklinkColors(plugin));
-  plugin.register(refresh.cancel);
+// Embedded backlinks only, never the whole markdown view: its title and
+// property names are colored by other modules.
+function embeddedBacklinkEls(plugin) {
+  return plugin.app.workspace
+    .getLeavesOfType("markdown")
+    .flatMap((leaf) => [...leaf.view.containerEl.querySelectorAll(EMBEDDED_SELECTOR)]);
+}
 
-  // Only the small sidebar pane is observed, never a markdown view: a subtree
-  // observer near the editor fires on every keystroke and once froze this
-  // vault. The embedded backlinks only change when links change ("resolved")
-  // or the note changes (layout-change/active-leaf-change), both covered below.
-  const observer = new MutationObserver(refresh);
-  const observeLeaves = () => {
-    for (const leaf of plugin.app.workspace.getLeavesOfType(BACKLINK_VIEW_TYPE)) {
-      observer.observe(leaf.view.containerEl, { childList: true, subtree: true });
+// Rows scrolled out of view stay in the resultDomLookup maps, detached from the
+// DOM.
+function clearKeptRows(plugin) {
+  for (const leaf of plugin.app.workspace.getLeavesOfType(BACKLINK_VIEW_TYPE)) {
+    for (const lookup of getResultDomLookups(leaf.view)) {
+      for (const resultDom of lookup.values()) {
+        const titleEl = resultDom.el?.querySelector(TITLE_SELECTOR);
+        if (titleEl) setInlineColor(titleEl, null);
+      }
     }
-  };
-  plugin.register(() => observer.disconnect());
+  }
+}
 
-  plugin.registerEvent(plugin.typIndex.on("change", refresh));
-  plugin.registerEvent(plugin.app.metadataCache.on("resolved", () => applyEmbeddedBacklinkColors(plugin)));
-  plugin.registerEvent(
-    plugin.app.workspace.on("layout-change", () => {
-      observeLeaves();
-      refresh();
-    })
-  );
-  plugin.registerEvent(plugin.app.workspace.on("active-leaf-change", refresh));
-
-  plugin.app.workspace.onLayoutReady(() => {
-    observeLeaves();
-    refresh();
+// One full round per frame at most, however many DOM changes and events come
+// in between: one update of the pane brings a burst of DOM changes.
+//
+// Only the small sidebar pane is observed, never a markdown view: a subtree
+// observer near the editor fires on every keystroke and once froze this vault.
+// The embedded backlinks only change when links change ("resolved") or the
+// note changes (layout-change/active-leaf-change), both covered here.
+function registerBacklinkColors(plugin) {
+  return registerLeafColors(plugin, {
+    key: "backlinks",
+    viewTypes: [BACKLINK_VIEW_TYPE],
+    apply: applyBacklinkColors,
+    events: (component, refresh) => {
+      component.registerEvent(plugin.app.metadataCache.on("resolved", () => applyEmbeddedBacklinkColors(plugin)));
+      component.registerEvent(plugin.app.workspace.on("active-leaf-change", refresh));
+    },
+    clearKept: clearKeptRows,
+    clearRoots: embeddedBacklinkEls,
   });
-
-  return refresh;
 }
 
 module.exports = { registerBacklinkColors };

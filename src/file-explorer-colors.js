@@ -1,6 +1,6 @@
 const { TFile, TFolder } = require("obsidian");
 const { colorForFile, setInlineColor } = require("./typ-colors");
-const { coalesceFrame } = require("./typ-utils");
+const { registerLeafColors } = require("./view-colors");
 
 const FILE_EXPLORER_VIEW_TYPE = "file-explorer";
 const FOLDER_NOTES_PLUGIN_ID = "folder-notes";
@@ -38,8 +38,7 @@ function applyColorToTitle(plugin, titleEl) {
     file = item;
   }
 
-  const color = plugin.settings.colorViews.fileExplorer ? colorForFile(plugin, file, "fileExplorer") : null;
-  setInlineColor(contentEl, color);
+  setInlineColor(contentEl, colorForFile(plugin, file, "fileExplorer"));
 }
 
 function applyFileExplorerColors(plugin) {
@@ -58,58 +57,31 @@ function applyToInsertedNodes(plugin, nodes) {
   }
 }
 
+// Rows of collapsed folders and rows scrolled out of the virtualized list stay
+// in view.fileItems, detached from the DOM; once inserted again they would
+// still show their color.
+function clearKeptRows(plugin) {
+  for (const leaf of plugin.app.workspace.getLeavesOfType(FILE_EXPLORER_VIEW_TYPE)) {
+    for (const item of Object.values(leaf.view.fileItems ?? {})) {
+      if (item.innerEl) setInlineColor(item.innerEl, null);
+    }
+  }
+}
+
+// Events that can change existing rows (TYP change, rename, layout change,
+// refreshTypColors) ask for a full round over the rendered rows; DOM changes
+// only color the rows the explorer inserted, which is all that scrolling and
+// expanding a folder do. Scrolling the virtualized list used to recolor the
+// whole view on every DOM change.
 function registerFileExplorerColors(plugin) {
-  // Two kinds of work, done at most once per frame:
-  //  - a full round over every rendered row, for anything that can change
-  //    existing rows (TYP change, rename, layout change, refreshTypColors);
-  //  - only the rows the explorer inserted, which is all that scrolling and
-  //    expanding a folder do. Scrolling the virtualized list used to recolor
-  //    the whole view on every DOM change.
-  let fullRound = false;
-  const insertedNodes = new Set();
-  const flush = coalesceFrame(() => {
-    if (fullRound) applyFileExplorerColors(plugin);
-    else applyToInsertedNodes(plugin, insertedNodes);
-    fullRound = false;
-    insertedNodes.clear();
+  return registerLeafColors(plugin, {
+    key: "fileExplorer",
+    viewTypes: [FILE_EXPLORER_VIEW_TYPE],
+    apply: applyFileExplorerColors,
+    applyInserted: applyToInsertedNodes,
+    events: (component, refresh) => component.registerEvent(plugin.app.vault.on("rename", refresh)),
+    clearKept: clearKeptRows,
   });
-  plugin.register(flush.cancel);
-  const refresh = () => {
-    fullRound = true;
-    flush();
-  };
-
-  const observer = new MutationObserver((records) => {
-    if (fullRound) return;
-    for (const record of records) {
-      for (const node of record.addedNodes) {
-        if (node.nodeType === Node.ELEMENT_NODE) insertedNodes.add(node);
-      }
-    }
-    if (insertedNodes.size) flush();
-  });
-  const observeExplorerLeaves = () => {
-    for (const leaf of plugin.app.workspace.getLeavesOfType(FILE_EXPLORER_VIEW_TYPE)) {
-      observer.observe(leaf.view.containerEl, { childList: true, subtree: true });
-    }
-  };
-  plugin.register(() => observer.disconnect());
-
-  plugin.registerEvent(plugin.typIndex.on("change", refresh));
-  plugin.registerEvent(plugin.app.vault.on("rename", refresh));
-  plugin.registerEvent(
-    plugin.app.workspace.on("layout-change", () => {
-      observeExplorerLeaves();
-      refresh();
-    })
-  );
-
-  plugin.app.workspace.onLayoutReady(() => {
-    observeExplorerLeaves();
-    refresh();
-  });
-
-  return refresh;
 }
 
 module.exports = { registerFileExplorerColors };

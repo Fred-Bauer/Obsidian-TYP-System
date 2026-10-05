@@ -8,6 +8,7 @@ const TITLE_SELECTOR = ".nav-file-title[data-path], .nav-folder-title[data-path]
 
 // Folder Notes shows a note as its folder instead of as its own row. It has no
 // public API for this, so the file name is rebuilt from its live settings.
+// Also used for the breadcrumbs of the view header (header-colors.js).
 function getFolderNoteFile(plugin, folder) {
   const folderNotes = plugin.app.plugins.plugins[FOLDER_NOTES_PLUGIN_ID];
   const settings = folderNotes?.settings;
@@ -16,7 +17,9 @@ function getFolderNoteFile(plugin, folder) {
   const fileName =
     (settings.folderNoteName || "{{folder_name}}").replace("{{folder_name}}", folder.name) +
     (settings.folderNoteType || ".md");
-  const dirPath = settings.storageLocation === "parentFolder" ? folder.parent?.path ?? "" : folder.path;
+  // The vault root's path is "/", which no file path starts with.
+  const parent = folder.parent && !folder.parent.isRoot() ? folder.parent.path : "";
+  const dirPath = settings.storageLocation === "parentFolder" ? parent : folder.path;
   const path = dirPath ? `${dirPath}/${fileName}` : fileName;
 
   const file = plugin.app.vault.getAbstractFileByPath(path);
@@ -84,4 +87,4 @@ function registerFileExplorerColors(plugin) {
   });
 }
 
-module.exports = { registerFileExplorerColors };
+module.exports = { registerFileExplorerColors, getFolderNoteFile };

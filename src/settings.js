@@ -101,6 +101,13 @@ const DEFAULT_SETTINGS = {
     allProperties: true,
     allPropertiesSubtyp: true,
     noteTitleColor: true,
+    // Tab headers (and the mobile tab switcher) and the view header above a
+    // note: note name and breadcrumb folders with a folder note (see
+    // header-colors.js).
+    tabTitles: true,
+    tabTitlesSubtyp: true,
+    viewHeader: true,
+    viewHeaderSubtyp: true,
     links: true,
     // Links in property values (see property-link-colors.js).
     propertyLinks: true,
@@ -281,6 +288,20 @@ class TypSystemSettingTab extends PluginSettingTab {
       "linkSuggestionsSubtyp"
     );
     colorViewToggle(coloringGroup, "typList", "TYP-Pane", "Color names in the TYP-Pane and TYP-Picker.", "typListSubtyp");
+    colorViewToggle(
+      coloringGroup,
+      "tabTitles",
+      "Tab titles",
+      "Color note names in tab headers, stacked tabs included, and in the mobile tab switcher.",
+      "tabTitlesSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "viewHeader",
+      "View header",
+      "Color the note name and every folder that has a folder note in the header above a note or base.",
+      "viewHeaderSubtyp"
+    );
     colorViewToggle(
       coloringGroup,
       "noteTitleColor",

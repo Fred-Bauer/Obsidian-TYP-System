@@ -118,7 +118,7 @@ function applyStyleToBlock(plugin, blockEl, marker) {
   else blockEl.style.removeProperty(BLOCK_COLOR_VAR);
 }
 
-function applyActiveTitleColors(plugin) {
+function applyActiveTitleColors(plugin, titleObserver) {
   for (const leaf of plugin.app.workspace.getLeavesOfType("markdown")) {
     const containerEl = leaf.view.containerEl;
     const file = leaf.view.file;
@@ -127,6 +127,7 @@ function applyActiveTitleColors(plugin) {
 
     const titleEl = containerEl.querySelector(".inline-title");
     if (titleEl) {
+      titleObserver.observe(titleEl, { childList: true });
       applyStyleToTitle(titleEl, marker);
 
       const textColor = plugin.settings.colorViews.noteTitleColor ? colorForFile(plugin, typedFile, "noteTitleColor") : null;
@@ -139,7 +140,15 @@ function applyActiveTitleColors(plugin) {
 }
 
 function registerActiveTitleColors(plugin) {
-  const refresh = () => applyActiveTitleColors(plugin);
+  // A view writes the name of each file it loads into the same title element
+  // (onLoadFile, rename). "file-open" and the other events come from timers,
+  // after that frame is painted, which showed the previous note's color and
+  // marker (block badge included) for one frame. An observer on the title
+  // alone (childList: setText replaces its text) refreshes before the paint;
+  // typing in the note doesn't touch the title.
+  const titleObserver = new MutationObserver(() => refresh());
+  plugin.register(() => titleObserver.disconnect());
+  const refresh = () => applyActiveTitleColors(plugin, titleObserver);
 
   plugin.registerEvent(plugin.typIndex.on("change", refresh));
   plugin.registerEvent(plugin.app.workspace.on("file-open", refresh));

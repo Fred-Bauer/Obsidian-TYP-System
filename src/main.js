@@ -13,6 +13,7 @@ const { registerBacklinkColors } = require("./backlink-colors");
 const { registerOutgoingLinkColors } = require("./outgoing-link-colors");
 const { registerBookmarksColors } = require("./bookmark-colors");
 const { registerActiveTitleColors } = require("./active-title-colors");
+const { registerTabTitleColors, registerViewHeaderColors } = require("./header-colors");
 const { registerLinkColors } = require("./link-colors");
 const { registerPropertyLinkColors } = require("./property-link-colors");
 const { registerSuggestColors } = require("./suggest-colors");
@@ -39,12 +40,13 @@ module.exports = class TypSystemPlugin extends Plugin {
     await this.loadSettings(data);
 
     // Disabling the plugin takes its inline colors out of the explorer,
-    // search, Bases, Recent Files, backlinks, bookmarks, note titles, property
-    // links and "All properties" (see setInlineColor in typ-colors.js); those
-    // views would keep them until they happen to re-render. Registered first so
-    // it runs last on unload, after the modules have stopped observing and
-    // listening and have cleared the rows their views keep out of the DOM (see
-    // registerColorView in view-colors.js).
+    // search, Bases, Recent Files, backlinks, bookmarks, note titles, tab
+    // titles, the view header, property links and "All properties" (see
+    // setInlineColor in typ-colors.js); those views would keep them until they
+    // happen to re-render. Registered first so it runs last on unload, after
+    // the modules have stopped observing and listening and have cleared the
+    // rows their views keep out of the DOM (see registerColorView in
+    // view-colors.js).
     this.register(() => {
       for (const doc of allDocuments(this.app)) clearInlineColors(doc);
     });
@@ -91,6 +93,8 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerOutgoingLinkColors(this),
       registerBookmarksColors(this),
       registerActiveTitleColors(this),
+      registerTabTitleColors(this),
+      registerViewHeaderColors(this),
       registerLinkColors(this),
       registerPropertyLinkColors(this),
       registerSuggestColors(this),

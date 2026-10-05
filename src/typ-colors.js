@@ -281,8 +281,8 @@ function colorForLink(plugin, linkEl, sourcePath, viewKey) {
 
 // --- Inline colors in other views -------------------------------------------
 // Explorer, search (pane and query blocks in notes), Bases, Recent Files,
-// backlinks, bookmarks, the note title, property links and "All properties"
-// are colored through style.color on Obsidian's own elements. Those views only
+// backlinks, bookmarks, the note title, tab titles, the view header, property
+// links and "All properties" are colored through style.color on Obsidian's own elements. Those views only
 // re-render now and then, so the colors would stay after the plugin is
 // disabled. Every element colored this way is marked, and on unload exactly
 // the marked ones are cleared - never an inline color some other plugin or

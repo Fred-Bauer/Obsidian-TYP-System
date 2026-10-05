@@ -15,6 +15,7 @@ const { registerBookmarksColors } = require("./bookmark-colors");
 const { registerActiveTitleColors } = require("./active-title-colors");
 const { registerLinkColors } = require("./link-colors");
 const { registerPropertyLinkColors } = require("./property-link-colors");
+const { registerSuggestColors } = require("./suggest-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { registerPropertyRenameSync } = require("./property-rename-sync");
 const { removePropertyMenuPatch } = require("./typ-frontmatter-editor");
@@ -92,6 +93,7 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerActiveTitleColors(this),
       registerLinkColors(this),
       registerPropertyLinkColors(this),
+      registerSuggestColors(this),
       this.refreshFrontmatterHighlight,
     ];
     this.refreshTypColorsExcept = (exceptView) => {

@@ -41,7 +41,8 @@ const PROPERTY_BLOCK_SELECTOR = ".metadata-container";
 // no way back to it, so it is found in the component tree by its container.
 // A container always belongs to the same editor, so the walk happens once per
 // container (editors: container -> editor). Not found: a hover preview opened
-// from an embedded note (see findRenderChild).
+// from an embedded note (see findRenderChild). Also used for the link
+// suggestions of a property field (suggest-colors.js).
 function editorOf(app, editors, blockEl) {
   let editor = editors.get(blockEl);
   if (!editor) {
@@ -134,4 +135,4 @@ function registerPropertyLinkColors(plugin) {
   });
 }
 
-module.exports = { registerPropertyLinkColors };
+module.exports = { registerPropertyLinkColors, editorOf };

@@ -104,6 +104,15 @@ const DEFAULT_SETTINGS = {
     links: true,
     // Links in property values (see property-link-colors.js).
     propertyLinks: true,
+    // Suggestion lists (see suggest-colors.js): the quick switcher, "[[" in
+    // the editor and in property fields, Canvas "Add note from vault" and Note
+    // Composer.
+    quickSwitcher: true,
+    quickSwitcherSubtyp: true,
+    linkSuggestions: true,
+    linkSuggestionsSubtyp: true,
+    fileDialogs: true,
+    fileDialogsSubtyp: true,
   },
 };
 
@@ -264,6 +273,13 @@ class TypSystemSettingTab extends PluginSettingTab {
       "Color internal links in property values by the TYP of their target (property block, properties sidebar, hover preview, TYP-Pane). External links and links to notes that don't exist stay as they are.",
       "propertyLinksSubtyp"
     );
+    colorViewToggle(
+      coloringGroup,
+      "linkSuggestions",
+      "Link suggestions",
+      "Color notes and aliases in link suggestions, after [[ in notes and in property fields. Headings, blocks and notes that don't exist stay as they are.",
+      "linkSuggestionsSubtyp"
+    );
     colorViewToggle(coloringGroup, "typList", "TYP-Pane", "Color names in the TYP-Pane and TYP-Picker.", "typListSubtyp");
     colorViewToggle(
       coloringGroup,
@@ -393,6 +409,20 @@ class TypSystemSettingTab extends PluginSettingTab {
       "outgoingLinksSubtyp"
     );
     colorViewToggle(coloringGroup, "bookmarks", "Bookmarks", "Color bookmarks that point directly to a note.", "bookmarksSubtyp");
+    colorViewToggle(
+      coloringGroup,
+      "quickSwitcher",
+      "Quick switcher",
+      "Color notes, aliases and bookmarks to a note in the quick switcher.",
+      "quickSwitcherSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "fileDialogs",
+      "Core file dialogs",
+      "Color notes, aliases and bookmarks to a note in Canvas \"Add note from vault\" and in Note Composer.",
+      "fileDialogsSubtyp"
+    );
     colorViewToggle(
       coloringGroup,
       "allProperties",

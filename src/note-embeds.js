@@ -1,10 +1,10 @@
 const { allDocuments } = require("./typ-colors");
 
-// Finds blocks Obsidian renders into notes (query blocks, bases) wherever they
-// show up: reading view, Live Preview, embedded notes, hover previews, canvas
-// cards, pop-out windows. Nothing watches the notes themselves - a subtree
-// observer near the editor once froze this vault - so a note without such a
-// block costs nothing, typing included.
+// Finds blocks Obsidian renders into notes (query blocks, bases, links in
+// property values) wherever they show up: reading view, Live Preview, embedded
+// notes, hover previews, canvas cards, pop-out windows. Nothing watches the
+// notes themselves - a subtree observer near the editor once froze this vault -
+// so a note without such a block costs nothing, typing included.
 //
 // The blocks announce themselves instead. While a watcher runs, its class sits
 // on the body of every window, and styles.css gives the watched blocks an empty
@@ -14,8 +14,11 @@ const { allDocuments } = require("./typ-colors");
 // class makes the blocks already on screen announce themselves too; a block in
 // a hidden tab does so once the tab is shown.
 //
-// The event comes in the rendering step before the frame is painted, so what
-// onInserted changes is already in that frame.
+// The event comes one frame after the block was first laid out (at the start
+// of the next rendering step), so a block appearing for the first time is
+// painted once as Obsidian rendered it. What onInserted changes is in the
+// frame after; what an observer set up there catches later is in the frame
+// it is inserted in.
 
 const INSERTED_ANIMATION = "typ-embed-inserted";
 

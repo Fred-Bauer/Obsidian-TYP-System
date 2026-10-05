@@ -1,3 +1,4 @@
+const { getLinkpath } = require("obsidian");
 const { getSubtyp } = require("./subtyps");
 
 // Color of a TYP without its own color. Lives here because code below the
@@ -267,13 +268,25 @@ function colorForFile(plugin, file, viewKey = null) {
   return subtypColor(settings, typ, plugin.typIndex.subtypOf(file));
 }
 
+// A rendered link element (data-href: link text or path, as Obsidian sets it;
+// "is-unresolved" for a target that doesn't exist), resolved from sourcePath
+// like Obsidian does - for Bases values and property links. Unresolved links,
+// attachments and notes without a TYP stay neutral (null).
+function colorForLink(plugin, linkEl, sourcePath, viewKey) {
+  const href = linkEl.getAttribute("data-href");
+  if (!href || linkEl.classList.contains("is-unresolved")) return null;
+  const file = plugin.app.metadataCache.getFirstLinkpathDest(getLinkpath(href), sourcePath);
+  return colorForFile(plugin, file, viewKey);
+}
+
 // --- Inline colors in other views -------------------------------------------
 // Explorer, search (pane and query blocks in notes), Bases, Recent Files,
-// backlinks, bookmarks, the note title and "All properties" are colored
-// through style.color on Obsidian's own elements. Those views only re-render
-// now and then, so the colors would stay after the plugin is disabled. Every
-// element colored this way is marked, and on unload exactly the marked ones
-// are cleared - never an inline color some other plugin or theme put there.
+// backlinks, bookmarks, the note title, property links and "All properties"
+// are colored through style.color on Obsidian's own elements. Those views only
+// re-render now and then, so the colors would stay after the plugin is
+// disabled. Every element colored this way is marked, and on unload exactly
+// the marked ones are cleared - never an inline color some other plugin or
+// theme put there.
 const COLORED_ATTR = "data-typ-colored";
 
 // color null/"" removes the color, but only from an element we colored.
@@ -307,6 +320,7 @@ module.exports = {
   clearInlineColors,
   allDocuments,
   colorForFile,
+  colorForLink,
   nameColor,
   DEFAULT_TYP_COLOR,
   subtypColor,

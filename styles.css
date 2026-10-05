@@ -63,6 +63,16 @@ body.typ-watch-bases .workspace-leaf-content[data-type="bases"] > .view-content 
   animation-name: typ-embed-inserted;
 }
 
+/* Links in property values announce themselves the same way while "Property
+   links" coloring is on (see property-link-colors.js): list pills and single
+   link values in property blocks, the properties sidebar and the TYP-Pane.
+   Neither element has an animation of its own. */
+body.typ-watch-property-links .metadata-container .multi-select-pill-content.internal-link,
+body.typ-watch-property-links .metadata-container .metadata-link-inner.internal-link {
+  animation-duration: 0.01s;
+  animation-name: typ-embed-inserted;
+}
+
 /* Stacks the extra badge toggles (see display in settings.js) instead of
    Obsidian's side-by-side flex row for several controls in one setting. */
 .typ-note-title-setting .setting-item-control {

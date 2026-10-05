@@ -1,5 +1,5 @@
-const { Component, getLinkpath } = require("obsidian");
-const { colorForFile, setInlineColor, clearInlineColors, allDocuments } = require("./typ-colors");
+const { Component } = require("obsidian");
+const { colorForFile, colorForLink, setInlineColor, clearInlineColors, allDocuments } = require("./typ-colors");
 const { coalesceFrame } = require("./typ-utils");
 const { registerColorView } = require("./view-colors");
 const { watchEmbeds, findRenderChild } = require("./note-embeds");
@@ -62,17 +62,6 @@ function headingsIn(el) {
   return el.matches(GROUP_HEADING_SELECTOR) ? [el] : el.querySelectorAll(GROUP_HEADING_SELECTOR);
 }
 
-// A link value, resolved like Obsidian does: values rendered as links resolve
-// from the vault root (data-href is the link text, or a full path for a file),
-// a link in a property editor of the table from the row's note. Unresolved
-// links, attachments and notes without a TYP stay neutral.
-function colorForLink(plugin, linkEl, sourcePath, viewKey) {
-  const href = linkEl.getAttribute("data-href");
-  if (!href || linkEl.classList.contains("is-unresolved")) return null;
-  const file = plugin.app.metadataCache.getFirstLinkpathDest(getLinkpath(href), sourcePath);
-  return colorForFile(plugin, file, viewKey);
-}
-
 // --- Parts --------------------------------------------------------------------
 // Each part colors (on) or clears (!on) its own elements:
 //   colorRow      optional (plugin, row, cells, on)
@@ -94,6 +83,8 @@ const LINK_PART = {
     for (const { prop, el } of cells) {
       if (prop === FILE_NAME_PROPERTY || !el) continue;
       for (const linkEl of el.querySelectorAll(LINK_SELECTOR)) {
+        // Values rendered as links resolve from the vault root, a link in a
+        // property editor of the table from the row's note - as in Obsidian.
         const sourcePath = linkEl.closest(".bases-metadata-value") ? row.entry?.file?.path ?? "" : "";
         setInlineColor(linkEl, on ? colorForLink(plugin, linkEl, sourcePath, "basesLinks") : null);
       }
@@ -235,8 +226,10 @@ function registerBasesColors(plugin) {
       };
 
       // Colors right away, not in the next frame: rows may already be shown
-      // (a tab shown again, or all bases on screen when switching on), and
-      // this frame is painted next.
+      // (a tab shown again, or all bases on screen when switching on). A base
+      // appearing for the first time has already been painted once uncolored
+      // (see watchEmbeds); rows inserted later are colored before they are
+      // painted.
       const onInserted = (el) => {
         const controller = findRenderChild(plugin.app, (candidate) => candidate.viewContainerEl?.parentElement === el);
         if (!controller) return;

@@ -87,8 +87,10 @@ function registerQueryBlockColors(plugin) {
       };
 
       // Colors right away, not in the next frame: results may already be shown
-      // (a block shown again, or all blocks on screen when switching on), and
-      // this frame is painted next.
+      // (a block shown again, or all blocks on screen when switching on). A
+      // block appearing for the first time has already been painted once
+      // uncolored (see watchEmbeds); rows inserted later are colored before
+      // they are painted.
       const onInserted = (blockEl) => {
         const query = findRenderChild(plugin.app, (candidate) => isQueryComponent(candidate, blockEl));
         if (!query) return;

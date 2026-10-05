@@ -13,6 +13,7 @@ const { registerBacklinkColors } = require("./backlink-colors");
 const { registerBookmarksColors } = require("./bookmark-colors");
 const { registerActiveTitleColors } = require("./active-title-colors");
 const { registerLinkColors } = require("./link-colors");
+const { registerPropertyLinkColors } = require("./property-link-colors");
 const { registerFrontmatterDefaultHighlight } = require("./frontmatter-default-highlight");
 const { registerPropertyRenameSync } = require("./property-rename-sync");
 const { removePropertyMenuPatch } = require("./typ-frontmatter-editor");
@@ -36,11 +37,11 @@ module.exports = class TypSystemPlugin extends Plugin {
     await this.loadSettings(data);
 
     // Disabling the plugin takes its inline colors out of the explorer,
-    // search, Bases, Recent Files, backlinks, bookmarks, note titles and "All
-    // properties" (see setInlineColor in typ-colors.js); those views would
-    // keep them until they happen to re-render. Registered first so it runs
-    // last on unload, after the modules have stopped observing and listening
-    // and have cleared the rows their views keep out of the DOM (see
+    // search, Bases, Recent Files, backlinks, bookmarks, note titles, property
+    // links and "All properties" (see setInlineColor in typ-colors.js); those
+    // views would keep them until they happen to re-render. Registered first so
+    // it runs last on unload, after the modules have stopped observing and
+    // listening and have cleared the rows their views keep out of the DOM (see
     // registerColorView in view-colors.js).
     this.register(() => {
       for (const doc of allDocuments(this.app)) clearInlineColors(doc);
@@ -88,6 +89,7 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerBookmarksColors(this),
       registerActiveTitleColors(this),
       registerLinkColors(this),
+      registerPropertyLinkColors(this),
       this.refreshFrontmatterHighlight,
     ];
     this.refreshTypColorsExcept = (exceptView) => {

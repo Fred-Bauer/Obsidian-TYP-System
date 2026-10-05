@@ -86,6 +86,7 @@ const DEFAULT_SETTINGS = {
     basesLinksSubtyp: true,
     basesGroupHeadingsSubtyp: true,
     linksSubtyp: true,
+    propertyLinksSubtyp: true,
     typListSubtyp: true,
     noteTitleColorSubtyp: true,
     noteTitleMarkerSubtyp: true,
@@ -99,6 +100,8 @@ const DEFAULT_SETTINGS = {
     allPropertiesSubtyp: true,
     noteTitleColor: true,
     links: true,
+    // Links in property values (see property-link-colors.js).
+    propertyLinks: true,
   },
 };
 
@@ -251,6 +254,13 @@ class TypSystemSettingTab extends PluginSettingTab {
       "Links in notes",
       "Color internal links by the TYP of their target (reading view, Live Preview, hover preview). Unresolved links stay as they are.",
       "linksSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "propertyLinks",
+      "Property links",
+      "Color internal links in property values by the TYP of their target (property block, properties sidebar, hover preview, TYP-Pane). External links and links to notes that don't exist stay as they are.",
+      "propertyLinksSubtyp"
     );
     colorViewToggle(coloringGroup, "typList", "TYP-Pane", "Color names in the TYP-Pane and TYP-Picker.", "typListSubtyp");
     colorViewToggle(

@@ -295,7 +295,8 @@ module.exports = class TypSystemPlugin extends Plugin {
   }
 
   // For TYP.js: TYP and Subtyp in one go (see typ-picker.js) - one picker with
-  // indented Subtyps or both pickers in turn, per "Separate Subtyp-Picker".
+  // "TYP / Subtyp" rows or both pickers in turn, following the TYP-List's
+  // Subtyp display.
   // Resolves with { typ, subtyp } (subtyp null for "no Subtyp"), or null on
   // ESC.
   pickTypAndSubtyp(options) {
@@ -315,6 +316,11 @@ module.exports = class TypSystemPlugin extends Plugin {
     // colorViews.links) would otherwise be silently off in older settings.
     this.settings.colorViews = { ...DEFAULT_SETTINGS.colorViews, ...this.settings.colorViews };
     this.settings.globalPropertyOrder = normalizeGlobalOrder(this.settings.globalPropertyOrder);
+    // "description" was a mode of the TYP-List's second column until the
+    // description came to show wherever there is room - which "none" now has.
+    if (this.settings.typListSecondary === "description") this.settings.typListSecondary = "none";
+    // Replaced by the TYP-List's Subtyp display (see pickTypAndSubtyp).
+    delete this.settings.separateSubtypPicker;
   }
 
   // settingsRevision counts every change of the settings (here and in

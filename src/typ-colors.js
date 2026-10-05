@@ -239,8 +239,9 @@ function subtypHasOwnColor(settings, typ, subtyp) {
 
 // Color of a TYP or Subtyp name - shared by the picker (typ-picker.js) and the
 // Subtyp preview in the TYP-List so they can't drift apart. With subtyp, the
-// Subtyp color, but only if the "Subtyp" sub-toggle of "TYP-Pane" allows it.
-// isDefault means a hollow ring instead of a filled dot (see paintColorDot).
+// Subtyp color, but only if the "Subtyp" sub-toggle of "TYP-Pane and -Picker"
+// allows it. isDefault means a hollow ring instead of a filled dot (see
+// paintColorDot).
 function nameColor(settings, typ, subtyp = null) {
   const useSubtyp = !!subtyp && settings.colorViews.typListSubtyp;
   const typColor = settings.typColors[typ] ?? null;
@@ -248,6 +249,26 @@ function nameColor(settings, typ, subtyp = null) {
     color: (useSubtyp ? subtypColor(settings, typ, subtyp) : typColor) ?? DEFAULT_TYP_COLOR,
     isDefault: !typColor || (useSubtyp && !subtypHasOwnColor(settings, typ, subtyp)),
   };
+}
+
+// Color of the Subtyp part in a "TYP / Subtyp" row (TYP-List in mode "Subtyps
+// as rows", combined TYP-Picker): the Subtyp color only while both toggles of
+// "TYP-Pane and -Picker" are on. Otherwise null and the row stays
+// uncolored - unlike a TYP row it has no dot to fall back on. null also for a
+// TYP without a color.
+function subtypRowColor(settings, typ, subtyp) {
+  const { typList, typListSubtyp } = settings.colorViews;
+  return typList && typListSubtyp ? subtypColor(settings, typ, subtyp) : null;
+}
+
+// The front of a "TYP / Subtyp" name: the TYP part (faint, uncolored, see
+// .typ-subtyp-path-typ) and the separator; the caller appends the Subtyp part
+// and colors it. The separator is a Style Setting drawn by CSS
+// (.typ-subtyp-sep::before), so it is neither in the picker's search text nor
+// in the text of an inline rename.
+function appendSubtypPathPrefix(el, typText) {
+  el.createSpan({ cls: "typ-subtyp-path-typ", text: typText });
+  el.createSpan({ cls: "typ-subtyp-sep" });
 }
 
 // Color dot (TYP-List, detail view, pickers, dialogs): filled for an own
@@ -322,6 +343,8 @@ module.exports = {
   colorForFile,
   colorForLink,
   nameColor,
+  subtypRowColor,
+  appendSubtypPathPrefix,
   DEFAULT_TYP_COLOR,
   subtypColor,
   applyColorOffset,

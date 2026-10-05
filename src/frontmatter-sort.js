@@ -2,7 +2,7 @@ const { Notice } = require("obsidian");
 const { getSubtyp } = require("./subtyps");
 const { typKeyOf, propertyValue, TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 const { plural } = require("./typ-utils");
-const { ConfirmModal, typNameNode } = require("./confirm-modal");
+const { ConfirmModal, typNameNode, subtypNameNode } = require("./confirm-modal");
 const { editFrontmatter, skippedText } = require("./frontmatter-text");
 
 // The four placeholders of the global order; the order editor lets you move
@@ -228,10 +228,11 @@ const PROGRESS_STEP = 10;
 // runFrontmatterSort counts with it before asking; sortAllFrontmatter writes
 // exactly these candidates.
 //
-// onlyTyp (optional) limits the run to notes of that TYP. Without it every
-// note is checked, including notes without a TYP: pinned properties such as
-// cssclasses apply regardless of TYP.
-function sortCandidates(app, plugin, onlyTyp) {
+// onlyTyp (optional) limits the run to notes of that TYP, onlySubtyp
+// (optional, only with onlyTyp) further to its notes with that SUBTYP.
+// Without them every note is checked, including notes without a TYP: pinned
+// properties such as cssclasses apply regardless of TYP.
+function sortCandidates(app, plugin, onlyTyp, onlySubtyp = null) {
   const globalOrder = normalizeGlobalOrder(plugin.settings.globalPropertyOrder);
   let checked = 0;
   const candidates = [];
@@ -241,8 +242,10 @@ function sortCandidates(app, plugin, onlyTyp) {
 
     const typ = plugin.typIndex.typOf(file);
     if (onlyTyp && typ !== onlyTyp) continue;
+    const subtyp = plugin.typIndex.subtypOf(file);
+    if (onlySubtyp && subtyp !== onlySubtyp) continue;
 
-    const typDefaultKeys = orderedDefaultKeys(plugin, typ, plugin.typIndex.subtypOf(file));
+    const typDefaultKeys = orderedDefaultKeys(plugin, typ, subtyp);
     checked++;
     if (cacheNeedsSorting(app, file, globalOrder, typDefaultKeys)) candidates.push({ file, typDefaultKeys });
   }
@@ -250,15 +253,22 @@ function sortCandidates(app, plugin, onlyTyp) {
   return { checked, candidates, globalOrder };
 }
 
-async function sortAllFrontmatter(app, plugin, onlyTyp) {
+// "TYP" or "TYP / Subtyp" in notices about a run. Plain text, so always with
+// " / " - the separator Style Setting only reaches rendered rows.
+function sortScope(onlyTyp, onlySubtyp) {
+  return onlySubtyp ? `${onlyTyp} / ${onlySubtyp}` : onlyTyp;
+}
+
+async function sortAllFrontmatter(app, plugin, onlyTyp, onlySubtyp = null) {
   // Counted afresh, not taken over from runFrontmatterSort's question: the
   // dialog may have been open for a while.
-  const { checked, candidates, globalOrder } = sortCandidates(app, plugin, onlyTyp);
+  const { checked, candidates, globalOrder } = sortCandidates(app, plugin, onlyTyp, onlySubtyp);
   // Only meaningful for a single TYP: lets the command explain a run that
-  // changed nothing because the TYP has no TYP-Frontmatter.
-  const hasTypDefaults = onlyTyp ? orderedDefaultKeys(plugin, onlyTyp) !== null : null;
+  // changed nothing because the TYP has no TYP-Frontmatter (nor, for a
+  // Subtyp, a block of its own).
+  const hasTypDefaults = onlyTyp ? orderedDefaultKeys(plugin, onlyTyp, onlySubtyp) !== null : null;
 
-  const label = onlyTyp ? `Frontmatter sorting ${onlyTyp}` : "Frontmatter sorting";
+  const label = onlyTyp ? `Frontmatter sorting ${sortScope(onlyTyp, onlySubtyp)}` : "Frontmatter sorting";
   const progressText = (done) => `${label}: ${done} of ${plural(candidates.length, "note")}…`;
   // Duration 0: stays until hidden below, a timed one could vanish mid-run.
   const notice = candidates.length >= LARGE_SORT_THRESHOLD ? new Notice(progressText(0), 0) : null;
@@ -282,11 +292,15 @@ async function sortAllFrontmatter(app, plugin, onlyTyp) {
 }
 
 // Resolves true for "Sort", false for Cancel, Escape or a click outside.
-function confirmLargeSort(plugin, onlyTyp, count, checked) {
+function confirmLargeSort(plugin, onlyTyp, onlySubtyp, count, checked) {
   const noun = checked === 1 ? "note" : "notes";
-  const title = onlyTyp
-    ? [`Re-sort ${count} of ${checked} `, typNameNode(plugin, onlyTyp, plugin.settings.typColors[onlyTyp] ?? null), ` ${noun}?`]
-    : `Re-sort ${count} of ${checked} ${noun}?`;
+  const typName = () => typNameNode(plugin, onlyTyp, plugin.settings.typColors[onlyTyp] ?? null);
+  let title = `Re-sort ${count} of ${checked} ${noun}?`;
+  if (onlySubtyp) {
+    title = [`Re-sort ${count} of ${checked} `, subtypNameNode(plugin, onlyTyp, onlySubtyp), ` ${noun} of `, typName(), "?"];
+  } else if (onlyTyp) {
+    title = [`Re-sort ${count} of ${checked} `, typName(), ` ${noun}?`];
+  }
   return new Promise((resolve) =>
     new ConfirmModal(plugin.app, {
       title,
@@ -301,22 +315,34 @@ function confirmLargeSort(plugin, onlyTyp, count, checked) {
 }
 
 // The one entry point of every sorting run over many notes: the commands "Sort
-// frontmatter in all notes" and "Sort frontmatter for one TYP" (after its
-// picker), the play button of the global order and the TYP-Pane's context
-// menu. onlyTyp null = all notes.
+// frontmatter in all notes" and "Sort frontmatter for one TYP or Subtyp"
+// (after its picker), the play button of the global order and the TYP-Pane's
+// context menus. onlyTyp null = all notes; onlySubtyp (with onlyTyp) = only
+// that Subtyp's notes.
 //
 // A large run (LARGE_SORT_THRESHOLD notes to re-sort, counted from the cache)
 // asks first; the question can't be switched off, the run rewrites notes and
 // has no undo. A small one just runs. Either way a notice reports the result.
-async function runFrontmatterSort(plugin, onlyTyp = null) {
-  const { checked, candidates } = sortCandidates(plugin.app, plugin, onlyTyp);
-  if (candidates.length >= LARGE_SORT_THRESHOLD && !(await confirmLargeSort(plugin, onlyTyp, candidates.length, checked))) return;
+async function runFrontmatterSort(plugin, onlyTyp = null, onlySubtyp = null) {
+  const { checked, candidates } = sortCandidates(plugin.app, plugin, onlyTyp, onlySubtyp);
+  if (
+    candidates.length >= LARGE_SORT_THRESHOLD &&
+    !(await confirmLargeSort(plugin, onlyTyp, onlySubtyp, candidates.length, checked))
+  ) {
+    return;
+  }
 
-  const { changed, skipped, hasTypDefaults, checked: checkedNow } = await sortAllFrontmatter(plugin.app, plugin, onlyTyp);
-  let message = sortSummary(onlyTyp ? `Frontmatter sorting ${onlyTyp}` : "Frontmatter sorting", checkedNow, changed, skipped);
+  const { changed, skipped, hasTypDefaults, checked: checkedNow } = await sortAllFrontmatter(
+    plugin.app,
+    plugin,
+    onlyTyp,
+    onlySubtyp
+  );
+  const scope = sortScope(onlyTyp, onlySubtyp);
+  let message = sortSummary(onlyTyp ? `Frontmatter sorting ${scope}` : "Frontmatter sorting", checkedNow, changed, skipped);
   // Not an error, but explains why nothing may have changed.
   if (hasTypDefaults === false) {
-    message += ` Note: ${onlyTyp} has no TYP-Frontmatter, so only the global order was applied.`;
+    message += ` Note: ${scope} has no TYP-Frontmatter, so only the global order was applied.`;
   }
   new Notice(message);
 }

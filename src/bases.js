@@ -394,7 +394,7 @@ async function createBaseCommand(plugin) {
   // includeManualOff: a Base is especially useful for TYP entries that aren't
   // set by hand (KONTAKT, MEDIA, EXTERN). Unregistered values are left out -
   // they have no TYP-Frontmatter and so no columns.
-  const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true });
+  const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true, allNotes: true });
   if (!choice) return;
 
   // A Subtyp picked here means the standalone Subtyp Base: it filters by
@@ -453,7 +453,7 @@ async function updateActiveView(plugin, view) {
   if (!target) {
     // No unambiguous TYP in the filter (hand-written OR group, no filter at
     // all): ask, and store the answer as a filter so the next run reads it.
-    const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true });
+    const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true, allNotes: true });
     if (!choice) return;
     target = { typ: choice.typ, subtyp: choice.subtyp };
     const and = [equalsFilter(TYP_PROPERTY, choice.typ)];

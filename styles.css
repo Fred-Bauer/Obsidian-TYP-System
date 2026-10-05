@@ -6,9 +6,22 @@ settings:
     -
         id: typ-system-subtyps-right
         title: Right-align Subtyp list
-        description: "Align the Subtyp list in the TYP-List to the right, just before the note count."
+        description: "Align the Subtyps in brackets in the TYP-List to the right, just before the note count."
         type: class-toggle
         default: false
+    -
+        id: typ-system-show-list-description
+        title: Show descriptions in TYP-List
+        description: "The TYP description next to the name, wherever the Subtyps in brackets leave room. Off, the name takes the whole row."
+        type: class-toggle
+        default: false
+    -
+        id: typ-system-subtyp-separator
+        title: Separator between TYP and Subtyp
+        description: "In \"TYP / Subtyp\" rows of the TYP-Pane and TYP-Picker. Spaces count."
+        type: variable-text
+        default: " / "
+        quotes: true
     -
         id: typ-system-unregistered-subtyp-opacity
         title: Color in unregistered Subtyp rows
@@ -121,12 +134,78 @@ body.typ-watch-property-links .metadata-container .metadata-link-inner.internal-
 }
 
 /* The name (tree-item-inner) no longer takes the whole rest of the row
-   (Obsidian's flex-grow: 1) - the second column (description input or Subtyp
-   list, see SECONDARY_MODES in typ-pane.js) needs the space. Only when that
-   column exists; in mode "Nothing" the name fills the row as usual. Scoped to
+   (Obsidian's flex-grow: 1) - the second column (Subtyps in brackets or the
+   description, see SECONDARY_MODES in typ-pane.js) needs the space. Scoped to
    the TYP-List so other tree views stay untouched. */
-.typ-list:not(.typ-list-no-secondary) .tree-item-inner {
+.typ-list .tree-item-inner {
   flex: 0 1 auto;
+}
+
+/* The description field only shows with the Style Setting "Show descriptions
+   in the TYP-List" (see @settings), so also not without Style Settings.
+   Without it the name fills the row as usual - except in bracket mode, where
+   the brackets still need the room. */
+body:not(.typ-system-show-list-description) .typ-list-description-input {
+  display: none;
+}
+
+body:not(.typ-system-show-list-description) .typ-list:not(.typ-list-subtyp-brackets) .tree-item-inner {
+  flex: 1 1 auto;
+}
+
+/* "TYP / Subtyp" row below its TYP in mode "Subtyps as rows" (see
+   renderSubtypItem in typ-pane.js). No second column, so the text gets the
+   row. The invisible dot keeps it in line with the TYP names above. */
+.typ-list .typ-subtyp-row .tree-item-inner {
+  flex: 1 1 auto;
+}
+
+.typ-color-wrap.typ-color-spacer {
+  visibility: hidden;
+}
+
+/* While renaming, only the Subtyp part is the input; title case, not the
+   uppercase of a TYP rename (see .is-being-renamed below, which this has to
+   outweigh). */
+.typ-list .tree-item-self.typ-subtyp-row.is-being-renamed .tree-item-inner {
+  text-transform: none;
+}
+
+.typ-list .typ-subtyp-row.is-being-renamed .typ-subtyp-row-name {
+  padding: 0 var(--size-4-1);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-form-field);
+  outline: none;
+}
+
+/* The TYP part of a "TYP / Subtyp" name (TYP-List rows, combined TYP-Picker,
+   see appendSubtypPathPrefix in typ-colors.js): faint like the separator and
+   never colored - the row is about the Subtyp, the TYP only places it. */
+.typ-subtyp-path-typ {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* The separator in every "TYP / Subtyp" name, the unregistered rows included.
+   Drawn by CSS so it is a Style Setting (see @settings, quoted there) and no
+   part of the text; pre keeps its spaces. Paler than the names, so the row
+   reads as one entry, not two values side by side. */
+.typ-subtyp-sep::before {
+  content: var(--typ-system-subtyp-separator, " / ");
+  white-space: pre;
+}
+
+.typ-subtyp-sep {
+  color: var(--text-faint);
+}
+
+/* "Rename and update notes" in the context menus (see addRenameItems in
+   typ-pane.js): accent color like its button in the detail view
+   (.typ-detail-rename-notes) - the same way Obsidian marks a warning item
+   (.menu-item.is-warning): text and icon, no hover of its own. */
+.menu-item.typ-menu-accent:not(.is-disabled),
+.menu-item.typ-menu-accent .menu-item-icon {
+  color: var(--interactive-accent);
 }
 
 /* "(Subtyp 1, Subtyp 2)" next to the TYP name - brackets and commas muted,
@@ -200,10 +279,9 @@ body.typ-system-subtyps-right .typ-list-subtyps {
 }
 
 /* Unregistered Subtyps at the bottom of the list: "NOTIZ / Kurz Geschichte"
-   (see renderUnregisteredSubtypItem in typ-pane.js). The slash is paler than
-   the names so the row reads as one entry, not two values side by side. */
+   (see renderUnregisteredSubtypItem in typ-pane.js). The separator
+   (.typ-subtyp-sep) is paler still, as the row itself is muted. */
 .typ-unregistered-subtyp-slash {
-  color: var(--text-faint);
   opacity: 0.6;
 }
 
@@ -385,19 +463,20 @@ body.typ-system-subtyps-right .typ-list-subtyps {
 
 /* Manual sort mode (see SORT_OPTIONS/renderRegisteredItem in typ-pane.js) -
    no grip icon, the whole row is draggable (mouse; long press on touch, see
-   pointer-drag.js). */
-.typ-list .tree-item-self.is-dragging {
+   pointer-drag.js). What moves is the tree-item: the TYP row with its Subtyp
+   rows (mode "Subtyps as rows"). */
+.typ-list .tree-item.is-dragging {
   opacity: 0.4;
 }
 
 /* Shows the gap a dragged row would land in - see showDropGap() in
    pointer-drag.js and the same technique in
    .typ-order-row.is-drop-before/-after. */
-.typ-list .tree-item-self.is-drop-before {
+.typ-list .tree-item.is-drop-before {
   box-shadow: inset 0 2px 0 var(--interactive-accent);
 }
 
-.typ-list .tree-item-self.is-drop-after {
+.typ-list .tree-item.is-drop-after {
   box-shadow: inset 0 -2px 0 var(--interactive-accent);
 }
 
@@ -1257,14 +1336,15 @@ body.is-mobile .typ-order-drag {
   font-weight: 400;
 }
 
-/* Subtyp row in the combined picker (TypSubtypPickerModal, see
-   typ-picker.js) - indented below its TYP, in its color, not bold. */
-.typ-picker-suggestion.typ-picker-subtyp {
-  padding-left: calc(var(--size-4-3) + 1.5em);
-}
-
+/* "TYP / Subtyp" row in the combined picker (TypSubtypPickerModal, see
+   typ-picker.js) - not bold, unlike a TYP row. While TYP rows have dots, an
+   invisible one keeps the text in line with their names. */
 .typ-picker-subtyp .typ-picker-name {
   font-weight: 400;
+}
+
+.typ-picker-dot.typ-picker-dot-spacer {
+  visibility: hidden;
 }
 
 /* Links in notes (see link-colors.js), Live Preview/source only: the mark sits

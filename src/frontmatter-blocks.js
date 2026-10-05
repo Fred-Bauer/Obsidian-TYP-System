@@ -99,7 +99,10 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
   // doesn't work on touch. Mouse: starts after a few pixels; touch: long press
   // on the heading, footer or margin, then move. An accent line shows the
   // target gap, Escape cancels. The TYP-Frontmatter is fixed on top (see
-  // getSectionOrder), so target 0 doesn't exist.
+  // getSectionOrder), so target 0 doesn't exist. A long press without moving
+  // opens the Subtyp's context menu, which the heading and footer carry (see
+  // attachSubtypMenu in typ-pane.js) - the drag would swallow the touch's
+  // own "contextmenu" otherwise.
   function attachBlockDrag(blockEl, section) {
     let indicator = null;
     let boxes = [];
@@ -115,6 +118,7 @@ function mountFrontmatterBlocks(view, containerEl, typ, { renderHeader, renderFo
 
     attachPointerDrag(blockEl, {
       canStart: (event) => isGrabTarget(event.target),
+      longPressMenu: true,
       onStart: () => {
         targetIndex = null;
         wrapper.doc.body.addClass("typ-block-dragging");

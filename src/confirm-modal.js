@@ -1,10 +1,11 @@
 const { ConfirmationModal, Platform } = require("obsidian");
 const { nameColor, paintColorDot, DEFAULT_TYP_COLOR } = require("./typ-colors");
 
-// A TYP name in running text (dialogs): colored when "TYP-Pane" coloring is on
-// (colorViews.typList), otherwise a dot before plain text - the same switch as
-// in the picker and the list. The caller passes color so a rename can use the
-// same (old) color for old and new name. color null = TYP without a color.
+// A TYP name in running text (dialogs): colored when "TYP-Pane and -Picker"
+// coloring is on (colorViews.typList), otherwise a dot before plain text - the
+// same switch as in the picker and the list. The caller passes color so a
+// rename can use the same (old) color for old and new name. color null = TYP
+// without a color.
 function appendTypName(parentEl, plugin, typ, color) {
   if (plugin.settings.colorViews.typList) {
     const nameEl = parentEl.createSpan({ cls: "typ-inline-name", text: typ });
@@ -16,7 +17,8 @@ function appendTypName(parentEl, plugin, typ, color) {
 }
 
 // Like appendTypName for a Subtyp of typ, in the Subtyp color (see nameColor
-// in typ-colors.js, which also honors the "Subtyp" sub-toggle of "TYP-Pane").
+// in typ-colors.js, which also honors the "Subtyp" sub-toggle of "TYP-Pane
+// and TYP-Picker").
 // colorSubtyp is the Subtyp whose color is used - a rename shows the new name,
 // which has no entry yet, in the old one's color. As with appendTypName, a TYP
 // without a color leaves the text uncolored.

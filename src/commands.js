@@ -47,13 +47,15 @@ function registerCommands(plugin) {
 
   plugin.addCommand({
     id: "sort-frontmatter-typ",
-    name: "Sort frontmatter for one TYP",
+    name: "Sort frontmatter for one TYP or Subtyp",
+    // The id stays from the time it only took a TYP, so hotkeys keep working.
     callback: runOrReportError("Frontmatter sorting", async () => {
       // Sorting makes sense for any TYP, manually creatable or not, registered
-      // or not.
-      const typ = await plugin.pickTyp({ includeManualOff: true, includeUnregistered: true });
-      if (!typ) return;
-      await runFrontmatterSort(plugin, typ);
+      // or not. The TYP itself means all of its notes (allNotes, see
+      // pickSubtyp), not only those without a Subtyp.
+      const choice = await plugin.pickTypAndSubtyp({ includeManualOff: true, includeUnregistered: true, allNotes: true });
+      if (!choice) return;
+      await runFrontmatterSort(plugin, choice.typ, choice.subtyp);
     }),
   });
 

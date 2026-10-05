@@ -40,13 +40,12 @@ const DEFAULT_SETTINGS = {
   // For position "block": top or bottom edge of the property block.
   noteTitleVerticalAlign: "top",
   typSortOrder: "count-desc",
-  // What the TYP-List shows next to the name: "subtyps", "description" or
+  // How the TYP-List shows the Subtyps: "subtyps" (in brackets), "rows" or
   // "none". Switched by the header button next to sorting (SECONDARY_MODES in
-  // typ-pane.js), not here: like the sort order it only concerns that list.
+  // typ-pane.js), not here. Also picks the picker flow: "rows" = one picker
+  // with "TYP / Subtyp" rows, otherwise TYP-Picker and Subtyp-Picker in turn
+  // (see pickTypAndSubtyp in typ-picker.js).
   typListSecondary: "subtyps",
-  // See pickTypAndSubtyp in typ-picker.js: false = each Subtyp indented in the
-  // TYP-Picker, true = a separate Subtyp-Picker after the TYP choice.
-  separateSubtypPicker: false,
   includeIgnoredFiles: false,
   // Ask before deleting a TYP or a Subtyp with properties. Only deletions that
   // touch nothing but these settings can be switched off ("Don't ask again" in
@@ -166,19 +165,6 @@ class TypSystemSettingTab extends PluginSettingTab {
           .addToggle((toggle) =>
             toggle.setValue(this.plugin.settings.confirmDeletion).onChange(async (value) => {
               this.plugin.settings.confirmDeletion = value;
-              await this.plugin.saveSettings();
-            })
-          )
-      )
-      .addSetting((setting) =>
-        setting
-          .setName("Separate Subtyp-Picker")
-          .setDesc(
-            "After choosing a TYP, choose the Subtyp in a second picker. When off, each Subtyp is listed indented below its TYP."
-          )
-          .addToggle((toggle) =>
-            toggle.setValue(this.plugin.settings.separateSubtypPicker).onChange(async (value) => {
-              this.plugin.settings.separateSubtypPicker = value;
               await this.plugin.saveSettings();
             })
           )
@@ -356,70 +342,12 @@ class TypSystemSettingTab extends PluginSettingTab {
 
     const coloringGroup = new SettingGroup(containerEl).setHeading("Coloring");
 
-    colorViewToggle(coloringGroup, "fileExplorer", "File explorer", "Color note names in the file explorer.", "fileExplorerSubtyp");
-    colorViewToggle(coloringGroup, "graph", "Graph", "Color nodes in the global and local graph.", "graphSubtyp");
-    colorViewToggle(coloringGroup, "search", "Search", "Color result titles in search and in query blocks in notes.", "searchSubtyp");
     colorViewToggle(
       coloringGroup,
-      "bases",
-      "Bases",
-      "Color note names in Bases (table, cards, list), in .base files and embedded in notes.",
-      "basesSubtyp"
-    );
-    if (this.plugin.settings.colorViews.bases) {
-      colorViewToggle(
-        coloringGroup,
-        "basesLinks",
-        "Bases links",
-        "Color links in values: link properties, file.links, backlinks, embeds and formulas.",
-        "basesLinksSubtyp",
-        { nested: true }
-      );
-      colorViewToggle(
-        coloringGroup,
-        "basesGroupHeadings",
-        "Bases group headings",
-        "Color group headings that link to a note.",
-        "basesGroupHeadingsSubtyp",
-        { nested: true }
-      );
-    }
-    colorViewToggle(coloringGroup, "recentFiles", "Recent Files", "Color entries in the Recent Files plugin.", "recentFilesSubtyp");
-    colorViewToggle(
-      coloringGroup,
-      "links",
-      "Links in notes",
-      "Color internal links by the TYP of their target (reading view, Live Preview, hover preview). Unresolved links stay as they are.",
-      "linksSubtyp"
-    );
-    colorViewToggle(
-      coloringGroup,
-      "propertyLinks",
-      "Property links",
-      "Color internal links in property values by the TYP of their target (property block, properties sidebar, hover preview, TYP-Pane). External links and links to notes that don't exist stay as they are.",
-      "propertyLinksSubtyp"
-    );
-    colorViewToggle(
-      coloringGroup,
-      "linkSuggestions",
-      "Link suggestions",
-      "Color notes and aliases in link suggestions, after [[ in notes and in property fields. Headings, blocks and notes that don't exist stay as they are.",
-      "linkSuggestionsSubtyp"
-    );
-    colorViewToggle(coloringGroup, "typList", "TYP-Pane", "Color names in the TYP-Pane and TYP-Picker.", "typListSubtyp");
-    colorViewToggle(
-      coloringGroup,
-      "tabTitles",
-      "Tab titles",
-      "Color note names in tab headers, stacked tabs included, and in the mobile tab switcher.",
-      "tabTitlesSubtyp"
-    );
-    colorViewToggle(
-      coloringGroup,
-      "viewHeader",
-      "View header",
-      "Color the note name and every folder that has a folder note in the header above a note or base.",
-      "viewHeaderSubtyp"
+      "typList",
+      "TYP-Pane and -Picker",
+      "Color TYP and Subtyp names in the TYP-Pane, the TYP-Picker and the plugin's dialogs. Rows \"TYP / Subtyp\" are only colored with Subtyp on.",
+      "typListSubtyp"
     );
     colorViewToggle(
       coloringGroup,
@@ -428,7 +356,6 @@ class TypSystemSettingTab extends PluginSettingTab {
       "Color the inline title of the open note.",
       "noteTitleColorSubtyp"
     );
-
     // Progressive disclosure: "badge" adds toggles (color, position) to this
     // one setting row, position "block" one more (alignment). Each re-renders
     // via display() so only the relevant ones show.
@@ -533,7 +460,25 @@ class TypSystemSettingTab extends PluginSettingTab {
         );
       }
     });
-
+    colorViewToggle(coloringGroup, "fileExplorer", "File explorer", "Color note names in the file explorer.", "fileExplorerSubtyp");
+    colorViewToggle(coloringGroup, "graph", "Graph", "Color nodes in the global and local graph.", "graphSubtyp");
+    colorViewToggle(coloringGroup, "search", "Search", "Color result titles in search and in query blocks in notes.", "searchSubtyp");
+    colorViewToggle(coloringGroup, "bookmarks", "Bookmarks", "Color bookmarks that point directly to a note.", "bookmarksSubtyp");
+    colorViewToggle(
+      coloringGroup,
+      "allProperties",
+      "All Properties",
+      "In Obsidian's \"All properties\" view, color property names that belong to exactly one TYP-Frontmatter, or bold them if more than one TYP uses them. With Subtyp, Subtyp blocks count as well, in the Subtyp color.",
+      "allPropertiesSubtyp",
+      { typTooltip: "TYP-Frontmatter", subtypTooltip: "Include Subtyp blocks, in Subtyp color" }
+    );
+    colorViewToggle(
+      coloringGroup,
+      "quickSwitcher",
+      "Quick switcher",
+      "Color notes, aliases and bookmarks to a note in the quick switcher.",
+      "quickSwitcherSubtyp"
+    );
     colorViewToggle(
       coloringGroup,
       "backlinks",
@@ -548,13 +493,65 @@ class TypSystemSettingTab extends PluginSettingTab {
       "Color links in the outgoing links pane and the notes named in its unlinked mentions.",
       "outgoingLinksSubtyp"
     );
-    colorViewToggle(coloringGroup, "bookmarks", "Bookmarks", "Color bookmarks that point directly to a note.", "bookmarksSubtyp");
     colorViewToggle(
       coloringGroup,
-      "quickSwitcher",
-      "Quick switcher",
-      "Color notes, aliases and bookmarks to a note in the quick switcher.",
-      "quickSwitcherSubtyp"
+      "bases",
+      "Bases",
+      "Color note names in Bases (table, cards, list), in .base files and embedded in notes.",
+      "basesSubtyp"
+    );
+    if (this.plugin.settings.colorViews.bases) {
+      colorViewToggle(
+        coloringGroup,
+        "basesLinks",
+        "Bases links",
+        "Color links in values: link properties, file.links, backlinks, embeds and formulas.",
+        "basesLinksSubtyp",
+        { nested: true }
+      );
+      colorViewToggle(
+        coloringGroup,
+        "basesGroupHeadings",
+        "Bases group headings",
+        "Color group headings that link to a note.",
+        "basesGroupHeadingsSubtyp",
+        { nested: true }
+      );
+    }
+    colorViewToggle(
+      coloringGroup,
+      "tabTitles",
+      "Tab titles",
+      "Color note names in tab headers, stacked tabs included, and in the mobile tab switcher.",
+      "tabTitlesSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "links",
+      "Links in notes",
+      "Color internal links by the TYP of their target (reading view, Live Preview, hover preview). Unresolved links stay as they are.",
+      "linksSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "propertyLinks",
+      "Property links",
+      "Color internal links in property values by the TYP of their target (property block, properties sidebar, hover preview, TYP-Pane). External links and links to notes that don't exist stay as they are.",
+      "propertyLinksSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "linkSuggestions",
+      "Link suggestions",
+      "Color notes and aliases in link suggestions, after [[ in notes and in property fields. Headings, blocks and notes that don't exist stay as they are.",
+      "linkSuggestionsSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "viewHeader",
+      "Header (Breadcrumbs)",
+      "Color the note name and every folder that has a folder note in the header above a note or base.",
+      "viewHeaderSubtyp"
     );
     colorViewToggle(
       coloringGroup,
@@ -563,15 +560,7 @@ class TypSystemSettingTab extends PluginSettingTab {
       "Color notes, aliases and bookmarks to a note in Canvas \"Add note from vault\" and in Note Composer.",
       "fileDialogsSubtyp"
     );
-    colorViewToggle(
-      coloringGroup,
-      "allProperties",
-      "All Properties",
-      "In Obsidian's \"All properties\" view, color property names that belong to exactly one TYP-Frontmatter, or bold them if more than one TYP uses them. With Subtyp, Subtyp blocks count as well, in the Subtyp color.",
-      "allPropertiesSubtyp",
-      { typTooltip: "TYP-Frontmatter", subtypTooltip: "Include Subtyp blocks, in Subtyp color" }
-    );
-
+    colorViewToggle(coloringGroup, "recentFiles", "Recent Files", "Color entries in the Recent Files plugin.", "recentFilesSubtyp");
     containerEl.scrollTop = scrollTop;
   }
 }

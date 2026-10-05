@@ -1,10 +1,10 @@
 const { FuzzySuggestModal, Notice, prepareFuzzySearch, renderMatches } = require("obsidian");
-const { compareTyps, DEFAULT_SORT_ORDER } = require("./typ-pane");
-const { nameColor, paintColorDot } = require("./typ-colors");
+const { compareTyps, subtypListMode, DEFAULT_SORT_ORDER } = require("./typ-pane");
+const { nameColor, paintColorDot, subtypRowColor, appendSubtypPathPrefix } = require("./typ-colors");
 const { pickerInstructions } = require("./typ-utils");
 
 // The search text of a TYP row, as the parts the row renders separately:
-// [{ key: "typ" | "subtyps" | "description", text, start }], start being the
+// [{ key: "typ" | "subtyps", text, start }], start being the
 // part's position in the search text. getItemText joins exactly these with
 // " ", so this is the one place that defines it - the match ranges Obsidian
 // returns refer to the joined text and are split back onto the parts by
@@ -20,7 +20,6 @@ function textParts(item) {
   };
   add("typ", item.typ);
   add("subtyps", item.subtyps?.join(" "));
-  add("description", item.description);
   return parts;
 }
 
@@ -52,8 +51,8 @@ class TypPickerModal extends FuzzySuggestModal {
     return this.items;
   }
 
-  // Search also covers the description and, where shown in the row
-  // (showSubtyps), the Subtyp names: what you see you expect to be able to type.
+  // Search covers the name and, where shown in the row (showSubtyps), the
+  // Subtyp names - not the description, which only explains the row.
   getItemText(item) {
     return textParts(item)
       .map((part) => part.text)
@@ -75,16 +74,15 @@ class TypPickerModal extends FuzzySuggestModal {
 
     if (item.subtyps?.length) this.renderSubtypPreview(el, item, matches, parts.subtyps.start);
 
-    if (item.description) {
-      highlight(el.createSpan({ cls: "typ-picker-desc" }), item.description, matches, parts.description.start);
-    }
+    if (item.description) el.createSpan({ cls: "typ-picker-desc", text: item.description });
 
     el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
   }
 
   // Name in the color of colorTyp (or of the Subtyp, see nameColor in
   // typ-colors.js) - as colored text or with a dot before it, depending on
-  // the "TYP-Pane" coloring setting. matches/start as in highlight().
+  // the "TYP-Pane and -Picker" coloring setting. matches/start as in
+  // highlight().
   renderColoredName(el, text, colorTyp, subtyp = null, matches = [], start = 0) {
     const { color, isDefault } = nameColor(this.plugin.settings, colorTyp, subtyp);
     const colorize = this.plugin.settings.colorViews.typList;
@@ -95,8 +93,9 @@ class TypPickerModal extends FuzzySuggestModal {
   }
 
   // "TYP (Subtyp 1, Subtyp 2)" - shows what lies below the TYP before the
-  // separate Subtyp-Picker comes. Each Subtyp in its own color, brackets and
-  // commas muted; uncolored like the name when "TYP-Pane" coloring is off.
+  // Subtyp-Picker of the two-step flow comes. Each Subtyp in its own color,
+  // brackets and commas muted; uncolored like the name when
+  // "TYP-Pane and -Picker" coloring is off.
   // start is where the Subtyp names begin in the search text; there they are
   // separated by one space instead of ", ", so each name starts one character
   // after the end of the one before.
@@ -183,9 +182,10 @@ class SubtypPickerModal extends TypPickerModal {
   }
 }
 
-// TYP-Picker with each Subtyp indented below its TYP (the default while
-// "Separate Subtyp-Picker" is off, see pickTypAndSubtyp). The TYP row itself
-// means "no Subtyp". Search works per group so a Subtyp never appears without
+// TYP-Picker with a row "TYP / Subtyp" for each Subtyp below its TYP, like the
+// TYP-List in mode "Subtyps as rows" (which picks this flow, see
+// pickTypAndSubtyp). The TYP row itself means "no Subtyp" (with allNotes: all
+// of its notes). Search works per group so a Subtyp never appears without
 // its TYP: a TYP match keeps all its Subtyps, a Subtyp match keeps that Subtyp
 // with its TYP. Groups sort by their best match; within a group block order
 // stays.
@@ -222,9 +222,20 @@ class TypSubtypPickerModal extends TypPickerModal {
       super.renderSuggestion(match, el);
       return;
     }
+    // Like the row in the TYP-List (renderSubtypItem in typ-pane.js): the TYP
+    // part faint, the Subtyp part in its color only while both toggles of
+    // "TYP-Pane and -Picker" are on (subtypRowColor), never a dot - an
+    // invisible one keeps the text in line with the TYP names while those
+    // have dots. Matched against the Subtyp name alone (see getSuggestions),
+    // so the highlight only concerns that part.
     el.addClass("typ-picker-suggestion", "typ-picker-subtyp");
-    // Matched against the Subtyp name alone (see getSuggestions).
-    this.renderColoredName(el, item.subtyp, item.typ, item.subtyp, match.match?.matches ?? []);
+    if (!this.plugin.settings.colorViews.typList) el.createSpan({ cls: "typ-picker-dot typ-picker-dot-spacer" });
+    const nameEl = el.createSpan({ cls: "typ-picker-name" });
+    appendSubtypPathPrefix(nameEl, item.typ);
+    const subtypEl = nameEl.createSpan();
+    highlight(subtypEl, item.subtyp, match.match?.matches ?? []);
+    const color = subtypRowColor(this.plugin.settings, item.typ, item.subtyp);
+    if (color) subtypEl.style.color = color;
     el.createSpan({ cls: "typ-picker-count", text: String(item.count) });
   }
 
@@ -235,8 +246,8 @@ class TypSubtypPickerModal extends TypPickerModal {
 
 // Initial order of a picker list given an already typed query (from the
 // TYP-Picker, see pickTypEntry): matches first by score, the rest after in
-// unchanged order. If nothing matches (a description was typed, say) the
-// list stays as it was. Typing in the picker itself uses Obsidian's search.
+// unchanged order. If nothing matches the list stays as it was. Typing in the
+// picker itself uses Obsidian's search.
 function sortByQuery(items, query, itemText) {
   const search = query?.trim() ? prepareFuzzySearch(query.trim()) : null;
   if (!search) return items;
@@ -253,10 +264,13 @@ function sortByQuery(items, query, itemText) {
 // Subtyp (in block order). query pre-sorts the list: typing "Lehrveranstaltung"
 // to reach ORGA meant that Subtyp, which then sits on top - Enter suffices.
 // options as in getSubtyps: Subtyps that aren't manually creatable are left
-// out by default, like such TYP entries before. Resolves with
+// out by default, like such TYP entries before. allNotes is for callers that
+// act on the notes rather than set a value (sorting, Bases): there the first
+// row stands for the whole TYP ("all notes", with its full count) instead of
+// "no Subtyp". Resolves with
 //  - the chosen Subtyp,
-//  - "" for "no Subtyp" (the first row without a query) - or right away,
-//    without a picker, if the TYP has no selectable Subtyp,
+//  - "" for the first row (without a query) - or right away, without a
+//    picker, if the TYP has no selectable Subtyp,
 //  - null on ESC (TYP.js goes back to the TYP choice).
 function pickSubtyp(app, plugin, typ, query = "", options = {}) {
   return new Promise((resolve) => {
@@ -265,10 +279,12 @@ function pickSubtyp(app, plugin, typ, query = "", options = {}) {
       resolve("");
       return;
     }
-    // "no Subtyp" first: Enter picks it without typing, and it is more common
-    // than any single Subtyp.
-    const noneCount = plugin.typIndex.subtypBucket(typ).noSubtyp;
-    items.unshift({ typ: "no Subtyp", description: "", count: noneCount, none: true });
+    // The TYP's own row first: Enter picks it without typing, and it is more
+    // common than any single Subtyp.
+    const first = options.allNotes
+      ? { typ: "all notes", count: plugin.typIndex.typCounts().counts.get(typ) ?? 0 }
+      : { typ: "no Subtyp", count: plugin.typIndex.subtypBucket(typ).noSubtyp };
+    items.unshift({ ...first, description: "", none: true });
     new SubtypPickerModal(app, plugin, typ, items, resolve, query).open();
   });
 }
@@ -290,7 +306,7 @@ function unregisteredItems(app, plugin) {
 // Picks a single TYP, for TYP.js and everywhere in the plugin. includeManualOff
 // as in getTyps(); includeUnregistered adds values that occur in notes but
 // aren't registered (muted). showSubtyps puts the Subtyp names after the TYP
-// name, for the separate flow where the Subtyp-Picker comes afterwards.
+// name, for the two-step flow where the Subtyp-Picker comes afterwards.
 // Resolves with the TYP, or null on cancel or if there is nothing to show.
 function pickTyp(app, plugin, options = {}) {
   return pickTypEntry(app, plugin, options).then((entry) => entry?.typ ?? null);
@@ -324,15 +340,16 @@ function typItems(app, plugin, { includeManualOff = false, includeUnregistered =
   return null;
 }
 
-// For TYP.js: TYP and Subtyp in one go. With separateSubtypPicker off, one
-// picker with each Subtyp indented below its TYP; with it on, first the
-// TYP-Picker (Subtyp names after the TYP name) and then, if there is a
-// selectable Subtyp, the Subtyp-Picker pre-sorted by the query (ESC goes back
-// to the TYP choice). includeManualOff also applies to the Subtyps.
-// Resolves with { typ, subtyp } (subtyp null for "no Subtyp"), or null on
-// cancel.
+// For TYP.js: TYP and Subtyp in one go, in the flow that matches the
+// TYP-List's Subtyp display (see SECONDARY_MODES in typ-pane.js): with
+// "Subtyps as rows" one picker with a row "TYP / Subtyp" per Subtyp;
+// otherwise first the TYP-Picker (Subtyp names after the TYP name) and then,
+// if there is a selectable Subtyp, the Subtyp-Picker pre-sorted by the query
+// (ESC goes back to the TYP choice). includeManualOff also applies to the
+// Subtyps; allNotes as in pickSubtyp. Resolves with { typ, subtyp } (subtyp
+// null for the TYP itself), or null on cancel.
 async function pickTypAndSubtyp(app, plugin, options = {}) {
-  if (plugin.settings.separateSubtypPicker) {
+  if (subtypListMode(plugin.settings) !== "rows") {
     while (true) {
       const entry = await pickTypEntry(app, plugin, { ...options, showSubtyps: true });
       if (!entry) return null;

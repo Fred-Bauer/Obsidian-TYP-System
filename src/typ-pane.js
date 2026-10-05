@@ -33,6 +33,8 @@ const {
   subtypHasOwnColor,
   paintColorDot,
   nameColor,
+  subtypRowColor,
+  appendSubtypPathPrefix,
   channelBounds,
   clampedOffset,
   SUBTYP_COLOR_CHANNELS,
@@ -41,22 +43,33 @@ const {
 
 const VIEW_TYPE_TYP_PANE = "typ-system-pane";
 const DEFAULT_SORT_ORDER = "count-desc";
-const DEFAULT_SECONDARY = "subtyps";
 
-// What the TYP-List shows next to the name (settings.typListSecondary),
-// cycled by a header button next to sorting (see cycleSecondary) - too few,
-// too immediately visible states for a menu.
-//   subtyps     - the TYP's Subtyps in brackets, each in its color (like the
-//                 preview in the separate TYP-Picker)
-//   description - text field to edit the TYP description
-//   none        - nothing, the name gets the whole row
-// The order is also the cycle order; the first is the default: the Subtyps
-// appear nowhere else in the list, the description also in the detail view.
+// How the TYP-List shows the Subtyps (settings.typListSecondary), cycled by a
+// header button next to sorting (see cycleSecondary) - too few, too
+// immediately visible states for a menu.
+//   subtyps - in brackets next to the TYP name, each in its color (like the
+//             preview in the TYP-Picker of the two-step flow)
+//   rows    - a row "TYP / Subtyp" each, below its TYP (see renderSubtypItem)
+//   none    - not at all
+// The TYP description can stand next to the name wherever the brackets leave
+// room, i.e. in "rows" and "none" - only with the Style Setting "Show
+// descriptions in the TYP-List" (see @settings in styles.css), off by
+// default. The mode also picks the picker flow, see
+// pickTypAndSubtyp in typ-picker.js. The order is also the cycle order; the
+// first is the default.
 const SECONDARY_MODES = [
-  { mode: "subtyps", title: "Subtyp list", icon: "list-tree" },
-  { mode: "description", title: "Description", icon: "text-cursor-input" },
-  { mode: "none", title: "Nothing", icon: "minus" },
+  { mode: "subtyps", title: "Subtyps in brackets", icon: "brackets" },
+  { mode: "rows", title: "Subtyps as rows", icon: "list-tree" },
+  { mode: "none", title: "Subtyps hidden", icon: "minus" },
 ];
+const DEFAULT_SECONDARY = SECONDARY_MODES[0].mode;
+
+// settings.typListSecondary, but always a valid mode - older data may lack
+// the key, and a mode removed later shouldn't leave the list empty.
+function subtypListMode(settings) {
+  const mode = settings.typListSecondary;
+  return SECONDARY_MODES.some((entry) => entry.mode === mode) ? mode : DEFAULT_SECONDARY;
+}
 
 const SORT_OPTIONS = [
   // Unlike the others, "manual" has no comparison: the order of settings.typs
@@ -336,11 +349,23 @@ class TypPane extends ItemView {
   }
 
   // Switching between list and detail view starts at the top; every other
-  // render() keeps the scroll position (see there).
-  openTypSettings(typ) {
+  // render() keeps the scroll position (see there). With subtyp (a click on a
+  // Subtyp row) the view starts at that Subtyp's block instead.
+  openTypSettings(typ, subtyp = null) {
     this.selectedTyp = typ;
     this._resetScroll = true;
     this.render();
+    if (subtyp !== null) this.scrollToSubtyp(subtyp);
+  }
+
+  // Brings a Subtyp block of the detail view to the top, a little space above
+  // it. Measured rather than scrollIntoView(), which would also scroll the
+  // sidebar around the pane.
+  scrollToSubtyp(subtyp) {
+    const block = [...this.contentEl.querySelectorAll(".typ-block")].find((el) => el.typSection === subtyp);
+    if (!block) return;
+    const offset = block.getBoundingClientRect().top - this.contentEl.getBoundingClientRect().top;
+    this.contentEl.scrollTop += offset - 8;
   }
 
   closeTypSettings() {
@@ -436,9 +461,10 @@ class TypPane extends ItemView {
         .map((typ) => ({ typ, count: counts.get(typ) ?? 0 }));
       const unregisteredSubtypRows = this.unregisteredSubtypRows();
 
-      // Without a second column the name may take the whole row (see
-      // .typ-list-no-secondary in styles.css).
-      const listCls = "typ-list nav-files-container" + (this.secondaryMode() === "none" ? " typ-list-no-secondary" : "");
+      // The second column is the bracket list or the description; which one
+      // decides whether the description being off (Style Settings) frees the
+      // row for the name (see .typ-list-subtyp-brackets in styles.css).
+      const listCls = "typ-list nav-files-container" + (this.secondaryMode() === "subtyps" ? " typ-list-subtyp-brackets" : "");
       this.listEl = contentEl.createDiv({ cls: listCls });
       this.separatorEl = null;
 
@@ -499,23 +525,20 @@ class TypPane extends ItemView {
     setIcon(sortBtn, "lucide-sort-asc");
     sortBtn.addEventListener("click", (event) => this.showSortMenu(event));
 
-    // Second column: a button cycling the three modes rather than a menu -
+    // Subtyp display: a button cycling the three modes rather than a menu -
     // with so few states whose effect shows right below, clicking through is
     // faster. Icon and tooltip show the current mode.
     const current = SECONDARY_MODES[this.secondaryIndex()];
     const secondaryBtn = buttonsContainer.createDiv({
       cls: "clickable-icon nav-action-button",
-      attr: { "aria-label": `Next to name: ${current.title}` },
+      attr: { "aria-label": current.title },
     });
     setIcon(secondaryBtn, current.icon);
     secondaryBtn.addEventListener("click", () => this.cycleSecondary());
   }
 
-  // settings.typListSecondary, but always a valid mode - older data may lack
-  // the key, and a mode removed later shouldn't leave the list empty.
   secondaryMode() {
-    const mode = this.plugin.settings.typListSecondary;
-    return SECONDARY_MODES.some((entry) => entry.mode === mode) ? mode : DEFAULT_SECONDARY;
+    return subtypListMode(this.plugin.settings);
   }
 
   secondaryIndex() {
@@ -769,12 +792,22 @@ class TypPane extends ItemView {
     const color = this.plugin.settings.colorViews.typList ? this.plugin.settings.typColors[typ] : null;
     if (color) nameEl.style.color = color;
 
-    // Second column, cycled by the header button (see SECONDARY_MODES).
+    // Second column: the bracket list or, wherever it leaves room, the
+    // description (see SECONDARY_MODES).
     const secondary = this.secondaryMode();
-    if (secondary === "description") this.renderDescriptionInput(self, typ);
-    else if (secondary === "subtyps") this.renderSubtypPreview(self, typ);
+    if (secondary === "subtyps") this.renderSubtypPreview(self, typ);
+    else this.renderDescriptionInput(self, typ);
 
     this.renderCountFlair(self, count);
+
+    // In the same tree-item as the TYP row, so the group moves as one when
+    // dragged (see below).
+    if (secondary === "rows") {
+      const { counts } = this.plugin.typIndex.subtypBucket(typ);
+      for (const subtyp of getSubtypNames(this.plugin.settings, typ)) {
+        this.renderSubtypItem(treeItem, typ, subtyp, counts.get(subtyp) ?? 0);
+      }
+    }
 
     self.addEventListener("click", () => {
       if (this.isEditing) return;
@@ -795,8 +828,12 @@ class TypPane extends ItemView {
     // row being renamed, so the cursor can be placed in the name. Moves
     // entries in settings.typs, the list that is the display order in manual
     // mode. A long press without moving opens the context menu above.
+    //
+    // What moves and marks the gaps is the whole tree-item: with "Subtyps as
+    // rows" it holds the TYP's Subtyp rows too, which move along. Only the TYP
+    // row itself starts a drag.
     if (draggable) {
-      self.typSortable = true;
+      treeItem.typSortable = true;
       let rows = [];
       let gap = null;
       attachPointerDrag(self, {
@@ -804,9 +841,9 @@ class TypPane extends ItemView {
           !this.isEditing && !event.target.closest(".typ-color-wrap, input, .is-being-renamed, [contenteditable='true']"),
         longPressMenu: true,
         onStart: () => {
-          rows = [...this.listEl.querySelectorAll(".tree-item-self")].filter((el) => el.typSortable);
+          rows = [...this.listEl.querySelectorAll(".tree-item")].filter((el) => el.typSortable);
           gap = null;
-          self.addClass("is-dragging");
+          treeItem.addClass("is-dragging");
         },
         onMove: (event) => {
           gap = gapIndexAt(rows, event.clientY);
@@ -814,7 +851,7 @@ class TypPane extends ItemView {
           showDropGap(rows, gap === index || gap === index + 1 ? null : gap);
         },
         onEnd: async (commit) => {
-          self.removeClass("is-dragging");
+          treeItem.removeClass("is-dragging");
           showDropGap(rows, null);
           if (!commit || gap === null || gap === index || gap === index + 1) return;
           const insertBefore = index < gap ? gap - 1 : gap;
@@ -837,18 +874,7 @@ class TypPane extends ItemView {
     const menu = new Menu();
     menu.addItem((item) => item.setTitle("Search notes").setIcon("search").onClick(() => this.openSearch(typ)));
     menu.addSeparator();
-    menu.addItem((item) =>
-      item
-        .setTitle("Rename")
-        .setIcon("pencil")
-        .onClick(() => this.startListRename(typ, self, nameEl))
-    );
-    menu.addItem((item) =>
-      item
-        .setTitle("Rename and update notes")
-        .setIcon("pencil")
-        .onClick(() => this.startListRename(typ, self, nameEl, { updateNotes: true }))
-    );
+    this.addRenameItems(menu, (options) => this.startListRename(typ, self, nameEl, options));
     menu.addItem((item) =>
       item
         .setTitle("Delete")
@@ -876,6 +902,67 @@ class TypPane extends ItemView {
     menu.showAtMouseEvent(event);
   }
 
+  // Right-click on a Subtyp row in the list or on a Subtyp block's heading or
+  // footer in the detail view: like showTypMenu, with the actions of the
+  // block's footer. startRename(options) puts the name where it was clicked
+  // into input mode. "Create Base" makes the standalone Subtyp Base, as the
+  // command does when a Subtyp is picked (see createBaseCommand).
+  showSubtypMenu(event, typ, subtyp, startRename) {
+    const menu = new Menu();
+    menu.addItem((item) =>
+      item
+        .setTitle("Search notes")
+        .setIcon("search")
+        .onClick(() => this.openSubtypSearch(typ, subtyp))
+    );
+    menu.addSeparator();
+    this.addRenameItems(menu, startRename);
+    menu.addItem((item) =>
+      item
+        .setTitle("Delete")
+        .setIcon("trash")
+        .setWarning(true)
+        .onClick(() => this.deleteSubtypWithConfirm(typ, subtyp))
+    );
+    menu.addSeparator();
+    if (isBasesEnabled(this.app)) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Create Base")
+          .setIcon("table")
+          .onClick(runOrReportError("Create Base", () => createBaseFor(this.plugin, { typ: null, subtyp })))
+      );
+    }
+    menu.addItem((item) =>
+      item
+        .setTitle("Sort frontmatter for this Subtyp")
+        .setIcon("arrow-down-up")
+        .onClick(runOrReportError("Frontmatter sorting", () => runFrontmatterSort(this.plugin, typ, subtyp)))
+    );
+    menu.showAtMouseEvent(event);
+  }
+
+  // "Rename" and "Rename and update notes" of both context menus. The latter
+  // in accent color like its button in the detail view
+  // (.typ-detail-rename-notes): it also rewrites notes. MenuItem has no API
+  // for a color, so the class goes on its element (item.dom, which
+  // setWarning() styles the same way).
+  addRenameItems(menu, startRename) {
+    menu.addItem((item) =>
+      item
+        .setTitle("Rename")
+        .setIcon("pencil")
+        .onClick(() => startRename({}))
+    );
+    menu.addItem((item) => {
+      item
+        .setTitle("Rename and update notes")
+        .setIcon("pencil")
+        .onClick(() => startRename({ updateNotes: true }));
+      item.dom?.addClass("typ-menu-accent");
+    });
+  }
+
   // A real input, so the description can be edited right in the list. Its
   // click must NOT trigger the row (which would open the detail view).
   renderDescriptionInput(self, typ) {
@@ -894,7 +981,7 @@ class TypPane extends ItemView {
   }
 
   // "(Subtyp 1, Subtyp 2)" instead of the description - the same look as the
-  // preview in the separate TYP-Picker (shared nameColor in typ-colors.js):
+  // preview in the two-step TYP-Picker (shared nameColor in typ-colors.js):
   // brackets and commas muted, each name in its Subtyp color. Only registered
   // Subtyps and no counts - unregistered values have no color, and counts
   // would make the row unreadable. Display only; click and right-click belong
@@ -913,6 +1000,42 @@ class TypPane extends ItemView {
       if (colorize) span.style.color = nameColor(this.plugin.settings, typ, subtyp).color;
     });
     wrap.appendText(")");
+  }
+
+  // A registered Subtyp in mode "Subtyps as rows", below its TYP row and
+  // inside its tree-item (see renderRegisteredItem): "TYP / Subtyp", the TYP
+  // part faint, the Subtyp part in its color (see subtypRowColor), plus its
+  // note count. No dot: an invisible one keeps the text in line with the TYP
+  // names above (.typ-color-spacer). Every registered Subtyp shows, manually
+  // creatable or not, in block order. A click opens the TYP's detail view at
+  // this Subtyp's block, right-click its own menu (showSubtypMenu).
+  renderSubtypItem(treeItem, typ, subtyp, count) {
+    const self = treeItem.createDiv({ cls: "tree-item-self is-clickable typ-subtyp-row" });
+    self.createDiv({ cls: "typ-color-wrap typ-color-spacer" });
+    const inner = self.createDiv({ cls: "tree-item-inner" });
+    appendSubtypPathPrefix(inner, typ);
+    const nameEl = inner.createSpan({ cls: "typ-subtyp-row-name", text: subtyp });
+    const color = subtypRowColor(this.plugin.settings, typ, subtyp);
+    if (color) nameEl.style.color = color;
+
+    this.renderCountFlair(self, count);
+
+    self.addEventListener("click", () => {
+      if (this.isEditing) return;
+      this.openTypSettings(typ, subtyp);
+    });
+    this.attachSubtypMenu(self, typ, subtyp, (options) => this.startListSubtypRename(typ, subtyp, self, nameEl, options));
+  }
+
+  // Opens showSubtypMenu on right-click (on touch: long press) on el. While a
+  // name is being edited, the text field's own menu (copy, paste) applies.
+  attachSubtypMenu(el, typ, subtyp, startRename) {
+    el.addEventListener("contextmenu", (event) => {
+      if (this.isEditing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.showSubtypMenu(event, typ, subtyp, startRename);
+    });
   }
 
   renderUnregisteredItem(typ, count) {
@@ -956,10 +1079,12 @@ class TypPane extends ItemView {
 
   // "NOTIZ / Kurz Geschichte" - the Subtyp alone would be ambiguous, the same
   // name can exist under several TYP entries. If the TYP is registered, its
-  // part carries its color (or a dot, depending on "TYP-Pane" coloring),
-  // toned down by the Style Setting "Color in unregistered Subtyp rows" so
-  // these rows stay behind the registered entries above. If the TYP isn't
-  // registered either, the whole row is muted like the entries above it.
+  // part carries its color (or a dot, depending on "TYP-Pane and -Picker"
+  // coloring), toned down by the Style Setting "Color in unregistered Subtyp
+  // rows" so these rows stay behind the registered entries above. If the TYP
+  // isn't registered either, the whole row is muted like the entries above
+  // it. The separator is the same Style Setting as in the registered Subtyp
+  // rows (.typ-subtyp-sep).
   renderUnregisteredSubtypItem({ typ, subtyp, count, typRegistered }) {
     const treeItem = this.listEl.createDiv({ cls: "tree-item" });
     const self = treeItem.createDiv({ cls: "tree-item-self is-clickable typ-unregistered" });
@@ -977,7 +1102,7 @@ class TypPane extends ItemView {
       typEl.style.color = color;
       typEl.addClass("typ-unregistered-subtyp-color");
     }
-    inner.createSpan({ cls: "typ-unregistered-subtyp-slash", text: " / " });
+    inner.createSpan({ cls: "typ-subtyp-sep typ-unregistered-subtyp-slash" });
     inner.createSpan({ text: displayTypKey(subtyp) });
 
     this.renderCountFlair(self, count);
@@ -1146,6 +1271,12 @@ class TypPane extends ItemView {
     const count = section === null ? bucket.noSubtyp : bucket.counts.get(section) ?? 0;
     titleGroup.createSpan({ cls: "typ-subtyp-count", text: String(count) });
     this.makeSearchable(titleEl, () => this.openSubtypSearch(typ, section));
+    // The Subtyp's context menu, as on its row in the list; the footer has it
+    // too (see renderSectionFooter). Not the property rows in between, which
+    // have Obsidian's own menu.
+    if (section !== null) {
+      this.attachSubtypMenu(el, typ, section, (options) => this.startSubtypRename(typ, section, titleEl, options));
+    }
 
     // Floating properties share the list and order of the others (which
     // frontmatter sorting relies on), so they land wherever drag & drop puts
@@ -1214,6 +1345,7 @@ class TypPane extends ItemView {
       const target = titleEl();
       if (target) this.startSubtypRename(typ, subtyp, target, { updateNotes });
     };
+    this.attachSubtypMenu(el, typ, subtyp, ({ updateNotes = false }) => rename(updateNotes));
 
     const renameWithNotesBtn = actions.createDiv({
       cls: "clickable-icon typ-detail-rename-notes",
@@ -1410,6 +1542,16 @@ class TypPane extends ItemView {
       // The title sits among Obsidian's property editors, whose keyboard
       // navigation would react too.
       stopAllKeys: true,
+      onFinish: (commit, text) =>
+        commit ? this.commitSubtypRename(typ, subtyp, text, { updateNotes }) : this.render(),
+    });
+  }
+
+  // The same from a Subtyp row's context menu: only the Subtyp part of the row
+  // becomes the input (the TYP part stays as it is).
+  startListSubtypRename(typ, subtyp, self, nameEl, { updateNotes = false } = {}) {
+    this.startInlineEdit(nameEl, {
+      classEl: self,
       onFinish: (commit, text) =>
         commit ? this.commitSubtypRename(typ, subtyp, text, { updateNotes }) : this.render(),
     });
@@ -1946,4 +2088,12 @@ async function addTypPropertyCommand(plugin) {
   view.frontmatterBlocks?.addBlank(null);
 }
 
-module.exports = { registerTypPane, VIEW_TYPE_TYP_PANE, compareTyps, sortTypsByMode, DEFAULT_SORT_ORDER, DEFAULT_TYP_COLOR };
+module.exports = {
+  registerTypPane,
+  VIEW_TYPE_TYP_PANE,
+  compareTyps,
+  sortTypsByMode,
+  subtypListMode,
+  DEFAULT_SORT_ORDER,
+  DEFAULT_TYP_COLOR,
+};

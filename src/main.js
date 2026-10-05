@@ -6,7 +6,7 @@ const { TypIndex, setCanonicalProperty, deleteProperty, TYP_PROPERTY, SUBTYP_PRO
 const { getSubtyp, getSubtypNames, isSubtypManual } = require("./subtyps");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
-const { registerSearchColors } = require("./search-colors");
+const { registerSearchColors, registerQueryBlockColors } = require("./search-colors");
 const { registerRecentFilesColors } = require("./recent-files-colors");
 const { registerBacklinkColors } = require("./backlink-colors");
 const { registerBookmarksColors } = require("./bookmark-colors");
@@ -80,6 +80,7 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerFileExplorerColors(this),
       registerGraphColors(this),
       registerSearchColors(this),
+      registerQueryBlockColors(this),
       registerRecentFilesColors(this),
       registerBacklinkColors(this),
       registerBookmarksColors(this),

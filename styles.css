@@ -39,6 +39,20 @@ settings:
   display: none !important;
 }
 
+/* Query blocks in notes announce themselves while "Search" coloring is on
+   (see watchEmbeds in note-embeds.js): the animation starts, and fires
+   "animationstart", whenever a block is inserted or shown. The keyframes are
+   empty, so nothing visible changes. Only on .internal-query, which has no
+   animation of its own - its result container carries Obsidian's
+   node-inserted animation, which must not be overridden. */
+@keyframes typ-embed-inserted {
+}
+
+body.typ-watch-query-blocks .internal-query {
+  animation-duration: 0.01s;
+  animation-name: typ-embed-inserted;
+}
+
 /* Stacks the extra badge toggles (see display in settings.js) instead of
    Obsidian's side-by-side flex row for several controls in one setting. */
 .typ-note-title-setting .setting-item-control {

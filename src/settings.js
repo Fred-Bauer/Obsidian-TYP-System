@@ -210,7 +210,7 @@ class TypSystemSettingTab extends PluginSettingTab {
 
     colorViewToggle(coloringGroup, "fileExplorer", "File explorer", "Color note names in the file explorer.", "fileExplorerSubtyp");
     colorViewToggle(coloringGroup, "graph", "Graph", "Color nodes in the global and local graph.", "graphSubtyp");
-    colorViewToggle(coloringGroup, "search", "Search", "Color result titles in search.", "searchSubtyp");
+    colorViewToggle(coloringGroup, "search", "Search", "Color result titles in search and in query blocks in notes.", "searchSubtyp");
     colorViewToggle(coloringGroup, "recentFiles", "Recent Files", "Color entries in the Recent Files plugin.", "recentFilesSubtyp");
     colorViewToggle(
       coloringGroup,

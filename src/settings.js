@@ -235,6 +235,125 @@ class TypSystemSettingTab extends PluginSettingTab {
         if (this.plugin.settings.colorViews[key]) addRow("Subtyp", subtypTooltip, subtypKey);
       });
 
+    // Limits of the sliders a Subtyp derives its color with (dot at the bottom
+    // of a Subtyp block, see typ-colors.js). A larger stored offset is clamped
+    // to the new limit.
+    const subtypColorGroup = new SettingGroup(containerEl).setHeading("Subtyp colors");
+    const rangeMax = { h: 180, /* s: 100, */ l: 100 };
+    const rangeDesc = {
+      h: "Maximum hue difference between a Subtyp and its TYP.",
+      // s: "Maximum share by which a Subtyp may be paler than its TYP. Only goes down - a Subtyp shouldn't be louder than its TYP.",
+      l: "Maximum lightness difference between a Subtyp and its TYP, as a share of the way to white or black.",
+    };
+    // The slider reports every step; the other views only follow once it rests.
+    const refreshColorsSoon = debounce(() => this.plugin.refreshTypColors?.(), 300, true);
+    for (const { key, label, unit, downOnly } of SUBTYP_COLOR_CHANNELS) {
+      subtypColorGroup.addSetting((setting) =>
+        setting
+          .setName(`${label} (${downOnly ? "−" : "±"} ${unit})`)
+          .setDesc(rangeDesc[key])
+          .addSlider((slider) =>
+            slider
+              .setLimits(0, rangeMax[key], 1)
+              .setValue(colorRange(this.plugin.settings, key))
+              .setDynamicTooltip()
+              .onChange(async (value) => {
+                this.plugin.settings.subtypColorRanges = { ...DEFAULT_SUBTYP_COLOR_RANGES, ...this.plugin.settings.subtypColorRanges, [key]: value };
+                await this.plugin.saveSettings();
+                refreshColorsSoon();
+              })
+          )
+          .addExtraButton((button) =>
+            button
+              .setIcon("rotate-ccw")
+              .setTooltip(`Reset to ${DEFAULT_SUBTYP_COLOR_RANGES[key]}`)
+              .onClick(async () => {
+                this.plugin.settings.subtypColorRanges = { ...DEFAULT_SUBTYP_COLOR_RANGES, ...this.plugin.settings.subtypColorRanges, [key]: DEFAULT_SUBTYP_COLOR_RANGES[key] };
+                await this.plugin.saveSettings();
+                this.plugin.refreshTypColors?.();
+                this.display();
+              })
+          )
+      );
+    }
+
+    // Group "Graph" (tag/attachment colors) disabled (2026-09-30): the Minimal
+    // theme's Style Settings cover both, see graph-colors.js. Coloring note
+    // nodes by TYP stays, under "Coloring" → "Graph".
+    //     const graphGroup = new SettingGroup(containerEl).setHeading("Graph");
+    //
+    //     // One setting per node kind the graph engine knows, same layout
+    //     // (toggle + color picker + reset) for each.
+    //     const graphColorSetting = (enabledKey, colorKey, defaultColor, name, desc) =>
+    //       graphGroup.addSetting((setting) =>
+    //         setting
+    //           .setName(name)
+    //           .setDesc(desc)
+    //           .addToggle((toggle) =>
+    //             toggle.setValue(this.plugin.settings[enabledKey]).onChange(async (value) => {
+    //               this.plugin.settings[enabledKey] = value;
+    //               await this.plugin.saveSettings();
+    //               this.plugin.refreshTypColors?.();
+    //             })
+    //           )
+    //           .addColorPicker((picker) =>
+    //             picker.setValue(this.plugin.settings[colorKey] || defaultColor).onChange(async (value) => {
+    //               this.plugin.settings[colorKey] = value;
+    //               await this.plugin.saveSettings();
+    //               this.plugin.refreshTypColors?.();
+    //             })
+    //           )
+    //           .addExtraButton((button) =>
+    //             button
+    //               .setIcon("rotate-ccw")
+    //               .setTooltip("Reset to default color")
+    //               .onClick(async () => {
+    //                 this.plugin.settings[colorKey] = "";
+    //                 await this.plugin.saveSettings();
+    //                 this.plugin.refreshTypColors?.();
+    //                 this.display();
+    //               })
+    //           )
+    //       );
+    //
+    //     graphColorSetting(
+    //       "graphTagColorEnabled",
+    //       "graphTagColor",
+    //       "#888888",
+    //       "Tag color",
+    //       "Own color for tag nodes in the global and local graph. Color groups still take precedence."
+    //     );
+    //     graphColorSetting(
+    //       "graphAttachmentColorEnabled",
+    //       "graphAttachmentColor",
+    //       "#e0ac00",
+    //       "Attachment color",
+    //       "Own color for attachment nodes (non-markdown files such as images or PDFs) in the graph."
+    //     );
+
+    const frontmatterGroup = new SettingGroup(containerEl).setHeading("TYP-Frontmatter");
+
+    colorViewToggle(
+      frontmatterGroup,
+      "frontmatterDefaults",
+      "Bold TYP properties",
+      "Show TYP-Frontmatter property names in bold in notes and the properties sidebar. With Subtyp, the note's Subtyp block counts as well.",
+      "frontmatterDefaultsSubtyp",
+      { typTooltip: "TYP-Frontmatter", subtypTooltip: "Include Subtyp blocks" }
+    );
+
+    // The order editor brings its own heading and buttons, so it goes straight
+    // into infoEl instead of setName/setDesc (see .typ-order-setting).
+    frontmatterGroup.addSetting((setting) => {
+      setting.settingEl.addClass("typ-order-setting");
+      mountGlobalOrderEditor(setting.infoEl, this.plugin);
+      setting.infoEl.createDiv({
+        cls: "setting-item-description",
+        text:
+          'Order applied by the "Sort frontmatter" commands; values are never changed. Pin single properties such as cssclasses or aliases. Drag to reorder; hover a placeholder row for what it stands for. Placeholder rows can\'t be removed.',
+      });
+    });
+
     const coloringGroup = new SettingGroup(containerEl).setHeading("Coloring");
 
     colorViewToggle(coloringGroup, "fileExplorer", "File explorer", "Color note names in the file explorer.", "fileExplorerSubtyp");
@@ -452,125 +571,6 @@ class TypSystemSettingTab extends PluginSettingTab {
       "allPropertiesSubtyp",
       { typTooltip: "TYP-Frontmatter", subtypTooltip: "Include Subtyp blocks, in Subtyp color" }
     );
-
-    // Limits of the sliders a Subtyp derives its color with (dot at the bottom
-    // of a Subtyp block, see typ-colors.js). A larger stored offset is clamped
-    // to the new limit.
-    const subtypColorGroup = new SettingGroup(containerEl).setHeading("Subtyp colors");
-    const rangeMax = { h: 180, /* s: 100, */ l: 100 };
-    const rangeDesc = {
-      h: "Maximum hue difference between a Subtyp and its TYP.",
-      // s: "Maximum share by which a Subtyp may be paler than its TYP. Only goes down - a Subtyp shouldn't be louder than its TYP.",
-      l: "Maximum lightness difference between a Subtyp and its TYP, as a share of the way to white or black.",
-    };
-    // The slider reports every step; the other views only follow once it rests.
-    const refreshColorsSoon = debounce(() => this.plugin.refreshTypColors?.(), 300, true);
-    for (const { key, label, unit, downOnly } of SUBTYP_COLOR_CHANNELS) {
-      subtypColorGroup.addSetting((setting) =>
-        setting
-          .setName(`${label} (${downOnly ? "−" : "±"} ${unit})`)
-          .setDesc(rangeDesc[key])
-          .addSlider((slider) =>
-            slider
-              .setLimits(0, rangeMax[key], 1)
-              .setValue(colorRange(this.plugin.settings, key))
-              .setDynamicTooltip()
-              .onChange(async (value) => {
-                this.plugin.settings.subtypColorRanges = { ...DEFAULT_SUBTYP_COLOR_RANGES, ...this.plugin.settings.subtypColorRanges, [key]: value };
-                await this.plugin.saveSettings();
-                refreshColorsSoon();
-              })
-          )
-          .addExtraButton((button) =>
-            button
-              .setIcon("rotate-ccw")
-              .setTooltip(`Reset to ${DEFAULT_SUBTYP_COLOR_RANGES[key]}`)
-              .onClick(async () => {
-                this.plugin.settings.subtypColorRanges = { ...DEFAULT_SUBTYP_COLOR_RANGES, ...this.plugin.settings.subtypColorRanges, [key]: DEFAULT_SUBTYP_COLOR_RANGES[key] };
-                await this.plugin.saveSettings();
-                this.plugin.refreshTypColors?.();
-                this.display();
-              })
-          )
-      );
-    }
-
-    // Group "Graph" (tag/attachment colors) disabled (2026-09-30): the Minimal
-    // theme's Style Settings cover both, see graph-colors.js. Coloring note
-    // nodes by TYP stays, under "Coloring" → "Graph".
-    //     const graphGroup = new SettingGroup(containerEl).setHeading("Graph");
-    //
-    //     // One setting per node kind the graph engine knows, same layout
-    //     // (toggle + color picker + reset) for each.
-    //     const graphColorSetting = (enabledKey, colorKey, defaultColor, name, desc) =>
-    //       graphGroup.addSetting((setting) =>
-    //         setting
-    //           .setName(name)
-    //           .setDesc(desc)
-    //           .addToggle((toggle) =>
-    //             toggle.setValue(this.plugin.settings[enabledKey]).onChange(async (value) => {
-    //               this.plugin.settings[enabledKey] = value;
-    //               await this.plugin.saveSettings();
-    //               this.plugin.refreshTypColors?.();
-    //             })
-    //           )
-    //           .addColorPicker((picker) =>
-    //             picker.setValue(this.plugin.settings[colorKey] || defaultColor).onChange(async (value) => {
-    //               this.plugin.settings[colorKey] = value;
-    //               await this.plugin.saveSettings();
-    //               this.plugin.refreshTypColors?.();
-    //             })
-    //           )
-    //           .addExtraButton((button) =>
-    //             button
-    //               .setIcon("rotate-ccw")
-    //               .setTooltip("Reset to default color")
-    //               .onClick(async () => {
-    //                 this.plugin.settings[colorKey] = "";
-    //                 await this.plugin.saveSettings();
-    //                 this.plugin.refreshTypColors?.();
-    //                 this.display();
-    //               })
-    //           )
-    //       );
-    //
-    //     graphColorSetting(
-    //       "graphTagColorEnabled",
-    //       "graphTagColor",
-    //       "#888888",
-    //       "Tag color",
-    //       "Own color for tag nodes in the global and local graph. Color groups still take precedence."
-    //     );
-    //     graphColorSetting(
-    //       "graphAttachmentColorEnabled",
-    //       "graphAttachmentColor",
-    //       "#e0ac00",
-    //       "Attachment color",
-    //       "Own color for attachment nodes (non-markdown files such as images or PDFs) in the graph."
-    //     );
-
-    const frontmatterGroup = new SettingGroup(containerEl).setHeading("TYP-Frontmatter");
-
-    colorViewToggle(
-      frontmatterGroup,
-      "frontmatterDefaults",
-      "Bold TYP properties",
-      "Show TYP-Frontmatter property names in bold in notes and the properties sidebar. With Subtyp, the note's Subtyp block counts as well.",
-      "frontmatterDefaultsSubtyp",
-      { typTooltip: "TYP-Frontmatter", subtypTooltip: "Include Subtyp blocks" }
-    );
-
-    // The order editor brings its own heading and buttons, so it goes straight
-    // into infoEl instead of setName/setDesc (see .typ-order-setting).
-    frontmatterGroup.addSetting((setting) => {
-      setting.settingEl.addClass("typ-order-setting");
-      mountGlobalOrderEditor(setting.infoEl, this.plugin);
-      setting.infoEl.createDiv({
-        cls: "setting-item-description",
-        text:
-          'Order applied by the "Sort frontmatter" commands; values are never changed. Pin single properties such as cssclasses or aliases. Drag to reorder; hover a placeholder row for what it stands for. Placeholder rows can\'t be removed.',
-      });
-    });
 
     containerEl.scrollTop = scrollTop;
   }

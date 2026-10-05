@@ -10,6 +10,7 @@ const { registerSearchColors, registerQueryBlockColors } = require("./search-col
 const { registerBasesColors } = require("./bases-colors");
 const { registerRecentFilesColors } = require("./recent-files-colors");
 const { registerBacklinkColors } = require("./backlink-colors");
+const { registerOutgoingLinkColors } = require("./outgoing-link-colors");
 const { registerBookmarksColors } = require("./bookmark-colors");
 const { registerActiveTitleColors } = require("./active-title-colors");
 const { registerLinkColors } = require("./link-colors");
@@ -86,6 +87,7 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerBasesColors(this),
       registerRecentFilesColors(this),
       registerBacklinkColors(this),
+      registerOutgoingLinkColors(this),
       registerBookmarksColors(this),
       registerActiveTitleColors(this),
       registerLinkColors(this),

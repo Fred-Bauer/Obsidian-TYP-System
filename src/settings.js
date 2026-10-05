@@ -68,6 +68,7 @@ const DEFAULT_SETTINGS = {
     search: true,
     recentFiles: true,
     backlinks: true,
+    outgoingLinks: true,
     bookmarks: true,
     // Bases: file names; the two sub-rows below it color links in values and
     // group headings (see bases-colors.js).
@@ -81,6 +82,7 @@ const DEFAULT_SETTINGS = {
     searchSubtyp: true,
     recentFilesSubtyp: true,
     backlinksSubtyp: true,
+    outgoingLinksSubtyp: true,
     bookmarksSubtyp: true,
     basesSubtyp: true,
     basesLinksSubtyp: true,
@@ -382,6 +384,13 @@ class TypSystemSettingTab extends PluginSettingTab {
       "Backlinks",
       "Color results in the backlinks pane and in embedded backlinks, including unlinked mentions.",
       "backlinksSubtyp"
+    );
+    colorViewToggle(
+      coloringGroup,
+      "outgoingLinks",
+      "Outgoing links",
+      "Color links in the outgoing links pane and the notes named in its unlinked mentions.",
+      "outgoingLinksSubtyp"
     );
     colorViewToggle(coloringGroup, "bookmarks", "Bookmarks", "Color bookmarks that point directly to a note.", "bookmarksSubtyp");
     colorViewToggle(

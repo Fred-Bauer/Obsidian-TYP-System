@@ -7,6 +7,7 @@ const { getSubtyp, getSubtypNames, isSubtypManual } = require("./subtyps");
 const { registerFileExplorerColors } = require("./file-explorer-colors");
 const { registerGraphColors } = require("./graph-colors");
 const { registerSearchColors, registerQueryBlockColors } = require("./search-colors");
+const { registerBasesColors } = require("./bases-colors");
 const { registerRecentFilesColors } = require("./recent-files-colors");
 const { registerBacklinkColors } = require("./backlink-colors");
 const { registerBookmarksColors } = require("./bookmark-colors");
@@ -35,7 +36,7 @@ module.exports = class TypSystemPlugin extends Plugin {
     await this.loadSettings(data);
 
     // Disabling the plugin takes its inline colors out of the explorer,
-    // search, Recent Files, backlinks, bookmarks, note titles and "All
+    // search, Bases, Recent Files, backlinks, bookmarks, note titles and "All
     // properties" (see setInlineColor in typ-colors.js); those views would
     // keep them until they happen to re-render. Registered first so it runs
     // last on unload, after the modules have stopped observing and listening
@@ -81,6 +82,7 @@ module.exports = class TypSystemPlugin extends Plugin {
       registerGraphColors(this),
       registerSearchColors(this),
       registerQueryBlockColors(this),
+      registerBasesColors(this),
       registerRecentFilesColors(this),
       registerBacklinkColors(this),
       registerBookmarksColors(this),

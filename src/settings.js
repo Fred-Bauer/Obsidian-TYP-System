@@ -69,6 +69,11 @@ const DEFAULT_SETTINGS = {
     recentFiles: true,
     backlinks: true,
     bookmarks: true,
+    // Bases: file names; the two sub-rows below it color links in values and
+    // group headings (see bases-colors.js).
+    bases: true,
+    basesLinks: true,
+    basesGroupHeadings: true,
     // "<view>Subtyp" sub-toggles: use a note's Subtyp color instead of its
     // TYP's (see colorForFile in typ-colors.js).
     fileExplorerSubtyp: true,
@@ -77,6 +82,9 @@ const DEFAULT_SETTINGS = {
     recentFilesSubtyp: true,
     backlinksSubtyp: true,
     bookmarksSubtyp: true,
+    basesSubtyp: true,
+    basesLinksSubtyp: true,
+    basesGroupHeadingsSubtyp: true,
     linksSubtyp: true,
     typListSubtyp: true,
     noteTitleColorSubtyp: true,
@@ -211,6 +219,31 @@ class TypSystemSettingTab extends PluginSettingTab {
     colorViewToggle(coloringGroup, "fileExplorer", "File explorer", "Color note names in the file explorer.", "fileExplorerSubtyp");
     colorViewToggle(coloringGroup, "graph", "Graph", "Color nodes in the global and local graph.", "graphSubtyp");
     colorViewToggle(coloringGroup, "search", "Search", "Color result titles in search and in query blocks in notes.", "searchSubtyp");
+    colorViewToggle(
+      coloringGroup,
+      "bases",
+      "Bases",
+      "Color note names in Bases (table, cards, list), in .base files and embedded in notes.",
+      "basesSubtyp"
+    );
+    if (this.plugin.settings.colorViews.bases) {
+      colorViewToggle(
+        coloringGroup,
+        "basesLinks",
+        "Bases links",
+        "Color links in values: link properties, file.links, backlinks, embeds and formulas.",
+        "basesLinksSubtyp",
+        { nested: true }
+      );
+      colorViewToggle(
+        coloringGroup,
+        "basesGroupHeadings",
+        "Bases group headings",
+        "Color group headings that link to a note.",
+        "basesGroupHeadingsSubtyp",
+        { nested: true }
+      );
+    }
     colorViewToggle(coloringGroup, "recentFiles", "Recent Files", "Color entries in the Recent Files plugin.", "recentFilesSubtyp");
     colorViewToggle(
       coloringGroup,

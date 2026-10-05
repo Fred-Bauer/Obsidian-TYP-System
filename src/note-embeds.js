@@ -1,10 +1,10 @@
 const { allDocuments } = require("./typ-colors");
 
-// Finds blocks Obsidian renders into notes (query blocks) wherever they show
-// up: reading view, Live Preview, embedded notes, hover previews, canvas cards,
-// pop-out windows. Nothing watches the notes themselves - a subtree observer
-// near the editor once froze this vault - so a note without such a block costs
-// nothing, typing included.
+// Finds blocks Obsidian renders into notes (query blocks, bases) wherever they
+// show up: reading view, Live Preview, embedded notes, hover previews, canvas
+// cards, pop-out windows. Nothing watches the notes themselves - a subtree
+// observer near the editor once froze this vault - so a note without such a
+// block costs nothing, typing included.
 //
 // The blocks announce themselves instead. While a watcher runs, its class sits
 // on the body of every window, and styles.css gives the watched blocks an empty

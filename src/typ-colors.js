@@ -268,12 +268,12 @@ function colorForFile(plugin, file, viewKey = null) {
 }
 
 // --- Inline colors in other views -------------------------------------------
-// Explorer, search (pane and query blocks in notes), Recent Files, backlinks,
-// bookmarks, the note title and "All properties" are colored through
-// style.color on Obsidian's own elements. Those views only re-render now and
-// then, so the colors would stay after the plugin is disabled. Every element
-// colored this way is marked, and on unload exactly the marked ones are
-// cleared - never an inline color some other plugin or theme put there.
+// Explorer, search (pane and query blocks in notes), Bases, Recent Files,
+// backlinks, bookmarks, the note title and "All properties" are colored
+// through style.color on Obsidian's own elements. Those views only re-render
+// now and then, so the colors would stay after the plugin is disabled. Every
+// element colored this way is marked, and on unload exactly the marked ones
+// are cleared - never an inline color some other plugin or theme put there.
 const COLORED_ATTR = "data-typ-colored";
 
 // color null/"" removes the color, but only from an element we colored.

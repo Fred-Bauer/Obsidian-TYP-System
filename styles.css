@@ -53,6 +53,16 @@ body.typ-watch-query-blocks .internal-query {
   animation-name: typ-embed-inserted;
 }
 
+/* Bases announce themselves the same way while "Bases" coloring is on (see
+   bases-colors.js): an embedded base by its .bases-embed, a .base file's tab
+   by its .view-content. Not on .bases-view, which carries Obsidian's own
+   node-inserted animation. */
+body.typ-watch-bases .bases-embed,
+body.typ-watch-bases .workspace-leaf-content[data-type="bases"] > .view-content {
+  animation-duration: 0.01s;
+  animation-name: typ-embed-inserted;
+}
+
 /* Stacks the extra badge toggles (see display in settings.js) instead of
    Obsidian's side-by-side flex row for several controls in one setting. */
 .typ-note-title-setting .setting-item-control {

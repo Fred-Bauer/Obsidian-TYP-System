@@ -179,6 +179,53 @@ function cutBlock(block, whole) {
   return { header, units, footer };
 }
 
+// "Still to be filled" in a note: isEmptyValue of subtyps.js (which can't be
+// required here - it requires this file), plus the empty list an emptied list
+// property leaves behind.
+function isBlankValue(value) {
+  return value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+// What rename(oldName, newName) does to a block with these keys - shared by
+// TextDoc and ObjectDoc. Every spelling of oldName and, if it differs in more
+// than case, of newName form one group that ends up as a single property
+// newName. The member holding the value stays (a newName one first, otherwise
+// the first oldName one; with only empty values the same order), so the value
+// is never written anew; the other members go. Returns null if there is
+// nothing to do, "conflict" if two members hold different non-empty values
+// (nothing may get lost), else { kept, dropped }.
+function planRename(keys, get, oldName, newName) {
+  const oldLower = oldName.toLowerCase();
+  const newLower = newName.toLowerCase();
+  const sources = keys.filter((key) => key.toLowerCase() === oldLower);
+  if (sources.length === 0) return null;
+  const targets = newLower === oldLower ? [] : keys.filter((key) => key.toLowerCase() === newLower);
+  const group = [...targets, ...sources];
+  const filled = group.filter((key) => !isBlankValue(get(key)));
+  if (filled.some((key) => !sameValue(get(key), get(filled[0])))) return "conflict";
+  const kept = filled[0] ?? group[0];
+  if (group.length === 1 && kept === newName) return null;
+  return { kept, dropped: group.filter((key) => key !== kept) };
+}
+
+// Length of the key part of a key line ("key:", "'a: b':") - the shortest
+// prefix up to a colon that parses to exactly this key - or -1.
+function keyPrefixLength(line, key) {
+  for (let i = line.indexOf(":"); i !== -1; i = line.indexOf(":", i + 1)) {
+    const parsed = tryParse(line.slice(0, i + 1));
+    if (isPlainObject(parsed) && Object.keys(parsed).length === 1 && Object.keys(parsed)[0] === key) return i + 1;
+  }
+  return -1;
+}
+
+// `name` as the serializer writes it as a key, quotes included if needed.
+function keyText(name) {
+  const line = stripEol(splitLines(stringifyYaml({ [name]: null }))[0] ?? "");
+  const length = keyPrefixLength(line, name);
+  if (length < 0) throw new UnsafeEdit();
+  return line.slice(0, length);
+}
+
 // The inline comment of a single-line unit ("   # note", with all the blanks
 // before it, so an aligned comment stays aligned), or "" if there is none: the
 // first `#` after a blank whose left part still parses to the same property.
@@ -282,6 +329,34 @@ class TextDoc {
     this.units = this.units.filter((unit) => unit.key.toLowerCase() !== lower);
   }
 
+  // Renames oldName (any spelling) to newName, see planRename; false on a
+  // conflict, with nothing changed. Only the key of the kept unit changes -
+  // value, inline comment and nested lines stay byte for byte. The comments
+  // above a dropped unit join the kept one (as in set()); a dropped unit with
+  // a comment inside can't go without losing it: UnsafeEdit.
+  rename(oldName, newName) {
+    const plan = planRename(this.keys(), (key) => this.get(key), oldName, newName);
+    if (plan === "conflict") return false;
+    if (plan === null) return true;
+
+    const unitOf = (key) => this.units.find((unit) => unit.key === key);
+    const kept = unitOf(plan.kept);
+    const dropped = plan.dropped.map(unitOf);
+    if (dropped.some((unit) => unit.lines.some(mayHaveComment))) throw new UnsafeEdit();
+    for (const unit of dropped) {
+      kept.leading.push(...unit.leading);
+      this.units.splice(this.units.indexOf(unit), 1);
+    }
+    if (kept.key !== newName) {
+      const [first, ...rest] = kept.lines;
+      const length = keyPrefixLength(first, kept.key);
+      if (length < 0) throw new UnsafeEdit();
+      kept.lines = [keyText(newName) + first.slice(length), ...rest];
+      kept.key = newName;
+    }
+    return true;
+  }
+
   // keys: the new order, a permutation of keys().
   reorder(keys) {
     const byKey = new Map(this.units.map((unit) => [unit.key, unit]));
@@ -358,6 +433,21 @@ class ObjectDoc {
     if (this.findKey(name) === undefined) return;
     deleteProperty(this.object, name);
     this.changed = true;
+  }
+
+  rename(oldName, newName) {
+    const plan = planRename(this.keys(), (key) => this.object[key], oldName, newName);
+    if (plan === "conflict") return false;
+    if (plan === null) return true;
+    const keys = this.keys();
+    const snapshot = { ...this.object };
+    for (const key of keys) delete this.object[key];
+    for (const key of keys) {
+      if (key === plan.kept) this.object[newName] = snapshot[key];
+      else if (!plan.dropped.includes(key)) this.object[key] = snapshot[key];
+    }
+    this.changed = true;
+    return true;
   }
 
   reorder(keys) {

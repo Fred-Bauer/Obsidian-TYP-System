@@ -4,6 +4,7 @@ const { pickShortcut } = require("./shortcut-picker");
 const { getSubtyp, ensureSubtyp } = require("./subtyps");
 const { TYP_PROPERTY, SUBTYP_PROPERTY } = require("./typ-index");
 const { snapshotSettings, offerUndo } = require("./undo");
+const { offerRenameInNotes } = require("./property-rename-notes");
 
 // Marks the TYP-Frontmatter editor's container so the shortcut rules in
 // styles.css apply only here, never in real notes.
@@ -311,8 +312,9 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
       const removedOnly = removedKeys.length > 0 && addedKeys.length === 0;
       const undoSnapshot = removedOnly ? snapshotSettings(view.plugin) : null;
 
+      const isRename = removedKeys.length === 1 && addedKeys.length === 1;
       let floating = store.getFloating();
-      if (removedKeys.length === 1 && addedKeys.length === 1) {
+      if (isRename) {
         // A rename: the floating flag moves along.
         floating = floating.map((key) => (key === removedKeys[0] ? addedKeys[0] : key));
       } else if (removedKeys.length > 0) {
@@ -320,7 +322,7 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
       }
       // Shortcuts belong to the key too: they move on rename and go on delete.
       const shortcuts = { ...store.getShortcuts() };
-      if (removedKeys.length === 1 && addedKeys.length === 1) {
+      if (isRename) {
         if (shortcuts[removedKeys[0]]) {
           shortcuts[addedKeys[0]] = shortcuts[removedKeys[0]];
           delete shortcuts[removedKeys[0]];
@@ -333,6 +335,8 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
       store.setFloating(floating);
       store.setShortcuts(shortcuts);
       view.plugin.saveSettings();
+      // The notes still hold the old name; offer to rename it there too.
+      if (isRename) offerRenameInNotes(view.plugin, store, removedKeys[0], addedKeys[0]);
       if (undoSnapshot) {
         const blockName = store.subtyp ?? store.typ;
         offerUndo(

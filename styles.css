@@ -557,8 +557,9 @@ body.typ-system-subtyps-right .typ-list-subtyps {
   font-weight: 600;
 }
 
-/* "Undo" in the notice after an action without confirmation (undo.js). */
-.typ-undo-button {
+/* A button in a notice: "Undo" after an action without confirmation
+   (undo.js), "Update notes" after a property rename (property-rename-notes.js). */
+.typ-notice-button {
   margin-inline-start: var(--size-4-2);
 }
 

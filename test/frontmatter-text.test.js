@@ -285,3 +285,70 @@ describe("10. misc", () => {
     assert.equal(run("---\nb:\n  - x: 1\n    y: 2\na: 1\n---\n", reorder(["a", "b"])).content, "---\na: 1\nb:\n  - x: 1\n    y: 2\n---\n");
   });
 });
+
+describe("11. rename", () => {
+  // Runs rename and also reports its return value (false = conflict).
+  const rename = (content, oldName, newName) => {
+    let ok;
+    const result = run(content, (d) => { ok = d.rename(oldName, newName); });
+    return { ...result, ok };
+  };
+
+  test("key replaced in place, value and inline comment byte-equal", () => {
+    assert.equal(rename("---\na: 1\nort:   'Berlin'   # c\nb: 2\n---\n", "ort", "Wohnort").content, "---\na: 1\nWohnort:   'Berlin'   # c\nb: 2\n---\n");
+  });
+  test("multi-line value with comment inside stays", () => {
+    assert.equal(rename("---\nort:\n  # inner\n  - a\n  - b\nx: 1\n---\n", "ort", "orte").content, "---\norte:\n  # inner\n  - a\n  - b\nx: 1\n---\n");
+  });
+  test("comment above moves with the key", () => {
+    assert.equal(rename("---\na: 1\n# about ort\nort: x\n---\n", "ort", "Ort").content, "---\na: 1\n# about ort\nOrt: x\n---\n");
+  });
+  test("case-only rename, old spelling matched in any case", () => {
+    assert.equal(rename("---\nORT: x\n---\n", "ort", "Ort").content, "---\nOrt: x\n---\n");
+  });
+  test("already the new name -> unchanged", () => {
+    assert.deepEqual(rename("---\nOrt: x\n---\n", "ort", "Ort"), { status: "unchanged", content: "---\nOrt: x\n---\n", ok: true });
+  });
+  test("old name missing -> unchanged", () => {
+    assert.equal(rename("---\na: 1\n---\n", "ort", "Ort").status, "unchanged");
+  });
+  test("new key needing quotes", () => {
+    assert.equal(rename("---\nort: x\n---\n", "ort", "a: b").content, "---\n\"a: b\": x\n---\n");
+  });
+  test("old key in quotes", () => {
+    assert.equal(rename("---\n'a: b': x # c\n---\n", "a: b", "c").content, "---\nc: x # c\n---\n");
+  });
+  test("CRLF kept", () => {
+    assert.equal(rename("---\r\nort: x\r\nb: 1\r\n---\r\n", "ort", "Ort").content, "---\r\nOrt: x\r\nb: 1\r\n---\r\n");
+  });
+  test("merge: empty target goes, filled source stays in place", () => {
+    assert.equal(rename("---\nWohnort:\nb: 1\nort: x # c\n---\n", "ort", "Wohnort").content, "---\nb: 1\nWohnort: x # c\n---\n");
+  });
+  test("merge: empty source goes, its comment above joins the target", () => {
+    assert.equal(rename("---\nWohnort: x\n# about ort\nort:\n---\n", "ort", "Wohnort").content, "---\n# about ort\nWohnort: x\n---\n");
+  });
+  test("merge: equal values", () => {
+    assert.equal(rename("---\nort: [a, b]\nWohnort: [a, b]\n---\n", "ort", "Wohnort").content, "---\nWohnort: [a, b]\n---\n");
+  });
+  test("merge: empty list counts as empty", () => {
+    assert.equal(rename("---\nWohnort: []\nort: x\n---\n", "ort", "Wohnort").content, "---\nWohnort: x\n---\n");
+  });
+  test("merge: different values -> conflict, nothing written", () => {
+    assert.deepEqual(rename("---\nort: x\nWohnort: y\n---\n", "ort", "Wohnort"), { status: "unchanged", content: "---\nort: x\nWohnort: y\n---\n", ok: false });
+  });
+  test("merge: dropped unit with inline comment -> skipped", () => {
+    assert.equal(rename("---\nWohnort: x\nort: # c\n---\n", "ort", "Wohnort").status, "skipped");
+  });
+  test("merge without comments -> fallback", () => {
+    assert.equal(rename("---\n{Wohnort: x, ort: '', b: 1}\n---\n", "ort", "Wohnort").content, "---\nWohnort: x\nb: 1\n---\n");
+  });
+  test("ObjectDoc rename keeps the order", () => {
+    assert.equal(rename("---\n{a: 1, ort: x, b: 2}\n---\n", "ort", "Ort").content, "---\na: 1\nOrt: x\nb: 2\n---\n");
+  });
+  test("ObjectDoc conflict", () => {
+    assert.deepEqual(rename("---\n{ort: x, Wohnort: y}\n---\n", "ort", "Wohnort").ok, false);
+  });
+  test("BOM", () => {
+    assert.equal(rename("﻿---\nort: x\n---\n", "ort", "Ort").content, "﻿---\nOrt: x\n---\n");
+  });
+});

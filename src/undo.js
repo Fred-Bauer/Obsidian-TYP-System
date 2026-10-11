@@ -32,7 +32,7 @@ function offerUndo(plugin, message, snapshot) {
   const fragment = createFragment((f) => {
     f.appendText(message);
     // Obsidian hides the notice on any click inside it, the button included.
-    const button = f.createEl("button", { cls: "typ-undo-button", text: "Undo" });
+    const button = f.createEl("button", { cls: "typ-notice-button", text: "Undo" });
     button.addEventListener("click", () => undo(plugin, token));
   });
   new Notice(fragment, UNDO_NOTICE_DURATION);

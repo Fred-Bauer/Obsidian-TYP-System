@@ -7799,6 +7799,58 @@ var require_shortcut_scripts = __commonJS({
   }
 });
 
+// src/databridge-integration.js
+var require_databridge_integration = __commonJS({
+  "src/databridge-integration.js"(exports2, module2) {
+    var { propertyValue, TYP_PROPERTY: TYP_PROPERTY2, SUBTYP_PROPERTY: SUBTYP_PROPERTY2 } = require_typ_index();
+    function existingSubtyp(frontmatter) {
+      const value = propertyValue(frontmatter, SUBTYP_PROPERTY2);
+      return typeof value === "string" && value.trim() !== "" ? value : null;
+    }
+    function createDatabridgeIntegration(plugin) {
+      return {
+        id: "typ-system",
+        prepare(frontmatter, ctx) {
+          ctx.state.subtyp = existingSubtyp(frontmatter);
+        },
+        finalize(frontmatter, ctx) {
+          const typ = propertyValue(frontmatter, TYP_PROPERTY2);
+          if (typeof typ !== "string" || typ.trim() === "") return;
+          const touched = ctx.isNew || ctx.changes.some((change) => String(change.key).toLowerCase() === "subtyp");
+          const subtyp = touched ? existingSubtyp(frontmatter) : ctx.state.subtyp ?? null;
+          plugin.applyTypProperties(frontmatter, typ, subtyp);
+          plugin.sortFrontmatter(frontmatter, typ, subtyp);
+        }
+      };
+    }
+    function registerDatabridgeIntegration2(plugin) {
+      const { app } = plugin;
+      let unregister = null;
+      const detach = () => {
+        try {
+          unregister?.();
+        } catch (error) {
+          console.error("TYP-System: removing the Databridge integration failed", error);
+        }
+        unregister = null;
+      };
+      const attach = (api2) => {
+        detach();
+        try {
+          unregister = api2.registerIntegration(createDatabridgeIntegration(plugin));
+        } catch (error) {
+          console.error("TYP-System: registering the Databridge integration failed", error);
+        }
+      };
+      plugin.registerEvent(app.workspace.on("databridge:ready", attach));
+      const api = app.plugins?.plugins?.databridge?.api;
+      if (api) attach(api);
+      plugin.register(detach);
+    }
+    module2.exports = { existingSubtyp, createDatabridgeIntegration, registerDatabridgeIntegration: registerDatabridgeIntegration2 };
+  }
+});
+
 // src/main.js
 var { Plugin } = require("obsidian");
 var { DEFAULT_SETTINGS, TypSystemSettingTab } = require_settings();
@@ -7831,6 +7883,7 @@ var {
 } = require_typ_picker();
 var { registerShortcutScripts } = require_shortcut_scripts();
 var { clearInlineColors, allDocuments } = require_typ_colors();
+var { registerDatabridgeIntegration } = require_databridge_integration();
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
     const data = await this.loadData();
@@ -7873,6 +7926,7 @@ module.exports = class TypSystemPlugin extends Plugin {
     this.refreshTypColors = () => this.refreshTypColorsExcept(null);
     const parseStyleSettings = window.setTimeout(() => this.app.workspace.trigger("parse-style-settings"), 0);
     this.register(() => window.clearTimeout(parseStyleSettings));
+    registerDatabridgeIntegration(this);
   }
   onunload() {
   }

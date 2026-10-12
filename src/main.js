@@ -29,6 +29,7 @@ const {
 } = require("./typ-picker");
 const { registerShortcutScripts } = require("./shortcut-scripts");
 const { clearInlineColors, allDocuments } = require("./typ-colors");
+const { registerDatabridgeIntegration } = require("./databridge-integration");
 
 module.exports = class TypSystemPlugin extends Plugin {
   async onload() {
@@ -117,6 +118,10 @@ module.exports = class TypSystemPlugin extends Plugin {
     // ready and the callback would run at once, just as early.
     const parseStyleSettings = window.setTimeout(() => this.app.workspace.trigger("parse-style-settings"), 0);
     this.register(() => window.clearTimeout(parseStyleSettings));
+
+    // Last: Databridge's writes get TYP/SUBTYP and the sort order through
+    // this plugin's methods, which are all set up by now.
+    registerDatabridgeIntegration(this);
   }
 
   onunload() {}

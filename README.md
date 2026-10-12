@@ -231,6 +231,7 @@ The script uses this API on `app.plugins.plugins["typ-system"]`:
 - `pickSubtyp(typ, query, { includeManualOff, allNotes })` → Subtyp, `""` for the first row ("no Subtyp", with `allNotes` "all notes"), or `null` on ESC
 - `pickTypAndSubtyp({ includeManualOff, includeUnregistered, allNotes })` → `{ typ, subtyp }` or `null`; one picker or two in turn, following the TYP-List's Subtyp display
 - Inside `processFrontMatter`: `applyTypProperties(frontmatter, typ, subtyp)` (canonical spelling, removes SUBTYP if none), `sortFrontmatter(frontmatter, typ, subtyp)`, `placeProperty(frontmatter, key)` (used by Fred's property backlinking). They work on `processFrontMatter`'s object, so comments in that note's frontmatter are lost as with any `processFrontMatter` call (see [Comments and formatting are kept](#comments-and-formatting-are-kept))
+- Databridge needs no call: its writes go through the same two methods automatically, see [Databridge integration](#databridge-integration)
 
 ### Script shortcut convention
 
@@ -240,6 +241,16 @@ Applies to script shortcuts run by the plugin's commands and by TYP.js alike.
 - `after(fn)` queues an action that runs after the frontmatter is written, in order - for side effects like renaming the file (`quelleEditName`)
 - A single return value becomes the property's value; a plain object can also fill other empty properties of the TYP
 - A script isn't run if the property already has a value; a missing or failing script shows a notice and the fallback is used
+
+## Databridge integration
+
+Databridge (a separate plugin) imports data from CSV files into note properties. When it is installed, TYP-System registers itself with it (`src/databridge-integration.js`), so every note Databridge creates or updates is treated like one set up by TYP.js:
+
+- **TYP spelled canonically:** a note whose `TYP` is a single, non-blank value gets `TYP` and `SUBTYP` under their canonical names (a `typ` or `Subtyp` variant is renamed in place)
+- **SUBTYP survives the import:** the Subtyp is the note's, not the import's. Whatever the note had before the write is kept – unless that write set SUBTYP itself (a new note's `create.set`, or a definition that owns SUBTYP), then the new value is used
+- **Sort order:** the frontmatter is sorted as "Set TYP of active note" sorts it (see [Frontmatter sorting](#frontmatter-sorting)), so imported properties land in their TYP-Frontmatter places instead of at the end
+
+Notes without a TYP, or with a list as TYP, are left as Databridge wrote them. No TYP-Frontmatter defaults are added – Databridge writes only the properties its definition lists. Registration follows both plugins: it is renewed whenever Databridge (re)loads (`databridge:ready`) and removed when TYP-System unloads. Tests: `test/databridge-integration.test.js`.
 
 ## Technical notes
 

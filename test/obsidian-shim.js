@@ -1,7 +1,8 @@
 // Stand-in for the "obsidian" module, which only exists inside the app.
-// Covers what src/frontmatter-text.js needs, directly or through
-// src/typ-index.js. The YAML functions match Obsidian 1.13.7: it bundles
-// yaml 2.7.0 (pinned in package.json) and calls it with exactly these options.
+// Covers what src/frontmatter-text.js and src/databridge-integration.js
+// need, directly or through src/typ-index.js. The YAML functions match
+// Obsidian 1.13.7: it bundles yaml 2.7.0 (pinned in package.json) and calls
+// it with exactly these options.
 const YAML = require("yaml");
 
 function parseYaml(text) {

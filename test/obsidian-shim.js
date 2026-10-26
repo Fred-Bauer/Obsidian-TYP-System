@@ -1,5 +1,5 @@
 // Stand-in for the "obsidian" module, which only exists inside the app.
-// Covers what src/frontmatter-text.js and src/databridge-integration.js
+// Covers what src/frontmatter-text.js, src/databridge-integration.js and src/set-typ.js
 // need, directly or through src/typ-index.js. The YAML functions match
 // Obsidian 1.13.7: it bundles yaml 2.7.0 (pinned in package.json) and calls
 // it with exactly these options.
@@ -35,4 +35,17 @@ class Events {}
 class TFile {}
 const debounce = (fn) => fn;
 
-module.exports = { parseYaml, stringifyYaml, getFrontMatterInfo, Events, TFile, debounce };
+// For src/set-typ.js: Notice records its messages (Notice.messages, reset by
+// the tests); the rest is only referenced at load time by its imports
+// (confirm-modal.js, typ-colors.js).
+class Notice {
+  constructor(message) {
+    Notice.messages.push(message);
+  }
+}
+Notice.messages = [];
+class ConfirmationModal {}
+const Platform = {};
+const getLinkpath = (link) => link;
+
+module.exports = { parseYaml, stringifyYaml, getFrontMatterInfo, Events, TFile, debounce, Notice, ConfirmationModal, Platform, getLinkpath };

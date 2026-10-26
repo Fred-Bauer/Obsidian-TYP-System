@@ -2691,10 +2691,11 @@ var require_set_typ = __commonJS({
     async function openTemplaterRun(app, file) {
       const templater = templaterOf(app);
       if (!templater) return null;
-      templater.start_templater_task(file.path);
+      const path = file.path;
+      templater.start_templater_task(path);
       const end = async () => {
         try {
-          await templater.end_templater_task(file.path);
+          await templater.end_templater_task(path);
         } catch (error) {
           console.error("TYP-System: couldn't end the Templater run", error);
         }
@@ -2816,12 +2817,13 @@ var require_set_typ = __commonJS({
       }
     }
     var typLabel = (typ, subtyp) => subtyp ? `${typ} / ${subtyp}` : typ;
+    var skippedNotice = (file) => new Notice(`TYP of "${file.basename}" couldn't be set without losing comments in its frontmatter.`);
     async function setTypOfActiveNote(plugin, file) {
       const choice = await plugin.pickTypAndSubtyp({ includeManualOff: false });
       if (!choice) return;
       const status = await setTypOfFile(plugin, file, choice);
       if (status === "skipped") {
-        new Notice(`TYP of "${file.basename}" couldn't be set without losing comments in its frontmatter.`);
+        skippedNotice(file);
       } else {
         new Notice(`TYP of "${file.basename}" set to ${typLabel(choice.typ, choice.subtyp)}.`);
       }
@@ -2845,13 +2847,16 @@ var require_set_typ = __commonJS({
         if (choice.subtyp) doc.set(SUBTYP_PROPERTY2, choice.subtyp);
       }).content;
       const file = await createUntitledNote(app, folder, initial);
+      const createdPath = file.path;
       try {
-        await setTypOfFile(plugin, file, choice);
+        const status = await setTypOfFile(plugin, file, choice);
+        if (status === "skipped") skippedNotice(file);
       } finally {
-        await app.workspace.getLeaf("tab").openFile(file, { active: true, state: { mode: "source" }, eState: { rename: "all" } });
+        const rename = file.path === createdPath ? { eState: { rename: "all" } } : {};
+        await app.workspace.getLeaf("tab").openFile(file, { active: true, state: { mode: "source" }, ...rename });
       }
     }
-    module2.exports = { setTypOfFile, setTypOfActiveNote, createNoteWithTyp };
+    module2.exports = { setTypOfFile, setTypOfActiveNote, createNoteWithTyp, __test: { openTemplaterRun } };
   }
 });
 

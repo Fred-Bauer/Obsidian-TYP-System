@@ -62,13 +62,19 @@ function templaterOf(app) {
 
 // Resolves to { tp, end } or null. end() closes the Templater task and must
 // be called once the run is done (also after an error).
+//
+// The task is keyed by the path at the start: an after-action may rename the
+// file before end() (Databridge's fill moves the note into its folder), and
+// ending it under the new path would leave the old one in Templater's
+// pending set - "all templates executed" would then never fire again.
 async function openTemplaterRun(app, file) {
   const templater = templaterOf(app);
   if (!templater) return null;
-  templater.start_templater_task(file.path);
+  const path = file.path;
+  templater.start_templater_task(path);
   const end = async () => {
     try {
-      await templater.end_templater_task(file.path);
+      await templater.end_templater_task(path);
     } catch (error) {
       console.error("TYP-System: couldn't end the Templater run", error);
     }
@@ -255,13 +261,15 @@ async function setTypOfFile(plugin, file, { typ, subtyp = null }) {
 
 const typLabel = (typ, subtyp) => (subtyp ? `${typ} / ${subtyp}` : typ);
 
+const skippedNotice = (file) => new Notice(`TYP of "${file.basename}" couldn't be set without losing comments in its frontmatter.`);
+
 // Command "Set TYP of active note".
 async function setTypOfActiveNote(plugin, file) {
   const choice = await plugin.pickTypAndSubtyp({ includeManualOff: false });
   if (!choice) return;
   const status = await setTypOfFile(plugin, file, choice);
   if (status === "skipped") {
-    new Notice(`TYP of "${file.basename}" couldn't be set without losing comments in its frontmatter.`);
+    skippedNotice(file);
   } else {
     new Notice(`TYP of "${file.basename}" set to ${typLabel(choice.typ, choice.subtyp)}.`);
   }
@@ -299,13 +307,19 @@ async function createNoteWithTyp(plugin) {
     if (choice.subtyp) doc.set(SUBTYP_PROPERTY, choice.subtyp);
   }).content;
   const file = await createUntitledNote(app, folder, initial);
+  const createdPath = file.path;
 
   try {
-    await setTypOfFile(plugin, file, choice);
+    const status = await setTypOfFile(plugin, file, choice);
+    if (status === "skipped") skippedNotice(file);
   } finally {
-    // Opened even if something failed: the note exists either way.
-    await app.workspace.getLeaf("tab").openFile(file, { active: true, state: { mode: "source" }, eState: { rename: "all" } });
+    // Opened even if something failed: the note exists either way. With its
+    // title selected for renaming only while it is still the "Untitled" just
+    // created - an after-action (Databridge filling it from a record) may
+    // already have given it its name and folder.
+    const rename = file.path === createdPath ? { eState: { rename: "all" } } : {};
+    await app.workspace.getLeaf("tab").openFile(file, { active: true, state: { mode: "source" }, ...rename });
   }
 }
 
-module.exports = { setTypOfFile, setTypOfActiveNote, createNoteWithTyp };
+module.exports = { setTypOfFile, setTypOfActiveNote, createNoteWithTyp, __test: { openTemplaterRun } };

@@ -78,11 +78,7 @@ var require_typ_index = __commonJS({
         plugin.registerEvent(app.metadataCache.on("deleted", (file) => this.remove(file.path)));
         plugin.registerEvent(app.vault.on("rename", (file, oldPath) => this.rename(file, oldPath)));
         plugin.registerEvent(app.vault.on("config-changed", () => this.aggregates = null));
-        const resolvedRef = app.metadataCache.on("resolved", () => {
-          app.metadataCache.offref(resolvedRef);
-          this.rebuild();
-        });
-        plugin.registerEvent(resolvedRef);
+        app.workspace.onLayoutReady(() => this.rebuild());
         plugin.register(() => this.flush.cancel());
       }
       read(file) {
@@ -1045,7 +1041,7 @@ var require_typ_colors = __commonJS({
       for (const el of root.querySelectorAll(`[${COLORED_ATTR}]`)) setInlineColor(el, null);
     }
     function allDocuments2(app) {
-      const docs = /* @__PURE__ */ new Set();
+      const docs = /* @__PURE__ */ new Set([document]);
       app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.view.containerEl.ownerDocument));
       return docs;
     }
@@ -3589,6 +3585,11 @@ var require_typ_frontmatter_editor = __commonJS({
         }
       };
       const editor = new EditorClass(app, owner);
+      const originalReorderKey = editor.reorderKey;
+      editor.reorderKey = function(entry, index) {
+        originalReorderKey.call(this, entry, index);
+        this.synchronize(store.getFrontmatter());
+      };
       if (onShiftFocus) registerFocusChain(editor, onShiftFocus);
       editor.containerEl.addClass(EDITOR_CLASS);
       containerEl.appendChild(editor.containerEl);
@@ -6475,12 +6476,37 @@ var require_bookmark_colors = __commonJS({
   }
 });
 
+// src/view-typ-attributes.js
+var require_view_typ_attributes = __commonJS({
+  "src/view-typ-attributes.js"(exports2, module2) {
+    var TYP_ATTR = "data-typ";
+    var SUBTYP_ATTR = "data-subtyp";
+    function setAttr(el, name, value) {
+      if (value) {
+        if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+      } else if (el.hasAttribute(name)) {
+        el.removeAttribute(name);
+      }
+    }
+    function applyViewTypAttributes(plugin, containerEl, file) {
+      setAttr(containerEl, TYP_ATTR, file ? plugin.typIndex.typOf(file) : null);
+      setAttr(containerEl, SUBTYP_ATTR, file ? plugin.typIndex.subtypOf(file) : null);
+    }
+    function clearViewTypAttributes(containerEl) {
+      containerEl.removeAttribute(TYP_ATTR);
+      containerEl.removeAttribute(SUBTYP_ATTR);
+    }
+    module2.exports = { applyViewTypAttributes, clearViewTypAttributes };
+  }
+});
+
 // src/active-title-colors.js
 var require_active_title_colors = __commonJS({
   "src/active-title-colors.js"(exports2, module2) {
     var { TFile } = require("obsidian");
     var { colorForFile, subtypColor, subtypHasOwnColor, setInlineColor, DEFAULT_TYP_COLOR } = require_typ_colors();
     var { getSubtyp: getSubtyp2 } = require_subtyps();
+    var { applyViewTypAttributes, clearViewTypAttributes } = require_view_typ_attributes();
     var DOT_CLASS = "typ-title-dot";
     var DOT_HOLLOW_CLASS = "typ-title-dot-hollow";
     var BADGE_CLASS = "typ-title-badge";
@@ -6562,6 +6588,7 @@ var require_active_title_colors = __commonJS({
         const file = leaf.view.file;
         const typedFile = file instanceof TFile ? file : null;
         const marker = resolveMarker(plugin, typedFile);
+        applyViewTypAttributes(plugin, containerEl, typedFile);
         const titleEl = containerEl.querySelector(".inline-title");
         if (titleEl) {
           titleObserver.observe(titleEl, { childList: true });
@@ -6586,6 +6613,7 @@ var require_active_title_colors = __commonJS({
         const none = { kind: "none" };
         for (const leaf of plugin.app.workspace.getLeavesOfType("markdown")) {
           const containerEl = leaf.view.containerEl;
+          clearViewTypAttributes(containerEl);
           const titleEl = containerEl.querySelector(".inline-title");
           if (titleEl) applyStyleToTitle(titleEl, none);
           const blockEl = containerEl.querySelector(".metadata-container");

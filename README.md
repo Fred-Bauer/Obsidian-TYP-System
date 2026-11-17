@@ -199,6 +199,18 @@ TYP colors apply to: file explorer (folder notes included), graph (color groups 
 
 Own tag/attachment colors in the graph are disabled since 2026-09-30 (`src/graph-colors.js`): the Minimal theme's Style Settings cover them.
 
+## TYP in CSS
+
+Every note tab carries the note's TYP and Subtyp as attributes of its view (`.workspace-leaf-content`): `data-typ="MEDIA"`, `data-subtyp="Film"` – in editing and reading view, updated when the note or its TYP changes; a note without TYP or Subtyp has no such attribute. TYP-System only provides the data – the styling lives in CSS snippets:
+
+```css
+.workspace-leaf-content[data-typ="MEDIA"][data-subtyp="Film"] .metadata-property[data-property-key="beschreibung"] {
+  flex-direction: column;
+}
+```
+
+(Obsidian lowercases `data-property-key`.) Not covered: hover previews and embedded notes.
+
 ## Templater integration
 
 Templater is optional. Without it the commands in [Setting a note's TYP](#setting-a-notes-typ) cover TYP, Subtyp and TYP-Frontmatter; script shortcuts then get their fallback values. With Templater the same commands run script shortcuts, and a Templater script can do the whole job inside your own templates.

@@ -1,6 +1,7 @@
 const { TFile } = require("obsidian");
 const { colorForFile, subtypColor, subtypHasOwnColor, setInlineColor, DEFAULT_TYP_COLOR } = require("./typ-colors");
 const { getSubtyp } = require("./subtyps");
+const { applyViewTypAttributes, clearViewTypAttributes } = require("./view-typ-attributes");
 
 const DOT_CLASS = "typ-title-dot";
 const DOT_HOLLOW_CLASS = "typ-title-dot-hollow";
@@ -124,6 +125,7 @@ function applyActiveTitleColors(plugin, titleObserver) {
     const file = leaf.view.file;
     const typedFile = file instanceof TFile ? file : null;
     const marker = resolveMarker(plugin, typedFile);
+    applyViewTypAttributes(plugin, containerEl, typedFile);
 
     const titleEl = containerEl.querySelector(".inline-title");
     if (titleEl) {
@@ -165,6 +167,7 @@ function registerActiveTitleColors(plugin) {
     const none = { kind: "none" };
     for (const leaf of plugin.app.workspace.getLeavesOfType("markdown")) {
       const containerEl = leaf.view.containerEl;
+      clearViewTypAttributes(containerEl);
       const titleEl = containerEl.querySelector(".inline-title");
       if (titleEl) applyStyleToTitle(titleEl, none);
       const blockEl = containerEl.querySelector(".metadata-container");

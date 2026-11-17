@@ -358,6 +358,17 @@ function mountFrontmatterEditor(view, containerEl, store, { onShiftFocus } = {})
   };
 
   const editor = new EditorClass(app, owner);
+  // Obsidian's reorderKey() only hands the new order to saveFrontmatter() and
+  // leaves editor.properties as it was - in a note, the file change syncs it
+  // back. Here nothing does, so the next edit in this block serialized the old
+  // order and silently undid the move. Removing, renaming and value changes
+  // keep editor.properties current themselves; only the reorder needs this.
+  // frontmatter-blocks.js wraps this again for moves between blocks.
+  const originalReorderKey = editor.reorderKey;
+  editor.reorderKey = function (entry, index) {
+    originalReorderKey.call(this, entry, index);
+    this.synchronize(store.getFrontmatter());
+  };
   if (onShiftFocus) registerFocusChain(editor, onShiftFocus);
   editor.containerEl.addClass(EDITOR_CLASS);
   containerEl.appendChild(editor.containerEl);

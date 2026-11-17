@@ -114,14 +114,15 @@ class TypIndex extends Events {
     // counts don't.
     plugin.registerEvent(app.vault.on("config-changed", () => (this.aggregates = null)));
 
-    // At startup the first (lazy) access can come before the metadata cache is
-    // fully loaded. Rebuild once after its first complete resolve; differences
-    // go out through the "change" event like any other change.
-    const resolvedRef = app.metadataCache.on("resolved", () => {
-      app.metadataCache.offref(resolvedRef);
-      this.rebuild();
-    });
-    plugin.registerEvent(resolvedRef);
+    // Plugins load before the vault and the metadata cache: Obsidian reads the
+    // cached metadata from IndexedDB in batches of 300, so a (lazy) access at
+    // startup sees only part of it - unchanged notes fire no "changed" later.
+    // The first "resolved" can also come too early for that (it once left
+    // every note past ~1200 without TYP). The layout only loads after the
+    // cache is initialized, so rebuild then; notes still being reindexed
+    // follow through "changed". Differences go out through the "change"
+    // event like any other change.
+    app.workspace.onLayoutReady(() => this.rebuild());
 
     plugin.register(() => this.flush.cancel());
   }

@@ -331,7 +331,11 @@ function clearInlineColors(root) {
 // The documents of all windows (pop-outs included), collected through their
 // leaves.
 function allDocuments(app) {
-  const docs = new Set();
+  // The main window's document always counts: during onload at Obsidian
+  // startup the layout is not loaded yet, so iterateAllLeaves finds no
+  // leaves, and body observers (Quick Switcher, link suggestions, file
+  // dialogs) would never watch the main window.
+  const docs = new Set([document]);
   app.workspace.iterateAllLeaves((leaf) => docs.add(leaf.view.containerEl.ownerDocument));
   return docs;
 }
